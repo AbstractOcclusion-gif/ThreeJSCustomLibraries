@@ -1,5 +1,8 @@
 # three-kit
 
+**Live bench:** https://abstractocclusion-gif.github.io/ThreeJSCustomLibraries/ — every module runs in the browser
+(deep links: `…/bench/?tool=trees`). Deployed from `main` by `.github/workflows/pages.yml`.
+
 Neutral Three.js modules extracted from Abstract Occlusion's projects. Plain ESM under `src/`, no build step; `bench/` holds one
 authoring page per module (Vite), `presets/` the JSON they save, `assets/` only free assets. Anything licensed (Synty packs,
 Enviro-derived sky textures, commercial FX sheets) is never in the repo: drop it in `private-assets/` and every module falls back
