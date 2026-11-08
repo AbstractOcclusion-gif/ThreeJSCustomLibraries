@@ -11,7 +11,7 @@ function showError(error) { errors.push(String(error)); $('error').hidden = fals
 
 // Optional licensed textures live in private-assets/weather/ (served at /weather/). Probe once; fall back to the procedural sky.
 async function detectAssets() {
-  try { const r = await fetch('/weather/cirrus.png', {method: 'HEAD'}); return r.ok && (r.headers.get('content-type') || '').startsWith('image') ? '/weather/' : undefined; }
+  try { const r = await fetch(import.meta.env.BASE_URL + 'weather/cirrus.png', {method: 'HEAD'}); return r.ok && (r.headers.get('content-type') || '').startsWith('image') ? import.meta.env.BASE_URL + 'weather/' : undefined; }
   catch { return undefined; }
 }
 

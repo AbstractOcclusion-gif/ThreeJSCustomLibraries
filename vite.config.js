@@ -9,7 +9,8 @@ const benchPages = Object.fromEntries(
 );
 export default defineConfig({
   root: '.',
+  base: process.env.BASE_PATH ?? '/',   // GitHub Pages serves a project site under /<repo>/
   publicDir: 'private-assets',  // served at /, gitignored: drop Synty / Enviro / licensed textures here
-  build: {target: 'esnext', outDir: 'dist', rollupOptions: {input: {bench: resolve('bench/index.html'), ...benchPages}}},
+  build: {target: 'esnext', outDir: 'dist', rollupOptions: {input: {root: resolve('index.html'), bench: resolve('bench/index.html'), ...benchPages}}},
   server: {open: '/bench/'},
 });

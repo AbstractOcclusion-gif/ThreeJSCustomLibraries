@@ -36,7 +36,7 @@ const depth = createParticleDepthBinding({THREE: T, camera, depthTexture: target
 const lighting = {uniforms: {uSunCol: {value: sun.color.clone().multiplyScalar(.9)}, uFxAmbient: {value: new T.Color(.35, .42, .5)}}, direction: sun.position.clone().normalize(), ambient: new T.Color(.35, .42, .5)};
 
 async function detectSheets() {
-  try { const r = await fetch('/water/' + OCEAN_SHEET_FILES['mist (8x8)'], {method: 'HEAD'}); return r.ok && (r.headers.get('content-type') || '').startsWith('image') ? '/water/' : undefined; } catch { return undefined; }
+  try { const r = await fetch(import.meta.env.BASE_URL + 'water/' + OCEAN_SHEET_FILES['mist (8x8)'], {method: 'HEAD'}); return r.ok && (r.headers.get('content-type') || '').startsWith('image') ? import.meta.env.BASE_URL + 'water/' : undefined; } catch { return undefined; }
 }
 const assetBaseUrl = await detectSheets();
 const spray = createWaterSpray({THREE: T, scene: fxScene, renderer, depth, lighting, assets: {assetBaseUrl},

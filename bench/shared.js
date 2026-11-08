@@ -9,7 +9,7 @@ export async function detectAssets(probeUrl, base) {
 }
 
 export async function createBenchWeather({scene, renderer, camera, initial = 'cloudy 1', hour = 15, precipitation = {count: 360, radius: 32, height: 34, floorHeight: 0}}) {
-  const assetBaseUrl = await detectAssets('/weather/cirrus.png', '/weather/');
+  const assetBaseUrl = await detectAssets(import.meta.env.BASE_URL + 'weather/cirrus.png', import.meta.env.BASE_URL + 'weather/');
   const system = createWeatherSystem({weather: {initial, seed: 17}, day: {hour, moonLight: true}});
   const view = createThreeWeather({system, scene, renderer, camera, assetBaseUrl, sky: {quality: 'mobile'}, precipitation});
   view.ready.catch(console.error);
