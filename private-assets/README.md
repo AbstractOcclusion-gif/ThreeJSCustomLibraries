@@ -1,6 +1,6 @@
 # private-assets (gitignored)
 
-Licensed or non-redistributable textures and packs go here; Vite serves this folder at `/`.
+Licensed or non-redistributable textures and packs go here. Vite serves this folder at `/` during development and excludes it from production builds.
 Nothing in it is part of the library. Expected layouts (all optional, every module has a free fallback):
 
 - `synty/vegetation/` — see SYNTY.md for the prepared pack layout.

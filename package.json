@@ -28,6 +28,8 @@
     "./trees": "./src/trees/index.js",
     "./boundaries": "./src/boundaries/index.js",
     "./cable": "./src/cable/index.js",
+    "./destruction": "./src/destruction/index.js",
+    "./destruction/three": "./src/destruction/three.js",
     "./camera": "./src/camera/index.js",
     "./presets/*": "./presets/*",
     "./src/*": "./src/*"

@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {createPuffMaterial} from './puff-material.js';
 // Billboard puffs (dust, soft dust, smoke): a fixed sprite pool with per-sprite gravity, growth and fade.
 // Sprite sheets are white channel masks tinted per particle. With `assets` (a base URL) the named files below are
 // loaded from it; without it every preset uses the bundled soft mask. `sheets: {name: {url, cols, rows}}` adds or overrides.
@@ -12,21 +13,32 @@ export async function createPuffs(scene,options={}){
  const {pool,assets,loadTexture=url=>new T.TextureLoader().loadAsync(url)}={...DEFAULTS,...options};
  if(!Number.isInteger(pool)||pool<1||pool>2048)throw Error('Puff pool must be 1..2048');
  const sheets = {...(assets === undefined ? BUILTIN_SHEETS : SHEETS), ...options.sheets};
- const frames=Object.create(null),owned=[];
- const loaded=await Promise.allSettled(Object.entries(sheets).map(async([name,{url,file,cols=1,rows=1}])=>{
+ const frames=Object.create(null),animated=Object.create(null),owned=[];
+ const loaded=await Promise.allSettled(Object.entries(sheets).map(async([name,{url,file,cols=1,rows=1,animate=false,heat=false}])=>{
   if (!Number.isInteger(cols) || cols < 1 || !Number.isInteger(rows) || rows < 1 || cols * rows > 256) {
    throw new Error(`Invalid sprite sheet grid: ${name}`);
   }
   const sheet=await loadTexture(url ?? assets+file);sheet.colorSpace=T.SRGBColorSpace;owned.push(sheet);
+  if(animate && cols*rows>1){
+   // Use base-level filtering so atlas neighbors cannot bleed through the mip chain.
+   sheet.generateMipmaps=false;sheet.minFilter=T.LinearFilter;sheet.needsUpdate=true;
+   animated[name]={cols,rows,heat};
+   frames[name]=[sheet];
+   return;
+  }
   frames[name]=Array.from({length:cols*rows},(_,i)=>{const t=sheet.clone();t.repeat.set(1/cols,1/rows);t.offset.set((i%cols)/cols,(rows-1-Math.floor(i/cols))/rows);t.needsUpdate=true;owned.push(t);return t;});}));
  const failure=loaded.find(result=>result.status==='rejected');if(failure){for(const texture of owned)texture.dispose();throw failure.reason;}
- const puffs=[];for(let i=0;i<pool;i++){const material=new T.SpriteMaterial({map:frames.dust[0],transparent:true,depthWrite:false});const sprite=new T.Sprite(material);sprite.visible=false;scene.add(sprite);puffs.push({sprite,material,active:false,age:0,life:1,v:new T.Vector3()});}
+ const puffs=[];const hasAnimation=Object.keys(animated).length>0;
+ for(let i=0;i<pool;i++){const look=createPuffMaterial(frames.dust[0],hasAnimation);const sprite=new T.Sprite(look.material);sprite.visible=false;scene.add(sprite);puffs.push({...look,sprite,active:false,age:0,life:1,v:new T.Vector3()});}
  let disposed=false;
  // opts: gravity (m/s^2 down, negative rises), grow (scale gain over life), opacity (peak).
  function emit(name,position,velocity,size,life,color,index=0,opts={}){
   if(disposed||!frames[name]||options.isRelevant&&!options.isRelevant(position))return false;const p=puffs.find(p=>!p.active);if(!p)return false;
   p.active=true;p.age=0;p.life=life;p.size=size;p.gravity=opts.gravity??(name==='dust'?1:0);p.grow=opts.grow??.8;p.peak=opts.opacity??(name==='dust'?.45:.8);p.v.set(velocity[0],velocity[1],velocity[2]);
   p.aspect=opts.aspect??1;p.fadeIn=opts.fadeIn??0;
+  const animation=animated[name];
+  p.tiles.set(animation?.cols??1,animation?.rows??1);
+  p.frame.value=0;p.heat.value=animation?.heat?1:0;
   p.sprite.position.copy(position);p.material.map=frames[name][index%frames[name].length];p.material.color.setHex(color);p.material.opacity=p.fadeIn>0?0:p.peak;p.material.rotation=opts.rotation??Math.random()*6.28;p.material.blending=opts.blending??T.NormalBlending;
   p.sprite.scale.set(size*p.aspect,size,1);p.sprite.visible=true;return true;
  }
@@ -46,6 +58,7 @@ export async function createPuffs(scene,options={}){
   tick(dt){if(disposed)return;for(const p of puffs){if(!p.active)continue;p.age+=dt;const t=p.age/p.life;if(t>=1||options.isRelevant&&!options.isRelevant(p.sprite.position)){p.active=false;p.sprite.visible=false;continue;}p.sprite.position.addScaledVector(p.v,dt);p.v.y-=dt*p.gravity;
    const fadeIn=p.fadeIn>0?Math.min(1,p.age/p.fadeIn):1;
    const scale=p.size*(1+t*p.grow);
+   p.frame.value=t*(p.tiles.x*p.tiles.y-1);
    p.material.opacity=(1-t)*p.peak*fadeIn;p.sprite.scale.set(scale*p.aspect,scale,1);
   }},
   get active(){return puffs.reduce((n,p)=>n+(p.active?1:0),0);},
