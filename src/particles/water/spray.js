@@ -1,7 +1,6 @@
-import {createOceanSheets} from './ocean-sheets.js';
+import {createOceanSheets, SOFT_DISC} from './ocean-sheets.js';
 import {createOceanSprites} from './ocean-sprites.js';
 import {createOceanSplash} from './ocean-splash.js';
-import {SOFT_DISC} from './ocean-sheets.js';
 
 // Airborne water effects (mist sprites + ballistic droplets). The caller schedules the target scene after its composite.
 // assets: {assetBaseUrl, sheets, dropletUrl, loadTexture} — all optional; without them the generated soft disc is used.
@@ -20,8 +19,8 @@ export function createWaterSpray({
  };
  const {SheetSprites} = createOceanSprites({...host, ...sheets});
  const mist = new SheetSprites(lighting.uniforms, lighting.direction, {
-  sheet: mistSheet, free: true, upright: true,
-  size: .9, growth: .7, life: .8, rise: .55, opacity: .42,
+  sheet: mistSheet, free: true, upright: true, billow: true,
+  size: .9, growth: .85, life: 1.05, rise: .48, opacity: .42,
  });
  const splash = createOceanSplash({...host, renderer, ...sheets, dropletUrl: assets.dropletUrl, loadTexture: assets.loadTexture, onDeposit});
  splash.initSplash(lighting.uniforms, lighting.ambient, lighting.direction);

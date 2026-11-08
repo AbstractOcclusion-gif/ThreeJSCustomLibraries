@@ -81,7 +81,7 @@ renderer.setAnimationLoop(now => {
   renderer.setRenderTarget(target); renderer.render(scene, camera);
   renderer.setRenderTarget(null); renderer.render(blitScene, blitCamera);
   spray.update(dt); renderer.autoClear = false; renderer.render(fxScene, camera); renderer.autoClear = true;
-  if (now - lastUI > 250) { lastUI = now; $('status').textContent = (assetBaseUrl ? 'Flipbook sheets: private-assets' : 'Flipbook sheets: generated soft disc') + `\npuffs ${puffs.active + prefabs.reduce((n, p) => n + p.active, 0)} · chips ${chips.active} · fragments ${fragments.active} · mist ${spray.active.mist} · droplets ${spray.active.droplets}`; }
+  if (now - lastUI > 250) { lastUI = now; $('status').textContent = (assetBaseUrl ? 'Water spray: local sheets' : 'Water spray: generated soft disc') + `\npuffs ${puffs.active + prefabs.reduce((n, p) => n + p.active, 0)} · chips ${chips.active} · fragments ${fragments.active} · mist ${spray.active.mist} · droplets ${spray.active.droplets}`; }
 });
 document.body.dataset.ready = 'true';
 window.particlesBench = {scene, fxScene, spray, puffs, chips, fragments, prefabs, renderer, camera};

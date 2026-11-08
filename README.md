@@ -28,7 +28,8 @@ Local hacking against a game: `npm link` here, `npm link @abstractocclusion/thre
 | core (lighting contract, hash, preset helpers) | `three-kit/core` | — | ✓ |
 | weather & sky (sim + Three adapter + dev panel) | `three-kit/weather`, `/weather/three`, `/weather/dev-panel` | `bench/weather/` | ✓ |
 | particles (puffs, chips, prefabs; water spray: sheets, sprites, droplets, depth binding, precipitation) | `three-kit/particles`, `/particles/water` | `bench/particles/` | ✓ |
-| water (channel surface, waves, ripples, flow bake, channel; ocean surface) | `three-kit/water` | `bench/water/`, `bench/ocean/` | ✓ |
+| fire (ignition, heat spread, fuel) | `three-kit/fire` | `bench/fire/` | ✓ |
+| water (channel and pond surfaces, waves, ripples, flow bake; ocean surface) | `three-kit/water` | `bench/water/`, `bench/pond/`, `bench/ocean/` | ✓ |
 | vegetation (grass with per-instance tint, specimens, procedural meadow tree, generated free assets, Synty loader code) | `three-kit/vegetation` | `bench/vegetation/` | ✓ |
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/trees/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
@@ -58,6 +59,7 @@ depend on WebAquarium's renderer internals (pond splash/bubbles/silt/motes, ocea
 
 `createParticlePrefab` bundles original 4×4 flame, smoke, and dust flipbooks. The sprite shader blends adjacent
 frames over each particle's lifetime and maps the flame sheet's red channel to a heat color ramp.
+Smoke and water mist use animated 3D noise for billowing density and softer silhouettes.
 Custom puff sheets can opt into lifetime playback with `{url, cols, rows, animate: true}`. Frames run left to right,
 top to bottom, and use RGBA with coverage in alpha. Sheets without `animate` still select a fixed frame by index.
 
@@ -69,6 +71,17 @@ top to bottom, and use RGBA with coverage in alpha. Sheets without `animate` sti
 `customSky({glsl, uniforms})` takes your own `sky(dir, sunMul)`. Foam and whitecap tiles are generated (`foam-texture.js`); pass
 your own textures to override. `createRipples` / `createFlowBake` take `{origin, size, cell}` grids and `ripples.mask(isWet)`
 takes a callback. The full WebAquarium pond/ocean workshops are not part of this lib.
+
+The pond bench adapts Glider 2's procedural waterfall sample to the current channel surface, ripple grid,
+generated foam and depth-aware spray. Set waterfall flow to zero to inspect a still pond.
+
+### Fire
+
+`createFireSystem({spreadRadius, cooling})` runs independently of Three.js. Register an object with
+`system.add({position, ignitionHeat, burnSeconds, heatOutput})`. Position is a live object with `x`, `y` and `z`
+coordinates. Call `object.ignite()` to start a fire and `system.tick(dt)` with elapsed seconds to advance it.
+Read `object.phase` (`unlit`, `burning`, or `burned`) and the normalized `heat` and `fuel` values to drive visuals.
+Burned objects stay burned until `system.reset()`. The bench uses the shared fire and smoke particle sheets.
 
 ### Destruction
 

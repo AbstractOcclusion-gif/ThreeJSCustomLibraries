@@ -1,4 +1,5 @@
 import {makePool, reuploadAll} from './pool.js';
+import {BILLOW_GLSL} from '../billow-glsl.js';
 // The host supplies its renderer, surface, depth, lighting and impact bindings.
 export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, SURFACE_HEIGHT_GLSL, surfaceHeightUniforms, FLIPBOOK_GLSL, applyLook, applySheet, sheetUniforms}) {
   // particles/sheet-sprites.js -- upright flipbook billboards standing on the drawn surface, facing the camera: splash / mist
@@ -8,7 +9,7 @@ export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, S
   // `upright` it stands on that point instead (no spin, no surface fade) -- the blow, moved along with the blowhole by move().
 
   const BILLBOARD_DEFAULTS = Object.freeze({ on: true, sheet: 'splashes (8x8)', blend: 'alpha', color: 'foam', oneShot: true, fps: 30, size: 1.4, sizeJitter: 0.4, growth: 0.5, life: 0.7, lift: 0,
-    maskLow: 0.08, maskHigh: 0.6, opacity: 0.9, chance: 0.6, minStrength: 0.2, free: false, rise: 0, upright: false });
+    maskLow: 0.08, maskHigh: 0.6, opacity: 0.9, chance: 0.6, minStrength: 0.2, free: false, rise: 0, upright: false, billow: false });
   const MAX = 512;
 
   const instances = new Set();
@@ -22,13 +23,15 @@ export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, S
       g.setAttribute('iPos', new THREE.InstancedBufferAttribute(this.pos, 3)); g.setAttribute('iData', new THREE.InstancedBufferAttribute(this.data, 4)); g.setAttribute('iMisc', new THREE.InstancedBufferAttribute(this.misc, 2));
       this.geo = g; this.pool = makePool(MAX, g, ['iPos', 'iData', 'iMisc']);
       this.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide,
-        uniforms: { ...surfaceHeightUniforms(), ...sheetUniforms(skyUniforms, sunDir), ...FX_DEPTH_U, uTime: { value: 0 }, uGrowth: { value: 1 }, uLift: { value: 0 }, uFps: { value: 24 }, uOneShot: { value: 1 }, uFree: { value: 0 }, uRise: { value: 0 }, uUpright: { value: 0 } },
-        vertexShader: /* glsl */`attribute vec3 iPos; attribute vec4 iData; attribute vec2 iMisc; uniform float uTime, uGrowth, uLift, uFps, uOneShot, uFree, uRise, uUpright; uniform vec2 uTiles; varying vec2 vUv; varying float vFrame, vFade; varying vec3 vWorldFx;
+        uniforms: { ...surfaceHeightUniforms(), ...sheetUniforms(skyUniforms, sunDir), ...FX_DEPTH_U, uTime: { value: 0 }, uGrowth: { value: 1 }, uLift: { value: 0 }, uFps: { value: 24 }, uOneShot: { value: 1 }, uFree: { value: 0 }, uRise: { value: 0 }, uUpright: { value: 0 }, uBillow: { value: 0 } },
+        vertexShader: /* glsl */`attribute vec3 iPos; attribute vec4 iData; attribute vec2 iMisc; uniform float uTime, uGrowth, uLift, uFps, uOneShot, uFree, uRise, uUpright, uBillow; uniform vec2 uTiles; varying vec2 vUv; varying float vFrame, vFade, vBillowPhase; varying vec3 vWorldFx;
           ${SURFACE_HEIGHT_GLSL}
           void main(){ vUv = uv; float age = uTime - iData.x, lifeS = iData.y;
             if (iData.x < -1e8 || age >= lifeS) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); vFade = 0.0; return; }
             float t = age / lifeS; vFade = iMisc.x * (uOneShot > 0.5 ? 1.0 : (1.0 - smoothstep(0.5, 1.0, t))) * smoothstep(0.0, 0.08, t);
-            vFrame = uOneShot > 0.5 ? t * uTiles.x * uTiles.y : age * uFps + iMisc.y * 37.0;
+            vFrame = uOneShot > 0.5 ? t * (uTiles.x * uTiles.y - uBillow) : age * uFps + iMisc.y * 37.0;
+            vBillowPhase = iMisc.y * 24.0 + t * 1.5;
+            if (uBillow > 0.5) vFade *= smoothstep(0.0, 0.22, t) * (1.0 - smoothstep(0.35, 1.0, t));
             float size = iData.z * (1.0 + uGrowth * t); float hs = surfaceHeightAt(iPos.xz); vec3 c = vec3(iPos.x, hs + uLift, iPos.z);
             vec3 ax = normalize(vec3(viewMatrix[0][0], 0.0, viewMatrix[2][0])), ay = vec3(0.0, 1.0, 0.0);
             if (uFree > 0.5 && uUpright > 0.5) { c.y = iPos.y + uRise * age + size * 0.45; }
@@ -37,10 +40,16 @@ export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, S
               ax = cr * cos(sp) + cu * sin(sp); ay = cu * cos(sp) - cr * sin(sp); vFade *= 1.0 - smoothstep(hs - size, hs - size * 0.2, c.y); }
             else c.y += size * 0.45;
             vec3 w = c + ax * (position.x * size) + ay * (position.y * size); vWorldFx = w; gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0); }`,
-        fragmentShader: /* glsl */`varying vec2 vUv; varying float vFrame, vFade; varying vec3 vWorldFx;
+        fragmentShader: /* glsl */`uniform float uBillow; varying vec2 vUv; varying float vFrame, vFade, vBillowPhase; varying vec3 vWorldFx;
           ${FLIPBOOK_GLSL}
           ${FX_DEPTH_GLSL}
-          void main(){ if (vFade <= 0.002 || fxHidden(vWorldFx)) discard; vec4 c = sampleFlipbook(vUv, vFrame); float alpha = c.a * vFade * fxNearFade(vWorldFx); if (alpha < 0.004) discard;
+          ${BILLOW_GLSL}
+          void main(){ if (vFade <= 0.002 || fxHidden(vWorldFx)) discard;
+            vec2 uv = vUv;
+            float density = 1.0;
+            if (uBillow > 0.5) density = particleBillow(uv, vBillowPhase);
+            vec4 c = sampleFlipbook(uv, vFrame);
+            float alpha = c.a * density * vFade * fxNearFade(vWorldFx); if (alpha < 0.004) discard;
             gl_FragColor = vec4(fxFog(c.rgb, vWorldFx), alpha);
             #include <colorspace_fragment>
           }` }));
@@ -48,7 +57,7 @@ export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, S
       this.applySettings();
     }
     applySettings(settings = {}) { const s = Object.assign(this.s, settings), u = this.mesh.material.uniforms; applySheet(this.mesh.material, s.sheet); applyLook(this.mesh.material, s);
-      u.uGrowth.value = s.growth; u.uLift.value = s.lift; u.uFps.value = s.fps; u.uOneShot.value = s.oneShot ? 1 : 0; u.uFree.value = s.free ? 1 : 0; u.uRise.value = s.rise; u.uUpright.value = s.upright ? 1 : 0; }
+      u.uGrowth.value = s.growth; u.uLift.value = s.lift; u.uFps.value = s.fps; u.uOneShot.value = s.oneShot ? 1 : 0; u.uFree.value = s.free ? 1 : 0; u.uRise.value = s.rise; u.uUpright.value = s.upright ? 1 : 0; u.uBillow.value = s.billow ? 1 : 0; }
     setAmplitude(a) { this.mesh.material.uniforms.uOceanAmplitude.value = a; }
     spawn(x, z, intensity = 1, sizeScale = 1, y = 0) {   // y: free mode only (surface-based sprites ignore it)
       const s = this.s, k = this.pool.alloc(), size = s.size * sizeScale * (1 + (Math.random() * 2 - 1) * s.sizeJitter);

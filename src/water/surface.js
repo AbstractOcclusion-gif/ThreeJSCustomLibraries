@@ -24,6 +24,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   clipRange: {value: new THREE.Vector2(camera.near, camera.far)},
   currentTime: {value: 0},
   foamAmount: {value: .55},
+  bankFoam: {value: 1},
   foamFeather: {value: .65},
   refraction: {value: 1},
   rippleMap: {value: ripples.texture},
@@ -66,7 +67,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    uniform highp sampler2D bedDepth;
    uniform vec2 clipRange;
    uniform float currentTime;
-   uniform float foamAmount, foamFeather, refraction, rippleCell, flowSpeed;
+   uniform float foamAmount, bankFoam, foamFeather, refraction, rippleCell, flowSpeed;
    uniform highp sampler2D rippleMap;
    uniform bool rippleActive;
    uniform vec4 rippleBounds, rocks[4];
@@ -186,7 +187,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
     float fresnel = .02 + .98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
     vec3 color = mix(refracted, sky(reflect(-V, n), .07), clamp(fresnel * reflectionStrength, 0.0, 1.0));
     float bank = smoothstep(mix(.76, .62, foamFeather), .89, abs(across)) *
-     (1.0 - smoothstep(mix(.94, .90, foamFeather), 1.0, abs(across))) * .48;
+     (1.0 - smoothstep(mix(.94, .90, foamFeather), 1.0, abs(across))) * .48 * bankFoam;
     vec4 field = bakedFlow ? texture2D(flowMap, (vWorld.xz - flowBounds.xy) / flowBounds.zw) : vec4(.6,.5,0,1);
     vec2 impactDelta = (vWorld.xz - impactFoam.xy) * vec2(.65, 1.0);
     float impact = impactFoam.w * (1.0 - smoothstep(.2, max(.21, impactFoam.z), length(impactDelta)));
@@ -224,6 +225,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    capture.setSize(Math.max(1, Math.floor(size.x * captureScale)), Math.max(1, Math.floor(size.y * captureScale)));
    uniforms.currentTime.value = seconds;
    uniforms.foamAmount.value = settings.foam;
+   uniforms.bankFoam.value = settings.bankFoam ?? 1;
    uniforms.foamFeather.value = settings.foamFeather;
    uniforms.refraction.value = settings.refraction;
    uniforms.flowSpeed.value = settings.speed;

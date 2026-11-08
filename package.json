@@ -22,6 +22,7 @@
     "./weather/sky": "./src/weather/three/sky-dome.js",
     "./weather/bundled-assets": "./src/weather/three/bundled-assets.js",
     "./particles": "./src/particles/index.js",
+    "./fire": "./src/fire/index.js",
     "./particles/water": "./src/particles/water/index.js",
     "./water": "./src/water/index.js",
     "./vegetation": "./src/vegetation/index.js",

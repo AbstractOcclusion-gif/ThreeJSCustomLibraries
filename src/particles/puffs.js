@@ -14,7 +14,7 @@ export async function createPuffs(scene,options={}){
  if(!Number.isInteger(pool)||pool<1||pool>2048)throw Error('Puff pool must be 1..2048');
  const sheets = {...(assets === undefined ? BUILTIN_SHEETS : SHEETS), ...options.sheets};
  const frames=Object.create(null),animated=Object.create(null),owned=[];
- const loaded=await Promise.allSettled(Object.entries(sheets).map(async([name,{url,file,cols=1,rows=1,animate=false,heat=false}])=>{
+ const loaded=await Promise.allSettled(Object.entries(sheets).map(async([name,{url,file,cols=1,rows=1,animate=false,heat=false,billow=false}])=>{
   if (!Number.isInteger(cols) || cols < 1 || !Number.isInteger(rows) || rows < 1 || cols * rows > 256) {
    throw new Error(`Invalid sprite sheet grid: ${name}`);
   }
@@ -22,7 +22,7 @@ export async function createPuffs(scene,options={}){
   if(animate && cols*rows>1){
    // Use base-level filtering so atlas neighbors cannot bleed through the mip chain.
    sheet.generateMipmaps=false;sheet.minFilter=T.LinearFilter;sheet.needsUpdate=true;
-   animated[name]={cols,rows,heat};
+   animated[name]={cols,rows,heat,billow};
    frames[name]=[sheet];
    return;
   }
@@ -38,7 +38,7 @@ export async function createPuffs(scene,options={}){
   p.aspect=opts.aspect??1;p.fadeIn=opts.fadeIn??0;
   const animation=animated[name];
   p.tiles.set(animation?.cols??1,animation?.rows??1);
-  p.frame.value=0;p.heat.value=animation?.heat?1:0;
+  p.frame.value=0;p.heat.value=animation?.heat?1:0;p.billow.value=animation?.billow?1:0;
   p.sprite.position.copy(position);p.material.map=frames[name][index%frames[name].length];p.material.color.setHex(color);p.material.opacity=p.fadeIn>0?0:p.peak;p.material.rotation=opts.rotation??Math.random()*6.28;p.material.blending=opts.blending??T.NormalBlending;
   p.sprite.scale.set(size*p.aspect,size,1);p.sprite.visible=true;return true;
  }

@@ -3,7 +3,7 @@ import {createPuffs} from './puffs.js';
 
 const sheets = {
   flame: {url: new URL('../../assets/particles/flame-flipbook.png', import.meta.url).href, cols: 4, rows: 4, animate: true, heat: true},
-  plume: {url: new URL('../../assets/particles/smoke-flipbook.png', import.meta.url).href, cols: 4, rows: 4, animate: true},
+  plume: {url: new URL('../../assets/particles/smoke-flipbook.png', import.meta.url).href, cols: 4, rows: 4, animate: true, billow: true},
   impact: {url: new URL('../../assets/particles/dust-flipbook.png', import.meta.url).href, cols: 4, rows: 4, animate: true},
 };
 const random = (min, max) => min + Math.random() * (max - min);
@@ -33,10 +33,10 @@ export async function createParticlePrefab(scene, type, {position, size = 1, ...
   }
 
   function puff(smaller) {
-    emit('plume', smaller ? 0.17 : 0.38, smaller ? 0.9 : 0.32,
-      random(0.48, 0.82), random(0.65, 1.05), random(2.8, 4.2),
-      smaller ? 0x72777d : burst % 2 ? 0xa8adb5 : 0x68717b,
-      {gravity: -0.12 * size, grow: 2.2, opacity: smaller ? 0.27 : 0.51, fadeIn: 0.18});
+    emit('plume', smaller ? 0.12 : 0.23, smaller ? 0.89 : 0.32,
+      random(0.38, 0.66), random(0.72, 1.1), random(2.8, 4.2),
+      smaller ? 0x80756a : burst % 2 ? 0xbfb9b1 : 0x918c85,
+      {gravity: -0.1 * size, grow: 2.1, opacity: smaller ? 0.27 : 0.41, fadeIn: 0.45});
   }
 
   function impactDust() {
@@ -71,22 +71,21 @@ export async function createParticlePrefab(scene, type, {position, size = 1, ...
       if (!running) return;
       countdown -= dt;
       if (countdown > 0) return;
-      const interval = fire ? 0.036 : 0.105;
-      countdown = Math.max(0, countdown + interval);
+      countdown = Math.max(0, countdown + (fire ? 0.105 : 0.15));
       burst++;
       if (!fire) {
         puff(false);
         return;
       }
-      emit('flame', 0.25, 0.28, random(1.0, 1.65), random(0.7, 1.15),
-        random(0.45, 0.72), burst % 3 ? 0xff7b22 : 0xffc950,
-        {gravity: -0.35 * size, grow: -0.55, opacity: 0.72, fadeIn: 0.08,
-          aspect: 0.75, rotation: random(-0.35, 0.35), blending: AdditiveBlending});
-      if (burst % 4 === 0) {
-        emit('dust-soft', 0.26, 0.48, random(1.6, 2.5), 0.12, random(0.55, 0.95),
-          0xffb240, {gravity: -0.15 * size, grow: -0.5, blending: AdditiveBlending});
+      emit('flame', 0.11, 0.31, random(0.75, 1.3), random(0.82, 1.18),
+        random(0.31, 0.47), 0xff9939,
+        {gravity: -0.3 * size, grow: -0.4, opacity: 0.96, fadeIn: 0.045,
+          aspect: 0.63, rotation: random(-0.16, 0.16)});
+      if (burst % 2 === 0) {
+        emit('dust-soft', 0.23, 0.53, random(1.9, 2.7), random(0.045, 0.075), random(0.45, 0.85),
+          0xffb240, {gravity: 0.55 * size, grow: -0.5, opacity: 0.8, blending: AdditiveBlending});
       }
-      if (burst % 6 === 0) puff(true);
+      if (burst % 3 === 0) puff(true);
     },
   };
 }
