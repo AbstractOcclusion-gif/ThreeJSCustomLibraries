@@ -29,24 +29,37 @@ const remap = (v, a, b, c, d) => c + (v - a) * (d - c) / (b - a);
 const clamp01 = v => Math.max(0, Math.min(1, v));
 
 // ---------- cloud volumes ----------
+// Channel statistics the cloud shader was tuned against (measured on the original noise set): mean / std per channel.
+// Raw noise is moment-matched to them so coverage remapping and erosion behave the same with the generated volumes.
+const BASE_STATS = [[.50, .133], [.50, .145], [.50, .139], [.53, .136]], DETAIL_STATS = [[0, 0], [.895, .158], [.788, .192], [.866, .168]];
+function matched(values, channels, stats) {
+  const n = values.length / channels, out = new Uint8Array(values.length);
+  for (let c = 0; c < channels; c++) {
+    let mean = 0; for (let i = 0; i < n; i++) mean += values[i * channels + c]; mean /= n;
+    let sd = 0; for (let i = 0; i < n; i++) sd += (values[i * channels + c] - mean) ** 2; sd = Math.sqrt(sd / n) || 1;
+    const [tm, ts] = stats[c];
+    for (let i = 0; i < n; i++) out[i * channels + c] = clamp01(tm + (values[i * channels + c] - mean) / sd * ts) * 255;
+  }
+  return out;
+}
 function cloudBase(size) {
-  const out = new Uint8Array(size ** 3 * 4); let i = 0;
+  const raw = new Float32Array(size ** 3 * 4); let i = 0;
   for (let z = 0; z < size; z++) for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const u = x / size, v = y / size, w = z / size;
     const p = fbmP(u * 4, v * 4, w * 4, 4, 11, 4);
     const w0 = worley3(u * 4, v * 4, w * 4, 4, 31), w1 = worley3(u * 8, v * 8, w * 8, 8, 41), w2 = worley3(u * 16, v * 16, w * 16, 16, 51), w3 = worley3(u * 32, v * 32, w * 32, 32, 61);
-    const pw = clamp01(remap(p, w0 - 1, 1, 0, 1));     // Perlin-Worley: Perlin billows carved by low-frequency Worley
-    out[i++] = pw * 255; out[i++] = w1 * 255; out[i++] = w2 * 255; out[i++] = w3 * 255;
+    raw[i++] = remap(p, w0 - 1, 1, 0, 1);     // Perlin-Worley: Perlin billows carved by low-frequency Worley
+    raw[i++] = w1; raw[i++] = w2; raw[i++] = w3;
   }
-  return out;
+  return matched(raw, 4, BASE_STATS);
 }
 function cloudDetail(size) {
-  const out = new Uint8Array(size ** 3 * 4); let i = 0;
+  const raw = new Float32Array(size ** 3 * 4); let i = 0;
   for (let z = 0; z < size; z++) for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const u = x / size, v = y / size, w = z / size;
-    out[i++] = worley3(u * 4, v * 4, w * 4, 4, 71) * 255; out[i++] = worley3(u * 8, v * 8, w * 8, 8, 81) * 255; out[i++] = worley3(u * 16, v * 16, w * 16, 16, 91) * 255; out[i++] = 255;
+    raw[i++] = 0; raw[i++] = worley3(u * 4, v * 4, w * 4, 4, 71); raw[i++] = worley3(u * 8, v * 8, w * 8, 8, 81); raw[i++] = worley3(u * 16, v * 16, w * 16, 16, 91);
   }
-  return out;
+  return matched(raw, 4, DETAIL_STATS);
 }
 
 // ---------- PNG ----------
