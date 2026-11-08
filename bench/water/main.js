@@ -118,7 +118,7 @@ renderer.setAnimationLoop(now => {
       waveTime, waveHeight: P.waves.height, wavelength: P.waves.wavelength, waveDirection: THREE.MathUtils.degToRad(weather.system.weather.windHeading + P.waves.direction), waveSpread: THREE.MathUtils.degToRad(P.waves.spread)});
     weather.view.render();
   } finally { scene.fog = fog; }
-  if (now - lastUI > 250) { lastUI = now; wf.sync(); $('status').textContent = (weather.assetBaseUrl ? '' : 'Procedural sky (no private assets)\n') + weather.system.weather.dominant + ' · ' + weather.hourLabel(weather.system.day.hour) + '\n' + bakeStatus + (ripples.active ? '\nripples active' : ''); }
+  if (now - lastUI > 250) { lastUI = now; wf.sync(); $('status').textContent = (weather.assetBaseUrl === 'bundled' ? 'Bundled sky textures\n' : '') + weather.system.weather.dominant + ' · ' + weather.hourLabel(weather.system.day.hour) + '\n' + bakeStatus + (ripples.active ? '\nripples active' : ''); }
 });
 document.body.dataset.ready = 'true';
 window.waterBench = {water, ripples, flow, obstacles, weather, scene, camera, renderer, bake, get channel() { return channel; }};

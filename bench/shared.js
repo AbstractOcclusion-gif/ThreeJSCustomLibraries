@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import {createWeatherSystem, hourLabel} from '../src/weather/index.js';
 import {createThreeWeather} from '../src/weather/three/index.js';
+import {bundledWeatherAssets} from '../src/weather/three/bundled-assets.js';
 import {downloadJson, readJsonFile} from '../src/core/presets.js';
 
 export async function detectAssets(probeUrl, base) {
@@ -9,9 +10,12 @@ export async function detectAssets(probeUrl, base) {
 }
 
 export async function createBenchWeather({scene, renderer, camera, initial = 'cloudy 1', hour = 15, precipitation = {count: 360, radius: 32, height: 34, floorHeight: 0}}) {
-  const assetBaseUrl = await detectAssets(import.meta.env.BASE_URL + 'weather/cirrus.png', import.meta.env.BASE_URL + 'weather/');
+  // Private Enviro-derived set when dropped in, otherwise the free bundled textures.
+  const privateBase = await detectAssets(import.meta.env.BASE_URL + 'weather/cirrus.png', import.meta.env.BASE_URL + 'weather/');
+  const assets = privateBase ? {assetBaseUrl: privateBase} : bundledWeatherAssets();
   const system = createWeatherSystem({weather: {initial, seed: 17}, day: {hour, moonLight: true}});
-  const view = createThreeWeather({system, scene, renderer, camera, assetBaseUrl, sky: {quality: 'mobile'}, precipitation});
+  const view = createThreeWeather({system, scene, renderer, camera, ...assets, sky: {quality: 'mobile'}, precipitation});
+  const assetBaseUrl = privateBase ?? 'bundled';
   view.ready.catch(console.error);
   return {system, view, assetBaseUrl, hourLabel};
 }

@@ -11,7 +11,8 @@
     "assets",
     "README.md",
     "LICENSE",
-    "SYNTY.md"
+    "SYNTY.md",
+    "scripts"
   ],
   "exports": {
     "./core": "./src/core/index.js",
@@ -19,6 +20,7 @@
     "./weather/three": "./src/weather/three/index.js",
     "./weather/dev-panel": "./src/weather/three/dev-panel.js",
     "./weather/sky": "./src/weather/three/sky-dome.js",
+    "./weather/bundled-assets": "./src/weather/three/bundled-assets.js",
     "./particles": "./src/particles/index.js",
     "./particles/water": "./src/particles/water/index.js",
     "./water": "./src/water/index.js",
@@ -42,7 +44,8 @@
     "test:trees": "node --test tests/trees/trees.test.js",
     "test:boundaries": "node --test tests/boundaries/boundaries.test.js",
     "test:cable": "node --test tests/cable/cable.test.js",
-    "test:camera": "node --test tests/camera/camera.test.js"
+    "test:camera": "node --test tests/camera/camera.test.js",
+    "assets:weather": "node scripts/make-weather-assets.mjs"
   },
   "peerDependencies": {
     "three": "^0.180.0",

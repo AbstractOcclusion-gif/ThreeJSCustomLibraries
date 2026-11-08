@@ -42,7 +42,7 @@ renderer.setAnimationLoop(now => {
   controls.update(); weather.system.update(dt); weather.view.update(dt);
   ocean.update(dt, weather.system.weather.wind);
   weather.view.render();
-  if (now - lastUI > 250) { lastUI = now; wf.sync(); $('status').textContent = (weather.assetBaseUrl ? '' : 'Procedural sky (no private assets)\n') + weather.system.weather.dominant + ' · ' + weather.hourLabel(weather.system.day.hour) + '\nwind ' + weather.system.weather.wind.toFixed(1) + ' m/s'; }
+  if (now - lastUI > 250) { lastUI = now; wf.sync(); $('status').textContent = (weather.assetBaseUrl === 'bundled' ? 'Bundled sky textures\n' : '') + weather.system.weather.dominant + ' · ' + weather.hourLabel(weather.system.day.hour) + '\nwind ' + weather.system.weather.wind.toFixed(1) + ' m/s'; }
 });
 document.body.dataset.ready = 'true';
 window.oceanBench = {ocean, weather, scene, camera, renderer};

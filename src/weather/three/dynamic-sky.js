@@ -131,7 +131,11 @@ export class DynamicSky {
     for(const t of [moon,stars,galaxy])t.colorSpace=THREE.SRGBColorSpace;
     cirrus.colorSpace=THREE.NoColorSpace;cirrus.wrapS=cirrus.wrapT=THREE.RepeatWrapping;
     this.sky.tMoon.value=moon;this.sky.tStars.value=stars;this.sky.tGalaxy.value=galaxy;u.tCirrus.value=cirrus;u.tCloudBase.value=noise[0];u.tCloudDetail.value=noise[1];
-    try{this.weatherMap=createCloudWeatherMap(this.renderer,u);}catch(error){textures.forEach(t=>t.dispose());this.ownedTextures=[];throw error;}
+    // Optional baked weather map (weather-map.png: r coverage around .5, g cloud top, tileable). Falls back to the procedural Worley map.
+    let baked=null;try{baked=await loadTexture(new URL('weather-map.png',baseUrl).href);}catch{baked=null;}
+    if(this.disposed){baked?.dispose();textures.forEach(t=>t.dispose());this.ownedTextures=[];return false;}
+    if(baked){baked.colorSpace=THREE.NoColorSpace;baked.wrapS=baked.wrapT=THREE.RepeatWrapping;this.ownedTextures.push(baked);u.tCloudWeather.value=baked;}
+    else{try{this.weatherMap=createCloudWeatherMap(this.renderer,u);}catch(error){textures.forEach(t=>t.dispose());this.ownedTextures=[];throw error;}}
     this.ready=true;this.captureAge=Infinity;return true;
   }
   dispose(){

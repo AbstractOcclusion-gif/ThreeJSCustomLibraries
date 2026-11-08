@@ -6,7 +6,9 @@
 Neutral Three.js modules extracted from Abstract Occlusion's projects. Plain ESM under `src/`, no build step; `bench/` holds one
 authoring page per module (Vite), `presets/` the JSON they save, `assets/` only free assets. Anything licensed (Synty packs,
 Enviro-derived sky textures, commercial FX sheets) is never in the repo: drop it in `private-assets/` and every module falls back
-to a procedural default without it.
+to a free default without it. The weather module ships its own generated textures in `assets/weather/` (Perlin-Worley cloud
+volumes, cirrus, moon, stars, galaxy, weather map — `npm run assets:weather` regenerates them); pass
+`...bundledWeatherAssets()` from `three-kit/weather/bundled-assets` to `createThreeWeather` to use them.
 
 ## Use in a project
 

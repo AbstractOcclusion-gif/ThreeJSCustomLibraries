@@ -5,5 +5,5 @@ Nothing in it is part of the library. Expected layouts (all optional, every modu
 
 - `synty/vegetation/` — see SYNTY.md for the prepared pack layout.
 - `water/` — the flipbook sheets named in OCEAN_SHEET_FILES (mist_sheet.webp, splashes_sheet.webp, …) and Droplet.png.
-- `weather/` — cirrus.png, moon.png, stars.png, galaxy.jpg, enviro-cloud-base-64.rgba, enviro-cloud-detail-32.rgba
+- `weather/` — optional override of the bundled free set: cirrus.png, moon.png, stars.png, galaxy.jpg, enviro-cloud-base-64.rgba, enviro-cloud-detail-32.rgba
   (the bench passes `assetBaseUrl: '/weather/'` when `weather/cirrus.png` is present).

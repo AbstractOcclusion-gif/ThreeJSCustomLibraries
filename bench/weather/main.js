@@ -3,6 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createWeatherSystem, DEFAULT_WEATHER_STATES, hourLabel} from '../../src/weather/index.js';
 import {createThreeWeather} from '../../src/weather/three/index.js';
 import {createWeatherDevPanel} from '../../src/weather/three/dev-panel.js';
+import {bundledWeatherAssets} from '../../src/weather/three/bundled-assets.js';
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
 import '../bench.css';
 
@@ -34,8 +35,9 @@ const system = createWeatherSystem({
   onEvent: event => { events.unshift(event); events.length = Math.min(events.length, 8); $('events').textContent = events.map(e => JSON.stringify(e)).join('\n'); },
 });
 
-const assetBaseUrl = await detectAssets();
-const view = createThreeWeather({system, scene, renderer, camera, assetBaseUrl,
+const privateBase = await detectAssets();
+const assetBaseUrl = privateBase ?? 'bundled';
+const view = createThreeWeather({system, scene, renderer, camera, ...(privateBase ? {assetBaseUrl: privateBase} : bundledWeatherAssets()),
   sky: {quality: 'low', bottom: 460, thickness: 540, scale: 5600, mapScale: 12000, mapVariation: .48, detail: .32},
   appearance: {sunShafts: true, shaftStrength: 1.4, heightFog: true}, precipitation: {count: 800, radius: 30, height: 30}});
 view.sun.castShadow = true; view.sun.shadow.mapSize.set(1024, 1024); Object.assign(view.sun.shadow.camera, {left: -180, right: 180, top: 180, bottom: -180, near: 1, far: 400});
@@ -52,7 +54,7 @@ for (let i = 0; i < 17; i++) { const a = i * 2.399, r = 30 + i % 6 * 13, x = Mat
 for (let i = 0; i < 7; i++) mesh(new THREE.BoxGeometry(4, 2 + i, 4), [0xc48e62, 0x8ca4aa, 0xd1c09a][i % 3], (i - 3) * 7, (2 + i) / 2, -12);
 for (let i = 0; i < 3; i++) { const m = mesh(new THREE.SphereGeometry(2.5, 32, 20), 0xb9c7ca, (i - 1) * 9, 2, 6); m.material.metalness = 1; m.material.roughness = [.08, .35, .75][i]; }
 
-let assetsReady = !assetBaseUrl;
+let assetsReady = false;
 view.ready.then(() => { assetsReady = true; document.body.dataset.ready = 'true'; }).catch(showError);
 
 for (const state of system.weather.states) { const o = document.createElement('option'); o.value = state.name; o.textContent = state.name; $('weather').append(o); }
@@ -94,7 +96,7 @@ renderer.setAnimationLoop(now => {
   const dt = last === null ? 0 : Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; controls.update(); system.update(dt);
   try { view.update(dt); view.render(); } catch (error) { showError(error); renderer.setAnimationLoop(null); }
   if (now - lastUI > 250) {
-    $('status').textContent = (assetsReady ? '' : 'Loading sky assets…\n') + (assetBaseUrl ? '' : 'Procedural sky (no private assets)\n') + system.weather.dominant + ' · ' + hourLabel(system.day.hour) + '\nWind ' + system.weather.wind.toFixed(1) + ' m/s · rain ' + Math.round(system.weather.rain * 100) + '% · snow ' + Math.round(system.weather.snow * 100) + '%';
+    $('status').textContent = (assetsReady ? '' : 'Loading sky assets…\n') + (privateBase ? '' : 'Bundled free sky textures\n') + system.weather.dominant + ' · ' + hourLabel(system.day.hour) + '\nWind ' + system.weather.wind.toFixed(1) + ' m/s · rain ' + Math.round(system.weather.rain * 100) + '% · snow ' + Math.round(system.weather.snow * 100) + '%';
     syncControls(); if ($('developer').open) devPanel.refresh(); lastUI = now;
   }
 });
