@@ -1,0 +1,22 @@
+{
+  "schema": "three-kit.ocean",
+  "version": 1,
+  "settings": {
+    "swell": 0.65,
+    "swellLength": 65,
+    "chop": 0.8,
+    "choppiness": 0.65,
+    "whitecaps": 0.75,
+    "waveSpeed": 1,
+    "heading": 0,
+    "waterTint": "#ffffff",
+    "foamTint": "#ffffff",
+    "reflection": 1,
+    "fresnelPower": 5,
+    "glint": 1,
+    "fineRipples": 1,
+    "foamOpacity": 0.82,
+    "foamFeather": 0.25,
+    "foamScale": 1
+  }
+}

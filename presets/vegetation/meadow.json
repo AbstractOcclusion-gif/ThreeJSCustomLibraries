@@ -1,0 +1,23 @@
+{
+  "schema": "three-kit.vegetation",
+  "version": 1,
+  "grass": {
+    "clumps": 14000,
+    "radius": 45,
+    "color": "#7da24a",
+    "tintVariation": 0.25,
+    "density": 1,
+    "lodDistance": 26,
+    "farDensity": 0.45,
+    "shadowDistance": 18,
+    "transmission": 0.8
+  },
+  "plants": {
+    "trees": 14,
+    "bushes": 24,
+    "gust": 0.4,
+    "treeWidth": 1,
+    "treeCrown": 1,
+    "asymmetry": 0.3
+  }
+}

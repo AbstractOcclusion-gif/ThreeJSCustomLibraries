@@ -1,0 +1,62 @@
+{
+  "name": "@abstractocclusion/three-kit",
+  "version": "0.1.0",
+  "description": "Neutral Three.js modules: weather & sky, water, particles, vegetation, leaved trees, boundaries, cable, camera. Plain ESM sources, no build step.",
+  "type": "module",
+  "license": "MIT",
+  "repository": "github:AbstractOcclusion-gif/ThreeJSCustomLibraries",
+  "files": [
+    "src",
+    "presets",
+    "assets",
+    "README.md",
+    "LICENSE",
+    "SYNTY.md"
+  ],
+  "exports": {
+    "./core": "./src/core/index.js",
+    "./weather": "./src/weather/index.js",
+    "./weather/three": "./src/weather/three/index.js",
+    "./weather/dev-panel": "./src/weather/three/dev-panel.js",
+    "./weather/sky": "./src/weather/three/sky-dome.js",
+    "./particles": "./src/particles/index.js",
+    "./particles/water": "./src/particles/water/index.js",
+    "./water": "./src/water/index.js",
+    "./vegetation": "./src/vegetation/index.js",
+    "./trees": "./src/trees/index.js",
+    "./boundaries": "./src/boundaries/index.js",
+    "./cable": "./src/cable/index.js",
+    "./camera": "./src/camera/index.js",
+    "./presets/*": "./presets/*",
+    "./src/*": "./src/*"
+  },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test tests/**/*.test.js",
+    "test:weather": "node --test tests/weather/weather.test.js tests/weather/lifecycle.test.js",
+    "test:particles": "node --test tests/particles/water.test.js",
+    "test:water": "node --test tests/water/water.test.js",
+    "test:vegetation": "node --test tests/vegetation/vegetation.test.js",
+    "test:trees": "node --test tests/trees/trees.test.js",
+    "test:boundaries": "node --test tests/boundaries/boundaries.test.js",
+    "test:cable": "node --test tests/cable/cable.test.js",
+    "test:camera": "node --test tests/camera/camera.test.js"
+  },
+  "peerDependencies": {
+    "three": "^0.180.0",
+    "cannon-es": "^0.20.0"
+  },
+  "devDependencies": {
+    "lil-gui": "^0.20.0",
+    "three": "^0.180.0",
+    "vite": "^6.4.1",
+    "cannon-es": "^0.20.0"
+  },
+  "peerDependenciesMeta": {
+    "cannon-es": {
+      "optional": true
+    }
+  }
+}

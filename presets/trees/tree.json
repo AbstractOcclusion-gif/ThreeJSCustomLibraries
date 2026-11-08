@@ -1,0 +1,70 @@
+{
+  "schema": "three-kit.tree-profile",
+  "version": 1,
+  "name": "tree",
+  "variants": 4,
+  "trunk": {
+    "enabled": true,
+    "sides": 6,
+    "radiusBottom": 0.1,
+    "radiusTop": 0.055,
+    "belowGround": 0.03,
+    "topIntoCrown": 0.4,
+    "color": "#4b3b2c"
+  },
+  "crown": {
+    "depth": 0.55,
+    "bottomFlatten": 0.6,
+    "mainRadius": 1,
+    "mainSquash": 0.85,
+    "fixedSquash": null,
+    "mainCentreY": null
+  },
+  "lobes": {
+    "count": [
+      2,
+      4
+    ],
+    "radius": [
+      0.5,
+      0.7
+    ],
+    "offset": [
+      0.45,
+      0.7
+    ],
+    "drop": [
+      0.1,
+      0.35
+    ],
+    "spread": 1,
+    "dropScale": 1,
+    "baseY": null,
+    "dropShare": 1,
+    "noiseAmplitude": 0.14,
+    "noiseFrequency": 2.6,
+    "tintJitter": 0.08
+  },
+  "core": {
+    "detail": 1,
+    "radiusShare": 0.78,
+    "shade": 0.55
+  },
+  "cards": {
+    "perUnitArea": 14,
+    "size": [
+      0.42,
+      0.62
+    ],
+    "tilt": 0.55,
+    "sink": 0.08,
+    "scale": 1,
+    "subcells": 2,
+    "yCompensation": 0.34,
+    "tintJitter": 0.12
+  },
+  "shade": {
+    "bottom": 0.72,
+    "top": 1.12
+  }
+}

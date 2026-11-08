@@ -1,0 +1,27 @@
+{
+  "schema": "three-kit.channel-water",
+  "version": 1,
+  "channel": {
+    "preset": "stream",
+    "width": 1,
+    "drop": 3,
+    "depth": 1
+  },
+  "water": {
+    "speed": 1,
+    "foam": 0.55,
+    "foamFeather": 0.65,
+    "refraction": 1,
+    "clarity": 1,
+    "reflection": 1,
+    "godRays": 0.55,
+    "tint": "#ffffff"
+  },
+  "waves": {
+    "height": 0.035,
+    "wavelength": 1.2,
+    "direction": 0,
+    "spread": 45,
+    "speed": 1
+  }
+}
