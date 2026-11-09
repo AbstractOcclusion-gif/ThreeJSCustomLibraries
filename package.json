@@ -26,6 +26,7 @@
     "./particles/water": "./src/particles/water/index.js",
     "./water": "./src/water/index.js",
     "./surface": "./src/surface/index.js",
+    "./terrain": "./src/terrain/index.js",
     "./vegetation": "./src/vegetation/index.js",
     "./trees": "./src/trees/index.js",
     "./boundaries": "./src/boundaries/index.js",

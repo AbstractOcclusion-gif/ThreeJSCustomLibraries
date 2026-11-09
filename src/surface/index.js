@@ -29,7 +29,7 @@ export function createSurfaceWeather() {
 const SURFACE_GLSL = /* glsl */`
 uniform vec2 surfaceWeather;
 uniform vec3 surfaceSnowColor;
-uniform float surfacePuddles, surfaceAntiTile, surfaceRunoff, surfaceTime;
+uniform float surfacePuddles, surfaceAntiTile, surfaceRunoff, surfaceTime, surfaceTrackContrast;
 uniform sampler2D surfaceTracks;
 uniform vec4 surfaceTrackBounds;
 uniform bool surfaceHasTracks;
@@ -71,17 +71,19 @@ vec3 surfaceUntile(vec2 uv) {
 
 // Standard PBR stays responsible for lights, shadows, fog and the host's environment map.
 export function createWeatherSurfaceMaterial(parameters = {}, {
- weather = createSurfaceWeather(), tracks, snowColor = '#eaf3fa', puddles = 1, antiTiling = 0, runoff = 1,
+ weather = createSurfaceWeather(), tracks, snowColor = '#eaf3fa', puddles = 1, antiTiling = 0, runoff = 1, trackContrast = .08,
 } = {}) {
  if (![puddles, antiTiling, runoff].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
   throw Error('Puddle, anti-tiling and runoff amounts must be between zero and one');
  }
+ if (!Number.isFinite(trackContrast) || trackContrast < 0 || trackContrast > 1) throw Error('Track contrast must be between zero and one');
  const material = new THREE.MeshStandardMaterial(parameters);
  const uniforms = {
   surfaceWeather: weather.levels, surfaceSnowColor: {value: new THREE.Color(snowColor)},
   surfacePuddles: {value: puddles}, surfaceAntiTile: {value: antiTiling},
   surfaceRunoff: {value: runoff}, surfaceTime: weather.time,
   surfaceTracks: {value: tracks?.texture ?? null}, surfaceHasTracks: {value: Boolean(tracks)},
+  surfaceTrackContrast: {value: trackContrast},
   surfaceTrackBounds: {value: tracks?.bounds ?? new THREE.Vector4(0, 0, 1, 1)},
  };
  material.onBeforeCompile = shader => {
@@ -118,7 +120,7 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     float track = surfaceTrack(vSurfaceWorld) * smoothstep(.35, .8, up);
     snowCoverage *= 1.0 - track * .92;
     float wet = surfaceWeather.x * (1.0 - snowCoverage);
-    diffuseColor.rgb *= (1.0 - .42 * wet) * (1.0 - track * (.08 + .18 * wet));
+    diffuseColor.rgb *= (1.0 - .42 * wet) * (1.0 - track * min(1.0, surfaceTrackContrast + .18 * wet));
     roughnessFactor = mix(roughnessFactor, max(.12, roughnessFactor * .4), wet);
     float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
     if (surfaceRunoff > 0.0 && wet > .1 && runoffSlope > 0.0) {
