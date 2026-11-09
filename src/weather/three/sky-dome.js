@@ -37,8 +37,10 @@ uniform samplerCube tDynamicSkyPrev; uniform float uDynamicSkyBlend;
 #endif
 uniform vec3 uSkySun, uMoonDir;
 uniform float uMoonOn, uMoonPhase, uMoonRadius, uMoonIntensity, uMoonEarthshine, uStarIntensity, uStarReflection, uGalaxyIntensity, uNightIntensity, uStarsRotation;
-const float SUN_DISC_RADIUS = 0.0093;     // rad, same 0.53 deg as three's Sky.js
-const float SUN_DISC_EDGE = 0.12;         // soft edge as a fraction of the radius (about one pixel at 60 deg fov)
+uniform vec2 uAuroraDirection;
+uniform float uAuroraIntensity, uAuroraTime;
+const float SUN_DISC_RADIUS = 0.0122;     // angular radius in radians (0.70 deg)
+const float SUN_DISC_EDGE = 0.12;         // soft edge as a fraction of the radius
 const float SUN_DISC_LIMB = 0.55;         // brightness kept at the limb (limb darkening)
 const float SUN_DISC_RADIANCE = 24.0;     // matches the radiance clamp of the former captured disc
 vec3 sunDisc(vec3 d){
@@ -92,13 +94,50 @@ vec3 celestialNight(vec3 d){
       vec3 moon = tex.rgb * vec3(0.65, 0.74, 0.9) * (lit + uMoonEarthshine) * uMoonIntensity;
       night = mix(night, moon, tex.a * (1.0 - smoothstep(0.96, 1.0, rr))); } }   // the moon hides the stars behind it
   return night * smoothstep(-0.05, 0.03, d.y); }
+vec4 auroraCurtain(vec2 ray, float layer, float visibility) {
+  float x = ray.x + layer * .23;
+  float t = uAuroraTime;
+  float wave = x * 8.0 + sin(x * 3.0 + layer) * 1.6 + layer * 2.1;
+  // A folded vertical sheet. Perspective raises the nearer folds and spreads their rays.
+  float depth = 1.0 + .24 * sin(wave + t * .32) + .09 * sin(wave * 2.1 - t * .21);
+  float bottom = .14 + layer * .072 + .025 * sin(x * 5.0 + t * .21 + layer);
+  float height = .28 + .075 * sin(x * 4.2 - t * .14 + layer);
+  float h = (ray.y * depth - bottom) / height;
+  float edge = smoothstep(-.18, .19, h) * (1.0 - smoothstep(.15, 1.12, h));
+  float filament = .74 + .17 * sin(x * 49.0 + sin(wave) * 2.5 - t * .7)
+                        + .09 * sin(x * 82.0 + layer - t * .44);
+  float pulse = .68 + .32 * sin(x * 7.0 - t * .55 + layer);
+  float ends = 1.0 - smoothstep(.35, 1.15, abs(x));
+  vec3 emission = mix(vec3(.045, .83, .35), vec3(.44, .095, .60), smoothstep(.19, .80, h));
+  float density = ends * pulse * exp(-layer * .45) * visibility;
+  float opacity = edge * filament * density * .42;
+  float haloHeight = (h - .30) / .57;
+  float halo = exp(-haloHeight * haloHeight * 1.9) * density * .12;
+  return vec4(emission * opacity + mix(vec3(.035, .58, .35), emission, .35) * halo, opacity);
+}
+vec4 auroraOver(vec4 front, vec4 back) { return front + back * (1.0 - front.a); }
+vec4 auroraSky(vec3 d) {
+  float darkness = smoothstep(.60, .98, uNightBlend);
+  float forward = dot(d.xz, uAuroraDirection);
+  if (uAuroraIntensity <= 0.0 || darkness <= 0.0 || d.y <= 0.0 || forward <= .25) return vec4(0.0);
+  vec2 side = vec2(-uAuroraDirection.y, uAuroraDirection.x);
+  vec2 ray = vec2(dot(d.xz, side), d.y) / forward;
+  float visibility = darkness * smoothstep(.25, .5, forward) * smoothstep(0.0, .06, d.y);
+  vec4 front = auroraCurtain(ray, 0.0, visibility);
+  vec4 middle = auroraCurtain(ray, 1.0, visibility);
+  vec4 back = auroraCurtain(ray, 2.0, visibility);
+  vec4 curtains = auroraOver(front, auroraOver(middle, back));
+  return vec4(curtains.rgb * uAuroraIntensity, curtains.a * min(1.0, uAuroraIntensity));
+}
 vec3 dynamicSkyColor(vec3 d, float sunMul){
 #ifdef SKY_CAPTURE_NO_BLEND
   vec4 cap = textureCube(tDynamicSky, d);
 #else
   vec4 cap = mix(textureCube(tDynamicSkyPrev, d), textureCube(tDynamicSky, d), uDynamicSkyBlend);
 #endif
-  return cap.rgb + (celestialNight(d) * uNightBlend + sunDisc(d) * sunMul) * cap.a; }
+  vec4 aurora = auroraSky(d);
+  vec3 night = celestialNight(d) * uNightBlend;
+  return cap.rgb + (night * (1.0 - aurora.a) + aurora.rgb + sunDisc(d) * sunMul) * cap.a; }
 #endif
 #ifndef SKY_DYNAMIC_ONLY
 // the clear-day gradient: the pond's preset 0 and the ocean's procedural sky (without the sun glint, which each adds in its colour)
@@ -191,6 +230,7 @@ export function createSkyUniforms(sunDir) {
     tDynamicSky: { value: null }, tDynamicSkyPrev: { value: null }, uDynamicSkyBlend: { value: 1 },
     tMoon: { value: null }, tStars: { value: null }, tGalaxy: { value: null }, uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoonOn: { value: 1 }, uMoonPhase: { value: 0.5 }, uMoonRadius: { value: 0.026 },
     uMoonIntensity: { value: 1 }, uMoonEarthshine: { value: 0.02 }, uStarIntensity: { value: 1 }, uStarReflection: { value: 1 }, uGalaxyIntensity: { value: 0.2 }, uNightIntensity: { value: 1 }, uStarsRotation: { value: 0 },
+    uAuroraDirection: { value: new THREE.Vector2(1, 0) }, uAuroraIntensity: { value: 0 }, uAuroraTime: { value: 0 },
     uEnvI: { value: 1 }, uEnvRot: { value: 0 }, uEnvTransform: { value: new THREE.Matrix3() }, uEnvBTransform: { value: new THREE.Matrix3() },
     uWeatherWeights: { value: new THREE.Vector4(1, 0, 0, 0) }, uNightBlend: { value: 0 }, uDayTint: { value: new THREE.Color(1, 1, 1) }, uFxAmbient: { value: new THREE.Color(0.35, 0.35, 0.35) } };
 }

@@ -94,6 +94,24 @@ float cloudSunTransmittance(vec3 p,vec3 sun){
   vec2 highCloud=p.xz+sun.xz*max(0.0,(uCirrusAltitude-p.y)/sun.y);
   return exp(-cloudSunOpticalDepth(p,sun))*(1.0-cirrusOpacityAt(highCloud));
 }
+// Lower-cost transport for sunlight reaching scene surfaces and the air below the clouds.
+float cloudGroundTransmittance(vec3 p,vec3 sun){
+  if(sun.y<=.01) return 1.0;
+  float tau=0.0;
+  if(uCloudOn>.5 && uCloudCoverage>0.0){
+    float entry=max(0.0,(uCloudBottom-p.y)/sun.y);
+    float exitDistance=(uCloudBottom+uCloudThickness-p.y)/sun.y;
+    float segment=clamp(exitDistance-entry,0.0,CLOUD_SUN_RANGE)/float(CLOUD_SUN_SAMPLES);
+    if(segment>0.0){
+      for(int i=0;i<CLOUD_SUN_SAMPLES;i++){
+        vec3 samplePosition=p+sun*(entry+(float(i)+.5)*segment);
+        tau+=cloudDensityAt(samplePosition,false)*segment;
+      }
+    }
+  }
+  vec2 highCloud=p.xz+sun.xz*max(0.0,(uCirrusAltitude-p.y)/sun.y);
+  return exp(-tau)*(1.0-cirrusOpacityAt(highCloud));
+}
 #endif
 `;
 

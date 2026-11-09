@@ -14,7 +14,7 @@ export function createCloudWeatherMap(renderer,uniforms){
         return clamp(1.0-sqrt(nearest),0.0,1.0);}
       void main(){float a=worley(vUv,6.0),b=worley(vUv,12.0),coverage=mix(a,b,.25);
         float type=clamp(pow(mix(a,b,.5),.5),0.0,1.0),top=pow(a*b,.75);
-        gl_FragColor=vec4(coverage,type,top,sqrt(top));}`});
+        gl_FragColor=vec4(coverage,top,type,sqrt(top));}`});
   const scene=new THREE.Scene(),camera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
   const quad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),material);scene.add(quad);
   const previous=renderer.getRenderTarget(),face=renderer.getActiveCubeFace?.()??0,level=renderer.getActiveMipmapLevel?.()??0;

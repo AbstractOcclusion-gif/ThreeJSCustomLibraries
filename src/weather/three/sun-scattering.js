@@ -17,8 +17,13 @@ export function createSunScattering(cloudUniforms, sunDirection) {
   scatterColor: {value: new THREE.Color()},
   shaftStrength: {value: 0},
   bankColor: {value: new THREE.Color()},
+  bankSunColor: {value: new THREE.Color()},
+  bankSunStrength: {value: 0},
   bankSettings: {value: new THREE.Vector4()},
   bankOffset: {value: new THREE.Vector2()},
+  bankTime: {value: 0},
+  wakeHead: {value: new THREE.Vector4()},
+  wakeTail: {value: new THREE.Vector3()},
  };
  const geometry = new THREE.PlaneGeometry(2, 2);
  const material = new THREE.ShaderMaterial({
@@ -32,12 +37,15 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    uniform mat4 inverseProjection, cameraWorld;
    uniform vec3 sunDirection, scatterColor;
    uniform float shaftStrength;
-   uniform vec3 bankColor;
+   uniform vec3 bankColor, bankSunColor;
+   uniform float bankSunStrength;
    uniform vec4 bankSettings;
    uniform vec2 bankOffset;
+   uniform float bankTime;
+   uniform vec4 wakeHead;
+   uniform vec3 wakeTail;
    ${CLOUD_GLSL}
    const int VIEW_STEPS = 16;
-   const int SHADOW_STEPS = 6;
 
    float bankHash(vec3 p) {
     p = fract(p * .1031);
@@ -61,25 +69,18 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     float h = max(0.0, elevation);
     if (h >= 3.0) return 0.0;
     vec3 q = vec3((p.xz - bankOffset) / bankSettings.z, elevation * .6);
-    float shape = bankNoise(q) * .72 + bankNoise(q * 2.03 + 17.0) * .28;
-    return bankSettings.x * exp(-h * h) * smoothstep(.36, .72, shape);
-   }
-
-   float sunlightVisibility(vec3 p) {
-    float tau = 0.0;
-    if (uCloudOn > .5 && uCloudCoverage > 0.0) {
-     float entry = max(0.0, (uCloudBottom - p.y) / sunDirection.y);
-     float exitDistance = (uCloudBottom + uCloudThickness - p.y) / sunDirection.y;
-     float segment = clamp(exitDistance - entry, 0.0, CLOUD_SUN_RANGE) / float(SHADOW_STEPS);
-     if (segment > 0.0) {
-      for (int i = 0; i < SHADOW_STEPS; i++) {
-       vec3 samplePosition = p + sunDirection * (entry + (float(i) + .5) * segment);
-       tau += cloudDensityAt(samplePosition, false) * segment;
-      }
-     }
+    float roll = bankNoise(q * .83 + vec3(13.0, 7.0, -bankTime * .075)) - .5;
+    q += vec3(.28, -.2, .7) * roll;
+    float shape = bankNoise(q) * .72 + bankNoise(q * 2.03 + vec3(17.0, 17.0, 17.0 - bankTime * .12)) * .28;
+    float wake = 1.0;
+    if (wakeHead.w > 0.0) {
+     vec3 axis = wakeTail - wakeHead.xyz;
+     vec3 relative = p - wakeHead.xyz;
+     float t = clamp(dot(relative, axis) / max(dot(axis, axis), .001), 0.0, 1.0);
+     float distanceToWake = length(relative - axis * t) / wakeHead.w;
+     wake -= .9 * (1.0 - t) * (1.0 - smoothstep(.2, 1.0, distanceToWake));
     }
-    vec2 highCloud = p.xz + sunDirection.xz * max(0.0, (uCirrusAltitude - p.y) / sunDirection.y);
-    return exp(-tau) * (1.0 - cirrusOpacityAt(highCloud));
+    return bankSettings.x * exp(-h * h) * smoothstep(.36, .72, shape) * wake;
    }
 
    void main() {
@@ -94,24 +95,36 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     const float g = .55;
     float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5);
     float horizonFade = smoothstep(.01, .15, sunDirection.y);
-    float stepLength = distanceToSurface / float(VIEW_STEPS);
     // Stable interleaved noise breaks up aligned sample planes without frame-to-frame flicker.
     float offset = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(.06711056, .00583715))));
     float transmittance = 1.0;
     float bankTransmittance = 1.0;
+    float bankSun = 0.0;
+    float bankLight = bankSunStrength * smoothstep(.01, .06, sunDirection.y);
     float scattering = 0.0;
     for (int i = 0; i < VIEW_STEPS; i++) {
-     vec3 p = origin + direction * ((float(i) + offset) * stepLength);
+     float a = float(i) / float(VIEW_STEPS);
+     float b = float(i + 1) / float(VIEW_STEPS);
+     // Keep nearby fog detail when the depth ray runs all the way to the sky.
+     if (bankSettings.x > 0.0) { a *= a; b *= b; }
+     float stepLength = (b - a) * distanceToSurface;
+     vec3 p = origin + direction * (a * distanceToSurface + offset * stepLength);
      float bankT = 1.0;
      if (bankSettings.x > 0.0) bankT = exp(-bankExtinction(p) * stepLength);
+     float bankOpacity = 1.0 - bankT;
+     float visibility = 0.0;
+     if (shaftStrength > 0.0 || (bankLight > 0.0 && bankOpacity > 0.0)) visibility = cloudGroundTransmittance(p, sunDirection);
+     // Keep a broad warm contribution from the sky in cloud shadow.
+     bankSun += bankTransmittance * bankOpacity * mix(.35, 1.0, visibility);
      if (shaftStrength > 0.0) {
       float localT = exp(-.0025 * exp(-max(p.y, 0.0) / 95.0) * stepLength);
-      scattering += transmittance * bankTransmittance * (1.0 - localT * bankT) * sunlightVisibility(p);
+      scattering += transmittance * bankTransmittance * (1.0 - localT) * visibility;
       transmittance *= localT;
      }
      bankTransmittance *= bankT;
     }
     vec3 fogged = mix(bankColor, color, bankTransmittance);
+    fogged += (bankSunColor - bankColor) * (bankSun * bankLight * mix(.7, 1.0, smoothstep(-.2, .9, mu)));
     gl_FragColor = vec4(fogged + scatterColor * (scattering * phase * horizonFade * .16), 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -124,7 +137,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
  const screenCamera = new THREE.Camera();
  const size = new THREE.Vector2();
  return {
-  render(renderer, scene, camera, color, strength, fogColor, banks, offset) {
+  render(renderer, scene, camera, color, strength, fogColor, sunColor, sunStrength, banks, offset, time, wakeHead, wakeTail) {
    renderer.getDrawingBufferSize(size);
    if (size.x === 0 || size.y === 0) return;
    target.setSize(size.x, size.y);
@@ -134,8 +147,13 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    uniforms.scatterColor.value.copy(color).multiplyScalar(strength);
    uniforms.shaftStrength.value = strength;
    uniforms.bankColor.value.copy(fogColor);
+   uniforms.bankSunColor.value.copy(sunColor);
+   uniforms.bankSunStrength.value = sunStrength;
    uniforms.bankSettings.value.copy(banks);
    uniforms.bankOffset.value.copy(offset);
+   uniforms.bankTime.value = time;
+   uniforms.wakeHead.value.copy(wakeHead);
+   uniforms.wakeTail.value.copy(wakeTail);
    const scissorTest = renderer.getScissorTest();
    const autoClear = renderer.autoClear;
    try {

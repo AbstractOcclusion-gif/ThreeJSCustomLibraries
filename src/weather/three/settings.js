@@ -18,6 +18,7 @@ export const DYNAMIC_SKY_DEFAULTS=Object.freeze({
  cirrus:true,cirrusOpacity:.14,cirrusAltitude:4500,cirrusScale:16000,cirrusSpeed:12,
  nightResolution:128,starIntensity:1,galaxyIntensity:.2,nightIntensity:1,
  moon:true,moonRadiusDeg:1.5,moonIntensity:1,moonEarthshine:.02,
+ aurora:false,auroraHeading:0,auroraIntensity:1,auroraSpeed:1,
  nightLight:.45,nightColor:'#8daeff',
  lightningStrength:3,lightningInterval:10,
 });
@@ -47,14 +48,19 @@ export const SKY_FIELDS={
   starIntensity:number('Stars',0,10,.1),galaxyIntensity:number('Galaxy',0,5,.05),
   moon:bool('Moon disc'),moonRadiusDeg:number('Moon radius · degrees',.05,10,.05),moonIntensity:number('Moon brightness',0,10,.1),moonEarthshine:number('Earthshine',0,1,.01),
  },
+ 'Aurora':{
+  aurora:bool('Aurora curtains'),auroraHeading:number('Heading · degrees',0,360,1,'0 faces +X and 90 faces +Z.'),
+  auroraIntensity:number('Curtain intensity',0,4,.05),auroraSpeed:number('Curtain animation speed',0,4,.05),
+ },
  'Capture & performance':{
   quality:choice('Cloud quality',['mobile','low','medium','high']),
   nightResolution:choice('Minimum night cube size',[64,128,256,512,1024]),
   captureInterval:number('Sky capture interval · s',.05,30,.05),lightingInterval:number('Lighting refresh interval · s',.1,60,.1),
  },
 };
-export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,sunShafts:false,shaftStrength:1,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0});
+export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0});
 export const APPEARANCE_FIELDS={
+ cloudShadowStrength:number('Surface cloud shadow strength',0,1,.05,'Applies to materials registered as cloud shadow receivers.'),
  sunShafts:bool('Volumetric sunlight'),shaftStrength:number('Sun shaft strength',0,4,.05),
  heightFog:bool('3D height fog'),bankDensity:number('Bank density',0,.2,.001),
  bankHeight:number('Bank falloff height · m',1,200,1),bankScale:number('Bank noise scale · m',10,1000,1),

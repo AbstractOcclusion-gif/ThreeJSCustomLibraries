@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {loadCloudNoise,createCloudUniforms} from '../../src/weather/three/cloud-density.js';
 import {createCloudWeatherMap} from '../../src/weather/three/cloud-weather-map.js';
+import {createCloudShadows} from '../../src/weather/three/cloud-shadows.js';
 import {createPrecipitation} from '../../src/weather/three/precipitation.js';
 import {resolveVisualConfig,DYNAMIC_SKY_DEFAULTS,SKY_FIELDS} from '../../src/weather/three/settings.js';
 
@@ -13,6 +14,29 @@ test('visual config exposes every active sky setting and validates changes befor
  assert.equal(next.precipitation.radius,45);assert.equal(next.precipitation.count,240);assert.equal(initial.precipitation.count,120);
  for(const bad of [{sky:{quality:'ultra'}},{sky:{captureInterval:0}},{appearance:{sunIntensity:-1}},{precipitation:{count:1.5}},{precipitation:true},{sky:null},{unknown:1}])assert.throws(()=>resolveVisualConfig(bad,initial));
  assert.equal(resolveVisualConfig({precipitation:false},initial).precipitation,false);
+});
+
+test('cloud shadow receivers compose with material hooks and restore them when detached',()=>{
+ const cloudUniforms=createCloudUniforms(),shadows=createCloudShadows(cloudUniforms);
+ const material=new THREE.MeshPhysicalMaterial();
+ const originalCompile=shader=>{shader.uniforms.custom={value:1};};
+ const originalKey=()=> 'custom-material';
+ material.onBeforeCompile=originalCompile;
+ material.customProgramCacheKey=originalKey;
+ const detach=shadows.add(material);
+ assert.equal(shadows.add(material),detach);
+ assert.match(material.customProgramCacheKey(),/^custom-material:weather-cloud-shadows$/);
+ const {vertexShader,fragmentShader}=THREE.ShaderLib.physical;
+ const shader={uniforms:{},vertexShader,fragmentShader};
+ material.onBeforeCompile(shader);
+ assert.equal(shader.uniforms.custom.value,1);
+ assert.equal(shader.uniforms.uCloudOffset,cloudUniforms.uCloudOffset);
+ assert.match(shader.vertexShader,/vWeatherShadowPosition =/);
+ assert.match(shader.fragmentShader,/getDirectionalLightInfo\( directionalLight, directLight \);\s*if \(uWeatherShadowStrength/);
+ shadows.dispose();
+ assert.equal(material.onBeforeCompile,originalCompile);
+ assert.equal(material.customProgramCacheKey,originalKey);
+ material.dispose();
 });
 
 test('noise volumes validate bytes and reject failed or cancelled loads',async()=>{

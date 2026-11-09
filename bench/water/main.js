@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 import {createChannel, createChannelSurface, createRipples, createFlowBake, skyFromWeather} from '../../src/water/index.js';
+import {createSurfaceWeather, createWeatherSurfaceMaterial} from '../../src/surface/index.js';
 import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder} from '../shared.js';
 import '../bench.css';
 
@@ -16,8 +17,10 @@ const ripples = createRipples();
 const flow = createFlowBake();
 const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
 const water = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view), ripples, obstacles, flow});
-const bed = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({vertexColors: true, roughness: .94})); scene.add(bed);
-const stone = new THREE.IcosahedronGeometry(1, 1), stoneMaterial = new THREE.MeshStandardMaterial({color: 0x736754, roughness: .95, flatShading: true});
+const bankWeather = createSurfaceWeather();
+const surfaceOptions = {weather: bankWeather, puddles: 0};
+const bed = new THREE.Mesh(new THREE.BufferGeometry(), createWeatherSurfaceMaterial({vertexColors: true, roughness: .94}, surfaceOptions)); scene.add(bed);
+const stone = new THREE.IcosahedronGeometry(1, 1), stoneMaterial = createWeatherSurfaceMaterial({color: 0x736754, roughness: .95, flatShading: true}, surfaceOptions);
 const rocks = new THREE.InstancedMesh(stone, stoneMaterial, 28); scene.add(rocks);
 const movableRocks = obstacles.map(() => { const m = new THREE.Mesh(stone, stoneMaterial); m.visible = false; scene.add(m); return m; });
 const markers = new THREE.InstancedMesh(new THREE.SphereGeometry(.22, 10, 6), new THREE.MeshBasicMaterial({color: 0xff9e35}), 22); markers.frustumCulled = false; scene.add(markers);
@@ -69,6 +72,10 @@ rebuild();
 
 const gui = new GUI({title: 'Channel water'});
 const wf = weatherFolder(gui, weather);
+const banks = {state: 'follow weather'};
+gui.add(banks, 'state', ['follow weather', 'dry', 'wet', 'snow']).name('Bank surface').onChange(state => {
+  if (state !== 'follow weather') bankWeather.set({wetness: Number(state === 'wet'), snow: Number(state === 'snow')});
+});
 const fc = gui.addFolder('Channel'); fc.add(P.channel, 'preset', ['stream', 'river']).onChange(rebuild); fc.add(P.channel, 'width', .6, 1.6, .05).onChange(rebuild); fc.add(P.channel, 'drop', 0, 6, .1).name('drop · m').onChange(rebuild); fc.add(P.channel, 'depth', .4, 2, .05).onChange(rebuild);
 const fw = gui.addFolder('Water'); for (const [k, a, b] of [['speed', 0, 2], ['foam', 0, 1], ['foamFeather', 0, 1], ['refraction', 0, 2], ['clarity', .2, 3], ['reflection', 0, 1.5], ['godRays', 0, 2]]) fw.add(P.water, k, a, b, .01); fw.addColor(P.water, 'tint');
 const fv = gui.addFolder('Wind waves'); fv.add(P.waves, 'height', 0, .16, .005); fv.add(P.waves, 'wavelength', .35, 4, .05); fv.add(P.waves, 'direction', -180, 180, 5).name('direction vs wind °'); fv.add(P.waves, 'spread', 0, 90, 5); fv.add(P.waves, 'speed', 0, 2, .05); fv.close();
@@ -101,6 +108,7 @@ renderer.setAnimationLoop(now => {
   const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
   flowTime += dt * P.water.speed; waveTime += dt * P.waves.speed;
   if (!diving) controls.update(); weather.system.update(dt); weather.view.update(dt);
+  if (!weather.system.paused) bankWeather.update(dt, banks.state === 'follow weather' ? weather.system.weather : null);
   markers.visible = P.interact.markers;
   if (markers.visible) {
     pose.rotation.set(0, 0, 0); pose.scale.setScalar(1);

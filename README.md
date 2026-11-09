@@ -21,6 +21,8 @@ import {createThreeWeather} from '@abstractocclusion/three-kit/weather/three';
 ```
 Local hacking against a game: `npm link` here, `npm link @abstractocclusion/three-kit` in the game.
 
+Register a standard or physical material with `view.addCloudShadowReceiver(material)` to shade it with the weather sun's cloud transmittance. The returned function detaches the material, and disposing the weather view detaches all receivers. Set `appearance.cloudShadowStrength` from `0` to `1` to blend the effect.
+
 ## Modules
 
 | Module | Entry | Bench | Status |
@@ -30,6 +32,7 @@ Local hacking against a game: `npm link` here, `npm link @abstractocclusion/thre
 | particles (puffs, chips, prefabs; water spray: sheets, sprites, droplets, depth binding, precipitation) | `three-kit/particles`, `/particles/water` | `bench/particles/` | ✓ |
 | fire (ignition, heat spread, fuel) | `three-kit/fire` | `bench/fire/` | ✓ |
 | water (channel and pond surfaces, waves, ripples, flow bake; ocean surface) | `three-kit/water` | `bench/water/`, `bench/pond/`, `bench/ocean/` | ✓ |
+| weathered surfaces (wetness, runoff streaks, snow, puddles, tracks, albedo anti-tiling) | `three-kit/surface` | `bench/weather/`, `bench/water/` | ✓ |
 | vegetation (grass with per-instance tint, specimens, procedural meadow tree, generated free assets, Synty loader code) | `three-kit/vegetation` | `bench/vegetation/` | ✓ |
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/trees/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |

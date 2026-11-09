@@ -9,17 +9,27 @@
  <label class="check"><input id="auto-weather" type="checkbox"> Automatic weather changes</label>
  <label>Time of day <input id="hour" type="range" min="0" max="23.95" step="0.05" value="17.2"><output id="hour-value">17:12</output></label>
  <label class="check"><input id="run-day" type="checkbox"> Run the day cycle</label>
+ <label class="check"><input id="aurora" type="checkbox" checked> Aurora curtains</label>
+ <div class="buttons"><button id="preview-aurora">Preview aurora at night</button><button id="tune-aurora" aria-controls="developer">Aurora tweaks</button></div>
  <label>Cloud quality <select id="quality"><option value="mobile">Mobile</option><option value="low" selected>Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
  <label class="check"><input id="clouds" type="checkbox" checked> Volumetric clouds</label>
+ <label class="check"><input id="cloud-shadows" type="checkbox" checked> Surface cloud shadows</label>
  <label class="check"><input id="shafts" type="checkbox" checked> Volumetric sunlight</label>
  <label class="check"><input id="height-fog" type="checkbox" checked> 3D height fog</label>
+ <label class="check"><input id="fog-wake" type="checkbox"> Demo a moving fog wake</label>
+ <div class="buttons"><button id="strike-block">Strike the block</button><button id="strike-ground">Strike the terrain</button></div>
  <label>Wind direction <input id="heading" type="range" min="0" max="360" step="1" value="20"><output id="heading-value">20°</output></label>
  <label>Preset <select id="preset"><option value="">— bundled presets —</option></select></label>
  <div class="buttons"><button id="pause">Pause</button><button id="save">Save preset</button><label class="file-button">Load preset<input id="load" type="file" accept=".json,application/json" hidden></label></div>
  <div id="status" role="status">Starting…</div><div id="error" role="alert" hidden></div>
  <details id="developer"><summary>Developer settings · all controls</summary><div id="dev-panel"></div></details>
+ <details><summary>Terrain and object surfaces</summary>
+  <label>Surface state <select id="surface-state"><option value="weather">Follow weather</option><option value="dry">Dry</option><option value="wet">Wet with puddles</option><option value="snow">Snow cover</option></select></label>
+  <label class="check"><input id="paint-tracks" type="checkbox"> Drag on the ground to paint tracks</label>
+  <div class="buttons"><button id="preview-surfaces">Inspect surfaces</button><button id="clear-tracks">Clear tracks</button></div>
+ </details>
  <details><summary>Recent weather events</summary><pre id="events">No changes yet.</pre></details>
  <p class="footnote">Cloud / celestial textures are optional: drop them in <code>private-assets/weather/</code>. Without them the procedural sky, lights, fog and precipitation still run.</p>
 </aside>
-<div class="caption">Cloud shadows in the air / material roughness / distance visibility</div>
+<div class="caption">Cloud shadows on the valley and in the air</div>
 <script type="module" src="./main.js"></script></body></html>
