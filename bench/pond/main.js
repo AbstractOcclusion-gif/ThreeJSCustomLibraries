@@ -2,8 +2,11 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
-import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, skyFromWeather} from '../../src/water/index.js';
-import {benchRenderer, createBenchWeather, weatherFolder} from '../shared.js';
+import {createFishFlock} from '../../src/flocking/index.js';
+import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
+import {benchRenderer, createBenchPondSettings, createBenchWeather, detectAssets, pondWindControls, waterFreezeControls, waterMaterialControls, weatherFolder} from '../shared.js';
+import {bindRippleGesture} from '../ripple-gesture.js';
+import {valueNoise} from '../../src/terrain/terrain-noise.js';
 import '../bench.css';
 
 const renderer = benchRenderer();
@@ -13,47 +16,81 @@ camera.position.set(17, 12, 22);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1, -3);
 controls.enableDamping = true;
+controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
 controls.minDistance = 5;
 controls.maxDistance = 64;
 controls.maxPolarAngle = Math.PI * 0.49;
 controls.update();
-const weather = await createBenchWeather({scene, renderer, camera, initial: 'cloudy 1'});
+const weather = await createBenchWeather({scene, renderer, camera, initial: 'clear', hour: 13});
 const ripples = createRipples({origin: [-15, -13], size: [100, 88], cell: 0.3});
 const flow = createFlowBake();
 const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
-const water = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view), ripples, obstacles, flow});
+const lightOccluders = [];
+const freeze = createWaterFreeze(), freezeMap = createFreezeTexture();
+const water = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view), ripples, obstacles, flow,
+ freezeMap, causticSegments: 280, clipToBed: true, pondOptics: true, bedCaustics: 'material', lightOccluders});
+const waterline = createWaterlineComposite(renderer, {caustics: water.lighting});
 
 // Pond, cliff and falling sheet adapted from Glider 2's procedural waterfall sample.
 
 const radiusX = 13, radiusZ = 11;
 ripples.mask((x, z) => Math.hypot(x / radiusX, z / radiusZ) < 1);
-water.surface.geometry.dispose();
-water.surface.geometry = new THREE.CircleGeometry(1, 96).rotateX(-Math.PI / 2).scale(radiusX, 1, radiusZ);
-const coordinates = water.surface.geometry.attributes.position;
-const shore = new Float32Array(coordinates.count * 3);
-for (let i = 0; i < coordinates.count; i++) {
- shore[i * 3 + 1] = Math.hypot(coordinates.getX(i) / radiusX, coordinates.getZ(i) / radiusZ);
-}
-water.surface.geometry.setAttribute('flow', new THREE.BufferAttribute(shore, 3));
-
 const bedGeometry = new THREE.PlaneGeometry(54, 52, 124, 120).rotateX(-Math.PI / 2);
 const points = bedGeometry.attributes.position, colors = [];
+const bedNoise = valueNoise(91);
+function pondBedHeight(x, z) {
+ const r = Math.hypot(x / radiusX, z / radiusZ);
+ const ground = r < 1 ? -3.2 * (1 - r ** 3) - .03 : Math.min(3, (r - 1) * 5);
+ return ground + bedNoise(x * .65, z * .65) * .11 * Math.min(1, Math.abs(r - 1) * 12);
+}
 for (let i = 0; i < points.count; i++) {
  const x = points.getX(i), z = points.getZ(i), r = Math.hypot(x / radiusX, z / radiusZ);
- const ground = r < 1 ? -3.2 * (1 - r ** 3) - .03 : Math.min(3, (r - 1) * 5);
- const variation = Math.sin(x * 1.3) * Math.cos(z * 1.4) * .11;
- points.setY(i, ground + variation * Math.min(1, Math.abs(r - 1) * 12));
+ const variation = bedNoise(x * .8, z * .8) * .11;
+ points.setY(i, pondBedHeight(x, z));
  const s = .88 + variation;
- colors.push(...(r < 1.02 ? [.31, .25, .16] : [.105, .155, .08]).map(c => c * s));
+ const grass = THREE.MathUtils.smoothstep(r, .98, 1.1);
+ colors.push(s * THREE.MathUtils.lerp(.42, .105, grass), s * THREE.MathUtils.lerp(.34, .155, grass), s * THREE.MathUtils.lerp(.23, .08, grass));
 }
 bedGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 bedGeometry.computeVertexNormals();
+// Use the rendered bed's triangles as the wet mask, as in the Terrain bench.
+// An independent ellipse slices through shallow bed triangles and catches light in slivers.
+const waterGeometry = new THREE.BufferGeometry();
+const coordinates = new Float32Array(points.count * 3), bedHeights = new Float32Array(points.count);
+for (let i = 0; i < points.count; i++) {
+ coordinates[i * 3] = points.getX(i); coordinates[i * 3 + 2] = points.getZ(i);
+ bedHeights[i] = points.getY(i);
+}
+waterGeometry.setIndex(bedGeometry.index);
+waterGeometry.setAttribute('position', new THREE.BufferAttribute(coordinates, 3));
+waterGeometry.setAttribute('bedHeight', new THREE.BufferAttribute(bedHeights, 1));
+waterGeometry.computeVertexNormals();
+water.surface.geometry.dispose();
+water.surface.geometry = waterGeometry;
 const bedMaterial = new THREE.MeshStandardMaterial({vertexColors: true, roughness: .95});
+water.lighting.bindBedMaterial(bedMaterial);
+// Original WebAquarium T_8 sand maps, available only from the staged asset library.
+const sandBase = import.meta.env.BASE_URL + 'webaquarium/library/embedded/tex/';
+const sand = await detectAssets(sandBase + 'sandAlb.webp', sandBase);
+if (sand) {
+ const loader = new THREE.TextureLoader();
+ const texture = name => {
+  const t = loader.load(sand + name);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  return t;
+ };
+ bedMaterial.map = texture('sandAlb.webp'); bedMaterial.map.colorSpace = THREE.SRGBColorSpace;
+ bedMaterial.normalMap = texture('sandNrm.webp'); bedMaterial.normalScale.set(.7, .7);
+ bedMaterial.map.repeat.set(54 / 1.3, 52 / 1.3);
+ bedMaterial.normalMap.repeat.copy(bedMaterial.map.repeat);
+}
 scene.add(new THREE.Mesh(bedGeometry, bedMaterial));
 
 const stone = new THREE.IcosahedronGeometry(1, 1);
 const stoneMaterial = new THREE.MeshStandardMaterial({color: 0x655c4d, roughness: .95, flatShading: true});
-const cliff = new THREE.InstancedMesh(stone, stoneMaterial, 31);
+water.lighting.bindBedMaterial(stoneMaterial);
+const cliff = new THREE.InstancedMesh(stone, stoneMaterial, 38);
 const pose = new THREE.Object3D();
 for (let i = 0; i < cliff.count; i++) {
  const rear = i < 15, angle = i * 2.39996;
@@ -61,10 +98,16 @@ for (let i = 0; i < cliff.count; i++) {
   rear ? 1.6 + (i >= 7 ? 2.2 : 0) : .04, rear ? -11.7 - (i % 3) * .95 : Math.sin(angle) * 10.5);
  pose.scale.set(rear ? 2.4 : .85, rear ? 2.9 : .65, rear ? 2.1 : 1.0);
  pose.rotation.set(i * .49, angle, i * .63);
+ if (i >= 31) {
+  const x = Math.cos(angle) * (1.1 + (i - 31) * .65), z = Math.sin(angle) * (1.4 + (i - 31) * .58);
+  pose.position.set(x, pondBedHeight(x, z) + .08, z);
+  pose.scale.set(.33 + (i % 3) * .17, .25 + (i % 3) * .1, .42);
+ }
  pose.updateMatrix();
  cliff.setMatrixAt(i, pose.matrix);
 }
 scene.add(cliff);
+lightOccluders.push(cliff);
 
 const foamTile = createFoamTexture();
 foamTile.wrapS = foamTile.wrapT = THREE.RepeatWrapping;
@@ -117,48 +160,76 @@ const spray = createWaterSpray({
   uniforms: {uSunCol: weather.view.uniforms.uSunCol, uFxAmbient: weather.view.uniforms.uAmb},
   direction: weather.view.uniforms.uSkySunDir.value, ambient: weather.view.uniforms.uAmb.value,
  },
- onDeposit(x, z, radius, strength) { ripples.splash(x, z, strength * .5); },
+ onDeposit(x, z, radius, strength) { if (freeze.progress < 1) ripples.splash(x, z, strength * .5); },
 });
 
 
 
-const state = {discharge: 1, waves: 0.025, foam: 0.65, godRays: 0.6, rippleMode: false};
+const state = {...createBenchPondSettings(), discharge: 1, diveHeight: -2.1};
 const gui = new GUI({title: 'Pond & waterfall'});
 gui.add(state, 'discharge', 0, 2, 0.05).name('Waterfall flow');
-gui.add(state, 'waves', 0, 0.12, 0.005).name('Wind waves');
 gui.add(state, 'foam', 0, 1, 0.05).name('Foam');
-gui.add(state, 'godRays', 0, 2, 0.05).name('Underwater light shafts');
-gui.add(state, 'rippleMode').name('Tap to make ripples').onChange(syncControls);
+pondWindControls(gui.addFolder('Wind ripples'), state.windWaves);
+waterMaterialControls(gui.addFolder('Water'), state);
 const diveControl = gui.add({toggleUnderwater}, 'toggleUnderwater').name('Underwater view');
+const diveHeight = gui.add(state, 'diveHeight', -2.4, .25, .01).name('Eye above water · m')
+ .onChange(positionDiveCamera).disable();
+const fishState = {show: false};
+const fishLoad = new AbortController();
+let flock, loading;
+gui.add(fishState, 'show').name('Show fish school').onChange(async enabled => {
+ if (flock) { flock.group.visible = enabled; return; }
+ if (!enabled || loading) return;
+ loading = true;
+ try {
+  flock = await createFishFlock({
+   bounds: new THREE.Box3(new THREE.Vector3(-2.5, -2.6, -2.5), new THREE.Vector3(2.5, 0, 2.5)),
+   floorHeight: pondBedHeight, surfaceHeight: () => water.surface.position.y, signal: fishLoad.signal,
+  });
+  if (fishLoad.signal.aborted) { flock.dispose(); return; }
+  flock.group.visible = fishState.show;
+  scene.add(flock.group);
+ } catch (error) {
+  if (!fishLoad.signal.aborted) console.error(error);
+ } finally { loading = false; }
+});
+waterFreezeControls(gui.addFolder('Freeze and thaw'), freeze);
 const weatherUI = weatherFolder(gui, weather);
 
 let diving = false;
 const above = new THREE.Vector3();
-const fog = new THREE.FogExp2(0x33665b, 0.17);
-function syncControls() { controls.enabled = !diving && !state.rippleMode; }
+function positionDiveCamera() {
+  camera.position.set(.6, state.diveHeight, 3.5);
+  camera.lookAt(-1.5, -2.9, -.2);
+}
 function toggleUnderwater() {
+  rippleGesture.cancel();
   diving = !diving;
   if (diving) {
     above.copy(camera.position);
-    camera.position.set(1.5, -1.5, 3.5);
-    camera.lookAt(0, -0.15, -6);
+    positionDiveCamera();
+    diveHeight.enable();
   } else {
     camera.position.copy(above);
     controls.update();
+    diveHeight.disable();
   }
   diveControl.name(diving ? 'Return above water' : 'Underwater view');
-  syncControls();
+  controls.enabled = !diving;
 }
 const canvas = renderer.domElement;
 const pointer = new THREE.Vector2();
 const ray = new THREE.Raycaster();
-canvas.addEventListener('pointerdown', event => {
-  if (diving || !state.rippleMode || event.button !== 0) return;
+const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), ripplePoint = new THREE.Vector3();
+const rippleGesture = bindRippleGesture(canvas, controls, event => {
+  if (diving || freeze.progress >= 1) return;
   const bounds = canvas.getBoundingClientRect();
   pointer.set(2 * (event.clientX - bounds.left) / bounds.width - 1, 1 - 2 * (event.clientY - bounds.top) / bounds.height);
   ray.setFromCamera(pointer, camera);
-  const hit = ray.intersectObject(water.surface)[0];
-  if (hit) ripples.splash(hit.point.x, hit.point.z, 1);
+  if (!ray.ray.intersectPlane(plane, ripplePoint)) return;
+  if (Math.hypot(ripplePoint.x / radiusX, ripplePoint.z / radiusZ) < 1) return ripplePoint;
+}, ({x, z}, strength) => {
+  if (freeze.progress < 1) ripples.splash(x, z, strength);
 });
 window.addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
@@ -176,6 +247,9 @@ renderer.setAnimationLoop(now => {
   weather.system.update(dt);
   weather.view.update(dt);
   weatherUI.sync();
+  const freezeProgress = freeze.update(dt, weather.system.weather.temperature);
+  if (freezeProgress >= 1) rippleGesture.cancel();
+  rippleGesture.update(dt);
   const discharge = state.discharge;
   fallTime += dt * (0.5 + discharge);
   sheet.visible = discharge > 0;
@@ -185,40 +259,45 @@ renderer.setAnimationLoop(now => {
   if (discharge > 0 && time >= nextImpact) {
     nextImpact = time + 0.18 / Math.max(0.25, discharge);
     const x = (Math.random() - 0.5) * 3 * Math.min(1, discharge);
-    ripples.splash(x, impact.y, discharge * 0.5);
+    if (freezeProgress < 1) ripples.splash(x, impact.y, discharge * 0.5);
     sprayPosition.set(x, 0.12, impact.y);
     spray.mist(sprayPosition, Math.min(1, discharge), 0.75);
     spray.splash(sprayPosition, Math.min(1, discharge * 0.5), 0.18);
   }
   spray.update(dt);
-  ripples.update(dt);
-  const previousFog = scene.fog;
+  if (flock?.group.visible) flock.update(dt);
+  if (freezeProgress < 1) ripples.update(dt);
+  canvas.dataset.ripples = ripples.active ? 'active' : 'still';
+  water.render(time * 0.12, {
+    ...state, bankFoam: .12, foamFeather: .7, speed: 1, waveTime: time,
+    impactFoam: impact,
+    freezeProgress,
+  });
   if (diving) {
-    fog.color.set(0x33665b).multiplyScalar(0.22 + 0.78 * weather.system.day.daylight);
-    scene.fog = fog;
-  }
-  try {
-    water.render(time * 0.12, {
-      foam: state.foam, bankFoam: 0.12, foamFeather: 0.7, refraction: 0.8, speed: 1, waveTime: time,
-      waveHeight: state.waves, wavelength: 1.05, godRays: state.godRays, waveSpread: 45,
-      waveDirection: THREE.MathUtils.degToRad(weather.system.weather.windHeading), impactFoam: impact,
-    });
-    renderer.render(scene, camera);
-    renderer.autoClear = false;
-    try { renderer.render(fxScene, camera); }
-    finally { renderer.autoClear = true; }
-  } finally { scene.fog = previousFog; }
+    const light = weather.view.uniforms;
+    waterline.render(scene, camera, {height: water.surface.position.y,
+      clarity: state.clarity, godRays: state.godRays, sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
+  } else renderer.render(scene, camera);
+  renderer.autoClear = false;
+  try { renderer.render(fxScene, camera); }
+  finally { renderer.autoClear = true; }
 });
 document.body.dataset.ready = 'true';
 
 window.addEventListener('pagehide', event => {
   if (event.persisted) return;
   renderer.setAnimationLoop(null);
+  rippleGesture.dispose();
   spray.dispose();
+  fishLoad.abort();
+  flock?.dispose();
   water.dispose();
+  waterline.dispose();
+  freezeMap.dispose();
   weather.view.dispose();
   ripples.dispose();
   flow.dispose();
+  bedMaterial.map?.dispose(); bedMaterial.normalMap?.dispose();
   for (const resource of [bedGeometry, bedMaterial, cliff, stone, stoneMaterial, sheetGeometry, sheetMaterial, foamTile]) resource.dispose();
   controls.dispose();
   gui.destroy();

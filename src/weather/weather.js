@@ -5,14 +5,14 @@ const smooth=t=>t*t*(3-2*t);
 function range(value,name,min){if(!Array.isArray(value)||value.length!==2)throw Error(`${name} needs [minimum, maximum]`);value.forEach(v=>finite(v,name,min));return [...value].sort((a,b)=>a-b);}
 
 export class Weather {
- constructor({states=DEFAULT_WEATHER_STATES,initial=states[0]?.name,transitionSeconds=45,seed=1,onEvent,auto=false,holdSeconds=[120,360],autoTransitionSeconds=[40,120],windHeading=0,windScale=1,fogScale=1,rainScale=1}={}){
+ constructor({states=DEFAULT_WEATHER_STATES,initial=states[0]?.name,transitionSeconds=45,seed=1,onEvent,auto=false,holdSeconds=[120,360],autoTransitionSeconds=[40,120],windHeading=0,windScale=1,fogScale=1,rainScale=1,temperatureOverride=null}={}){
   this.states=defineWeatherStates(states);this.names=this.states.map(s=>s.name);this.index(initial);
   this.duration=finite(transitionSeconds,'transitionSeconds');this.defaultDuration=this.duration;this.elapsed=this.duration;this.current=this.target=initial;this.time=0;
   this.weights=this.names.map(n=>Number(n===initial));this.start=this.weights.slice();this.cloudProfile=new Array(5).fill(0);this.listeners=new Set();if(onEvent)this.listeners.add(onEvent);
   if(!Number.isInteger(seed))throw Error('Weather seed must be an integer');this.randomState=seed>>>0;
   this.enabled=true;this.scales={wind:finite(windScale,'windScale'),fog:finite(fogScale,'fogScale'),rain:finite(rainScale,'rainScale')};
   this.windHeading=finite(windHeading,'windHeading',-Infinity);this.auto={enabled:false,hold:range(holdSeconds,'holdSeconds',.1),transition:range(autoTransitionSeconds,'autoTransitionSeconds',0)};this.autoRemaining=0;
-  this.update(0);this.setAuto(auto);
+  this.setTemperatureOverride(temperatureOverride);this.setAuto(auto);
  }
  index(name){const i=this.names.indexOf(name);if(i<0)throw Error(`Unknown weather state: ${name}`);return i;}
  get on(){return this.enabled;}
@@ -37,6 +37,10 @@ export class Weather {
   this.auto={enabled:!!enabled,hold,transition};this.autoRemaining=enabled?Math.max(0,this.duration-this.elapsed)+this.between(hold):0;return this;
  }
  setEnabled(enabled){this.enabled=!!enabled;this.blend();return this;}
+ setTemperatureOverride(value=null){
+  if(value!==null)finite(value,'temperature override',-Infinity);
+  this.temperatureOverride=value;this.blend();return this;
+ }
  setStates(states){
   const rows=defineWeatherStates(states),names=rows.map(s=>s.name),weights=this.weightsByName,start=Object.fromEntries(this.names.map((n,i)=>[n,this.start[i]]));
   if(names.length!==this.names.length||names.some(n=>!this.names.includes(n)))throw Error('Live profile editing must keep the same state names');
@@ -53,6 +57,12 @@ export class Weather {
  blend(){
   const weights=this.enabled?this.weights:this.names.map((_,i)=>Number(i===0));
   for(const key of WEATHER_FIELDS)this[key]=this.states.reduce((sum,s,i)=>sum+s[key]*weights[i],0);
+  this.temperature=this.temperatureOverride??this.states.reduce((sum,s,i)=>sum+(s.temperature??(s.snow>s.rain?-3:12))*weights[i],0);
+  if(this.temperatureOverride!==null){
+   const snowfall=smooth(Math.max(0,Math.min(1,(2-this.temperature)/4)));
+   const precipitation=this.rain+this.snow;
+   this.snow=precipitation*snowfall;this.rain=precipitation*(1-snowfall);
+  }
   this.wind*=this.scales.wind;this.density*=this.scales.fog;this.rain*=this.scales.rain;this.snow*=this.scales.rain;
   for(let j=0;j<5;j++)this.cloudProfile[j]=this.states.reduce((sum,s,i)=>sum+s.cloud[j]*weights[i],0);
  }
@@ -69,7 +79,7 @@ export class Weather {
   }
   this.blend();return this;
  }
- save(){return{type:'weather',version:1,current:this.current,target:this.target,weights:this.weightsByName,start:Object.fromEntries(this.names.map((n,i)=>[n,this.start[i]])),duration:this.duration,elapsed:this.elapsed,time:this.time,defaultDuration:this.defaultDuration,randomState:this.randomState,enabled:this.enabled,scales:{...this.scales},windHeading:this.windHeading,auto:structuredClone(this.auto),autoRemaining:this.autoRemaining};}
+ save(){return{type:'weather',version:1,current:this.current,target:this.target,weights:this.weightsByName,start:Object.fromEntries(this.names.map((n,i)=>[n,this.start[i]])),duration:this.duration,elapsed:this.elapsed,time:this.time,defaultDuration:this.defaultDuration,randomState:this.randomState,enabled:this.enabled,scales:{...this.scales},windHeading:this.windHeading,temperatureOverride:this.temperatureOverride,auto:structuredClone(this.auto),autoRemaining:this.autoRemaining};}
  restore(data){
   if(data?.type!=='weather'||data.version!==1)throw Error('Unsupported weather snapshot');
   this.index(data.current);this.index(data.target);
@@ -79,6 +89,7 @@ export class Weather {
   if(data.elapsed>data.duration||!Number.isInteger(data.randomState)||data.randomState<0||data.randomState>0xffffffff)throw Error('Invalid weather snapshot timing/RNG');
   const auto={enabled:!!data.auto?.enabled,hold:range(data.auto?.hold,'holdSeconds',.1),transition:range(data.auto?.transition,'autoTransitionSeconds',0)};
   const scales={wind:finite(data.scales?.wind,'wind scale'),fog:finite(data.scales?.fog,'fog scale'),rain:finite(data.scales?.rain,'rain scale')};finite(data.windHeading,'windHeading',-Infinity);
-  Object.assign(this,{current:data.current,target:data.target,weights,start,duration:data.duration,elapsed:data.elapsed,time:data.time,defaultDuration:data.defaultDuration,randomState:data.randomState,enabled:!!data.enabled,scales,windHeading:data.windHeading,auto,autoRemaining:data.autoRemaining});this.blend();return this;
+  const temperatureOverride=data.temperatureOverride===undefined||data.temperatureOverride===null?null:finite(data.temperatureOverride,'temperature override',-Infinity);
+  Object.assign(this,{current:data.current,target:data.target,weights,start,duration:data.duration,elapsed:data.elapsed,time:data.time,defaultDuration:data.defaultDuration,randomState:data.randomState,enabled:!!data.enabled,scales,windHeading:data.windHeading,temperatureOverride,auto,autoRemaining:data.autoRemaining});this.blend();return this;
  }
 }

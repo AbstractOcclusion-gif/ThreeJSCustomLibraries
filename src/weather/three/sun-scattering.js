@@ -11,6 +11,11 @@ export function createSunScattering(cloudUniforms, sunDirection) {
   ...cloudUniforms,
   sceneColor: {value: target.texture},
   sceneDepth: {value: depth},
+  waterDistance: {value: null},
+  hasWaterDistance: {value: false},
+  hasWaterPlane: {value: false},
+  waterPlane: {value: new THREE.Vector4()},
+  cameraNear: {value: .1},
   inverseProjection: {value: new THREE.Matrix4()},
   cameraWorld: {value: new THREE.Matrix4()},
   sunDirection: {value: sunDirection},
@@ -34,6 +39,10 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    varying vec2 screenUV;
    uniform sampler2D sceneColor;
    uniform highp sampler2D sceneDepth;
+   uniform highp sampler2D waterDistance;
+   uniform bool hasWaterDistance, hasWaterPlane;
+   uniform vec4 waterPlane;
+   uniform float cameraNear;
    uniform mat4 inverseProjection, cameraWorld;
    uniform vec3 sunDirection, scatterColor;
    uniform float shaftStrength;
@@ -90,7 +99,36 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     vec3 ray = mat3(cameraWorld) * (view.xyz / view.w);
     vec3 direction = normalize(ray);
     vec3 origin = cameraWorld[3].xyz;
-    float distanceToSurface = min(length(ray), 650.0);
+    float distanceToSurface = length(ray);
+    if (hasWaterDistance) {
+     float water = texture2D(waterDistance, screenUV).a;
+     if (water > 0.0) distanceToSurface = min(distanceToSurface, water);
+    }
+    float airStart = 0.0, airEnd = distanceToSurface;
+    // WebAquarium's local water-plane interval, limited to crossings near the eye.
+    if (hasWaterPlane) {
+     airStart = min(cameraNear / max(dot(direction, -cameraWorld[2].xyz), .001), airEnd);
+     float side = dot(waterPlane.xyz, origin + direction * airStart) + waterPlane.w;
+     float slope = dot(waterPlane.xyz, direction);
+     if (side < 0.0) {
+      if (slope <= .00001) airStart = airEnd;
+      else {
+       float crossing = -side / slope;
+       airStart = mix(airEnd, min(airEnd, airStart + crossing), 1.0 - smoothstep(1.0, 2.0, crossing));
+      }
+     } else if (slope < -.00001) {
+      float crossing = -side / slope;
+      airEnd = mix(airEnd, min(airEnd, airStart + crossing), 1.0 - smoothstep(1.0, 2.0, crossing));
+     }
+    }
+    distanceToSurface = min(airEnd - airStart, 650.0);
+    origin += direction * airStart;
+    if (distanceToSurface <= 0.0 || (shaftStrength <= 0.0 && bankSettings.x <= 0.0)) {
+     gl_FragColor = vec4(color, 1.0);
+     #include <tonemapping_fragment>
+     #include <colorspace_fragment>
+     return;
+    }
     float mu = dot(direction, sunDirection);
     const float g = .55;
     float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5);
@@ -137,11 +175,20 @@ export function createSunScattering(cloudUniforms, sunDirection) {
  const screenCamera = new THREE.Camera();
  const size = new THREE.Vector2();
  return {
-  render(renderer, scene, camera, color, strength, fogColor, sunColor, sunStrength, banks, offset, time, wakeHead, wakeTail) {
-   renderer.getDrawingBufferSize(size);
-   if (size.x === 0 || size.y === 0) return;
-   target.setSize(size.x, size.y);
+  render(renderer, scene, camera, color, strength, fogColor, sunColor, sunStrength, banks, offset, time, wakeHead, wakeTail, input) {
+   if (!input) {
+    renderer.getDrawingBufferSize(size);
+    if (size.x === 0 || size.y === 0) return;
+    target.setSize(size.x, size.y);
+   }
    camera.updateMatrixWorld();
+   uniforms.sceneColor.value = input?.color ?? target.texture;
+   uniforms.sceneDepth.value = input?.depth ?? depth;
+   uniforms.hasWaterDistance.value = Boolean(input?.waterDistance);
+   uniforms.waterDistance.value = input?.waterDistance ?? null;
+   uniforms.hasWaterPlane.value = Boolean(input?.waterPlane);
+   if (input?.waterPlane) uniforms.waterPlane.value.copy(input.waterPlane);
+   uniforms.cameraNear.value = camera.near;
    uniforms.cameraWorld.value.copy(camera.matrixWorld);
    uniforms.inverseProjection.value.copy(camera.projectionMatrixInverse);
    uniforms.scatterColor.value.copy(color).multiplyScalar(strength);
@@ -157,10 +204,12 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    const scissorTest = renderer.getScissorTest();
    const autoClear = renderer.autoClear;
    try {
-    renderer.setRenderTarget(target);
     renderer.setScissorTest(false);
     renderer.autoClear = true;
-    renderer.render(scene, camera);
+    if (!input) {
+     renderer.setRenderTarget(target);
+     renderer.render(scene, camera);
+    }
     renderer.setRenderTarget(null);
     renderer.render(composite, screenCamera);
    } finally {

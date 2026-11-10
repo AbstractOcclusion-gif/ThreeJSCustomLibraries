@@ -59,6 +59,8 @@ export function createWeatherDevPanel({system,view,renderer,container,onChange=(
  field(weather,'weather','auto',flag('Automatic transitions'),()=>system.weather.auto.enabled,value=>system.weather.setAuto(value));
  field(weather,'weather','defaultDuration',num('Manual transition duration · s',0,600,1),()=>system.weather.defaultDuration,value=>system.weather.defaultDuration=value);
  field(weather,'weather','windHeading',num('Weather wind heading · degrees',0,360,1),()=>system.weather.windHeading,value=>system.weather.windHeading=value);
+ field(weather,'weather','manualTemperature',flag('Override temperature'),()=>system.weather.temperatureOverride!==null,value=>system.weather.setTemperatureOverride(value?system.weather.temperature:null));
+ field(weather,'weather','temperature',num('Air temperature · °C',-50,60,.1),()=>Math.round(system.weather.temperature*10)/10,value=>system.weather.setTemperatureOverride(value));
  for(const key of ['wind','fog','rain'])field(weather,'scales',key,num(key==='rain'?'Rain / snow multiplier':key+' multiplier',0,10,.1),()=>system.weather.scales[key],value=>system.weather.setScales({[key]:value}));
  for(const [key,label]of [['hold','Hold'],['transition','Transition']])for(const [i,side]of ['minimum','maximum'].entries()){
   field(weather,'auto',key+i,num(label+' '+side+' · s',key==='hold'?.1:0,3600,.1),()=>system.weather.auto[key][i],value=>{

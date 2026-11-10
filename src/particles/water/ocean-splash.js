@@ -151,7 +151,16 @@ export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, f
     if (onDeposit) for (let i = 0; i < landedCount; i++) onDeposit(landed[i * 3], landed[i * 3 + 1], S.depositRadius, landed[i * 3 + 2] * S.depositStrength);
     if (simWindow) { const u = landMat.uniforms; u.uSimCenter.value.copy(simWindow.center); u.uSimHalf.value = simWindow.halfSize; u.uRadiusPx.value = Math.max(1, S.depositRadius / simWindow.texelMeters); u.uStrength.value = S.depositStrength;
       landGeo.attributes.position.needsUpdate = true; landGeo.setDrawRange(0, landedCount);
-      renderer.setRenderTarget(simWindow.foam.read); renderer.autoClear = false; renderer.render(landScene, landCam); renderer.autoClear = true; renderer.setRenderTarget(null); }
+      const previous = renderer.getRenderTarget(), autoClear = renderer.autoClear;
+      const face = renderer.getActiveCubeFace(), level = renderer.getActiveMipmapLevel();
+      try {
+        renderer.setRenderTarget(simWindow.foam.read);
+        renderer.autoClear = false;
+        renderer.render(landScene, landCam);
+      } finally {
+        renderer.autoClear = autoClear;
+        renderer.setRenderTarget(previous, face, level);
+      } }
     landedCount = 0;
   }
 

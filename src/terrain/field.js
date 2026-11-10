@@ -8,6 +8,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
      !size.every(n => Number.isFinite(n) && n > 0) || !Number.isInteger(seed)) throw Error('Invalid terrain grid');
  const samples = Float32Array.from(heights);
+ const original = samples.slice();
  if (!samples.every(Number.isFinite)) throw Error('Terrain heights must be finite');
  const rules = createTerrainRules(seed, {mudFromRunout: false, ...settings});
  const [width, depth] = size, stepX = width / (nx - 1), stepZ = depth / (nz - 1);
@@ -16,6 +17,11 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  const positions = geometry.getAttribute('position');
  for (let i = 0; i < samples.length; i++) positions.setY(i, samples[i]);
  geometry.computeVertexNormals();
+ // All edits stay inside this envelope, so local edits need no bounds scan.
+ geometry.computeBoundingBox();
+ geometry.boundingBox.min.y -= .65;
+ geometry.boundingBox.max.y += .43;
+ geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
  const heightMap = new THREE.DataTexture(samples, nx, nz, THREE.RedFormat, THREE.FloatType);
  const weights = new Uint8Array(samples.length * 4);
  const weightMap = new THREE.DataTexture(weights, nx, nz);
@@ -44,7 +50,126 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   const c = samples[(iz + 1) * nx + ix], d = samples[(iz + 1) * nx + ix + 1];
   return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
  }
+ let minX = nx, minZ = nz, maxX = -1, maxZ = -1;
+ const soil = samples.slice();
+ let snow, snowEnabled = false;
+ const snowCover = {value: false};
+ const snowMask = new Uint8Array(samples.length);
+ let snowMaskDirty = false;
+ const snowMap = new THREE.DataTexture(snowMask, nx, nz, THREE.RedFormat);
+ snowMap.minFilter = snowMap.magFilter = THREE.LinearFilter;
+ snowMap.needsUpdate = true;
+ const baseNormals = geometry.getAttribute('normal').array.slice();
+ const normals = geometry.getAttribute('normal');
+ const face = new THREE.Vector3();
+ function accumulate(a, b, c) {
+  const ax = positions.getX(a), ay = samples[a], az = positions.getZ(a);
+  const ux = positions.getX(b) - ax, uy = samples[b] - ay, uz = positions.getZ(b) - az;
+  const vx = positions.getX(c) - ax, vy = samples[c] - ay, vz = positions.getZ(c) - az;
+  const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+  addNormal(a, fx, fy, fz); addNormal(b, fx, fy, fz); addNormal(c, fx, fy, fz);
+ }
+ function addNormal(index, x, y, z) {
+  const column = index % nx, row = Math.floor(index / nx);
+  if (column < minX || column > maxX || row < minZ || row > maxZ) return;
+  normals.setXYZ(index, normals.getX(index) + x, normals.getY(index) + y, normals.getZ(index) + z);
+ }
+ function writeHeight(index, value, onSample) {
+  samples[index] = value;
+  positions.setY(index, samples[index]);
+  const coverage = snowEnabled ? Math.round(255 * THREE.MathUtils.smoothstep(snow[index], .015, .11)) : 0;
+  if (snowMask[index] !== coverage) {
+   snowMask[index] = coverage;
+   snowMaskDirty = true;
+  }
+  const x = index % nx, z = Math.floor(index / nx);
+  onSample?.(x, z, samples[index]);
+  minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+  minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+ }
+ function deform(x, z, radius, depth, onSample) {
+  if (![x, z, radius, depth].every(Number.isFinite) || radius <= 0 || depth <= 0) return 0;
+  const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ;
+  let volume = 0;
+  for (let j = Math.max(0, Math.ceil(gz - radius / stepZ)); j <= Math.min(nz - 1, Math.floor(gz + radius / stepZ)); j++) {
+   for (let i = Math.max(0, Math.ceil(gx - radius / stepX)); i <= Math.min(nx - 1, Math.floor(gx + radius / stepX)); i++) {
+    const distance = Math.hypot((i - gx) * stepX, (j - gz) * stepZ);
+    const index = j * nx + i, previous = samples[index];
+    const falloff = 1 - THREE.MathUtils.smoothstep(distance / radius, .15, 1);
+    const minimum = snowEnabled ? soil[index] : original[index] - .65;
+    const next = Math.fround(Math.max(minimum, previous - depth * falloff));
+    if (next === previous) continue;
+    if (snowEnabled) snow[index] = next - soil[index];
+    else soil[index] = next;
+    writeHeight(index, next, onSample);
+    volume += (previous - samples[index]) * stepX * stepZ;
+   }
+  }
+  return volume;
+ }
+ function flushDeformation() {
+  if (maxX < 0) return false;
+  positions.addUpdateRange(minZ * nx * 3, (maxZ - minZ + 1) * nx * 3);
+  positions.needsUpdate = true;
+  // Every changed face also affects the normals of its immediate neighbors.
+  minX = Math.max(0, minX - 1); maxX = Math.min(nx - 1, maxX + 1);
+  minZ = Math.max(0, minZ - 1); maxZ = Math.min(nz - 1, maxZ + 1);
+  if ((maxX - minX + 1) * (maxZ - minZ + 1) > samples.length / 3) {
+   normals.addUpdateRange(0, normals.array.length);
+   geometry.computeVertexNormals();
+  } else {
+   for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) normals.setXYZ(z * nx + x, 0, 0, 0);
+   for (let z = Math.max(0, minZ - 1); z <= Math.min(nz - 2, maxZ); z++) {
+    for (let x = Math.max(0, minX - 1); x <= Math.min(nx - 2, maxX); x++) {
+     const a = z * nx + x, b = a + nx, d = a + 1;
+     accumulate(a, b, d); accumulate(b, b + 1, d);
+    }
+   }
+   for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) {
+    const index = z * nx + x;
+    face.fromBufferAttribute(normals, index).normalize();
+    normals.setXYZ(index, face.x, face.y, face.z);
+   }
+   normals.addUpdateRange(minZ * nx * 3, (maxZ - minZ + 1) * nx * 3);
+   normals.needsUpdate = true;
+  }
+  minX = nx; minZ = nz; maxX = maxZ = -1;
+  heightMap.needsUpdate = true;
+  if (snowMaskDirty) snowMap.needsUpdate = true;
+  snowMaskDirty = false;
+  return true;
+ }
+ function resetDeformation(onSample) {
+  soil.set(original);
+  snow = undefined;
+  const restoreSnow = snowEnabled;
+  snowEnabled = false;
+  for (let index = 0; index < samples.length; index++) {
+   if (samples[index] === original[index]) continue;
+   writeHeight(index, original[index], onSample);
+  }
+  if (restoreSnow) return setSnowCover(true, onSample);
+  return flushDeformation();
+ }
+ function setSnowCover(enabled, onSample) {
+  if (enabled === snowEnabled) return false;
+  if (enabled && !snow) {
+   snow = new Float32Array(samples.length);
+   for (let index = 0; index < snow.length; index++) {
+    const x = index % nx, z = Math.floor(index / nx);
+    const drift = .31 + .12 * Math.sin(x * .18 + Math.cos(z * .14));
+    snow[index] = drift * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], .55, .95);
+   }
+  }
+  snowEnabled = enabled;
+  snowCover.value = enabled;
+  for (let index = 0; index < samples.length; index++) {
+   const next = Math.fround(soil[index] + (enabled ? snow[index] : 0));
+   if (next !== samples[index]) writeHeight(index, next, onSample);
+  }
+  return flushDeformation();
+ }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, heightAt, updateRules,
-  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); }};
+ return {geometry, bounds, heightMap, weightMap, snowMap, snowCover, heightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover,
+  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); snowMap.dispose(); }};
 }

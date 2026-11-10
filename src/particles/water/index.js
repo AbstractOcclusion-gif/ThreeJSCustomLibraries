@@ -1,5 +1,7 @@
 export {createParticleDepthBinding} from './depth-binding.js';
 export {createWaterSpray} from './spray.js';
+export {SprayPump, SPRAY_DEFAULTS, GATE as SPRAY_PROBE_GATE} from './spray-pump.js';
+export {Motes, MOTE_DEFAULTS} from './motes.js';
 export {createOceanSheets, OCEAN_SHEET_LAYOUTS, OCEAN_SHEET_FILES, SOFT_DISC} from './ocean-sheets.js';
 export {createOceanSprites} from './ocean-sprites.js';
 export {createOceanSplash} from './ocean-splash.js';

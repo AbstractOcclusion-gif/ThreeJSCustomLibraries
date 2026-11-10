@@ -139,20 +139,24 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    cloudShadows.update(sun,dynamic.ready&&!d.moonLit&&sun.intensity>0?look.cloudShadowStrength:0);
    return view;
   },
-  // Optional final draw for a perspective camera and the default screen framebuffer.
-  render(){
+  get postEnabled(){
+   return (look.sunShafts&&sunDir.y>.01&&!system.day.moonLit&&system.weather.sunlight>0&&look.shaftStrength>0)||
+    (look.heightFog&&look.bankDensity>0);
+  },
+  // Optional final draw for a perspective camera. A host can supply its own captured layers.
+  render(input){
    if(disposed)return;
    const shafts=look.sunShafts&&sunDir.y>.01&&!system.day.moonLit&&system.weather.sunlight>0?look.shaftStrength:0;
    const bankDensity=look.heightFog?look.bankDensity*Math.min(2,.55+system.weather.bank):0;
-   if((shafts===0&&bankDensity===0)||!camera.isPerspectiveCamera||renderer.getRenderTarget()!==null||
-      renderer.capabilities.logarithmicDepthBuffer||renderer.capabilities.reversedDepthBuffer||renderer.xr.isPresenting){
+   if(!input&&((shafts===0&&bankDensity===0)||!camera.isPerspectiveCamera||renderer.getRenderTarget()!==null||
+      renderer.capabilities.logarithmicDepthBuffer||renderer.capabilities.reversedDepthBuffer||renderer.xr.isPresenting)){
     renderer.render(scene,camera);
     return;
    }
    scattering??=createSunScattering(dynamic.cloudUniforms,sunDir);
    bankSettings.set(bankDensity,look.bankHeight,look.bankScale,look.bankLevel);
    const bankSunStrength=bankDensity>0&&sunDir.y>.01&&!system.day.moonLit?Math.min(1,Math.sqrt(sun.intensity/2.7)):0;
-   scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,fogObject.color,sun.color,bankSunStrength,bankSettings,bankOffset,bankTime,wakeHead,wakeTail);
+   scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,fogObject.color,sun.color,bankSunStrength,bankSettings,bankOffset,bankTime,wakeHead,wakeTail,input);
   },
   dispose(){
    if(disposed)return;disposed=true;cloudShadows.dispose();bolt?.dispose();scattering?.dispose();dynamic.dispose();rain?.dispose();dome.geometry.dispose();dome.material.dispose();scene.remove(group);

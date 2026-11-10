@@ -25,6 +25,7 @@
     "./fire": "./src/fire/index.js",
     "./particles/water": "./src/particles/water/index.js",
     "./water": "./src/water/index.js",
+    "./flocking": "./src/flocking/index.js",
     "./surface": "./src/surface/index.js",
     "./terrain": "./src/terrain/index.js",
     "./vegetation": "./src/vegetation/index.js",
@@ -40,6 +41,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "stage:webaquarium": "node scripts/stage-webaquarium.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/**/*.test.js",
     "test:weather": "node --test tests/weather/weather.test.js tests/weather/lifecycle.test.js",

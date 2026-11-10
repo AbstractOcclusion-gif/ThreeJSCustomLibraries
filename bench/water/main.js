@@ -3,7 +3,8 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 import {createChannel, createChannelSurface, createRipples, createFlowBake, skyFromWeather} from '../../src/water/index.js';
 import {createSurfaceWeather, createWeatherSurfaceMaterial} from '../../src/surface/index.js';
-import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder} from '../shared.js';
+import {benchRenderer, createBenchWeather, waterMaterialControls, weatherFolder, presetsFolder} from '../shared.js';
+import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
@@ -30,7 +31,8 @@ let channel, flowTime = 0, waveTime = 0, diving = false, dragged = -1;
 
 const P = {
   channel: {preset: 'stream', width: 1, drop: 3, depth: 1},
-  water: {speed: 1, foam: .55, foamFeather: .65, refraction: 1, clarity: 1, reflection: 1, godRays: .55, tint: '#ffffff'},
+  water: {speed: 1, foam: .55, foamFeather: .65, refraction: 1, clarity: 1, reflection: 1, godRays: .55, tint: '#ffffff',
+    rippleStrength: 1, microRipples: .025, caustics: .65},
   waves: {height: .035, wavelength: 1.2, direction: 0, spread: 45, speed: 1},
   interact: {mode: 'orbit', rippleStrength: 1, markers: true},
   bake: {iterations: 90},
@@ -64,6 +66,7 @@ function bake() {
 }
 function positionUnderwater() { const s = channel.sectionAt(27), up = channel.sectionAt(16); camera.position.set(27, s.height - P.channel.depth * .57, s.centre); camera.lookAt(16, up.height - .12, up.centre); }
 function toggleUnderwater() {
+  rippleGesture.cancel();
   if (!diving) { abovePosition.copy(camera.position); aboveTarget.copy(controls.target); positionUnderwater(); }
   else { camera.position.copy(abovePosition); controls.target.copy(aboveTarget); controls.update(); }
   diving = !diving; controls.enabled = !diving && P.interact.mode === 'orbit';
@@ -77,9 +80,11 @@ gui.add(banks, 'state', ['follow weather', 'dry', 'wet', 'snow']).name('Bank sur
   if (state !== 'follow weather') bankWeather.set({wetness: Number(state === 'wet'), snow: Number(state === 'snow')});
 });
 const fc = gui.addFolder('Channel'); fc.add(P.channel, 'preset', ['stream', 'river']).onChange(rebuild); fc.add(P.channel, 'width', .6, 1.6, .05).onChange(rebuild); fc.add(P.channel, 'drop', 0, 6, .1).name('drop · m').onChange(rebuild); fc.add(P.channel, 'depth', .4, 2, .05).onChange(rebuild);
-const fw = gui.addFolder('Water'); for (const [k, a, b] of [['speed', 0, 2], ['foam', 0, 1], ['foamFeather', 0, 1], ['refraction', 0, 2], ['clarity', .2, 3], ['reflection', 0, 1.5], ['godRays', 0, 2]]) fw.add(P.water, k, a, b, .01); fw.addColor(P.water, 'tint');
+const fw = gui.addFolder('Water');
+for (const [key, max] of [['speed', 2], ['foam', 1], ['foamFeather', 1]]) fw.add(P.water, key, 0, max, .01);
+waterMaterialControls(fw, P.water);
 const fv = gui.addFolder('Wind waves'); fv.add(P.waves, 'height', 0, .16, .005); fv.add(P.waves, 'wavelength', .35, 4, .05); fv.add(P.waves, 'direction', -180, 180, 5).name('direction vs wind °'); fv.add(P.waves, 'spread', 0, 90, 5); fv.add(P.waves, 'speed', 0, 2, .05); fv.close();
-const fi = gui.addFolder('Interact'); fi.add(P.interact, 'mode', ['orbit', 'ripple', 'rock']).onChange(v => { controls.enabled = !diving && v === 'orbit'; }); fi.add(P.interact, 'rippleStrength', 0, 2, .05); fi.add(P.interact, 'markers').name('flow markers');
+const fi = gui.addFolder('Interact'); fi.add(P.interact, 'mode', ['orbit', 'ripple', 'rock']).onChange(v => { rippleGesture.cancel(); controls.enabled = !diving && v === 'orbit'; }); fi.add(P.interact, 'rippleStrength', 0, 2, .05); fi.add(P.interact, 'markers').name('flow markers');
 fi.add({clearRocks: () => { for (const r of obstacles) r.set(0, 0, 0, 0); syncObstacles(); }}, 'clearRocks').name('clear rocks'); fi.add({toggleUnderwater}, 'toggleUnderwater').name('underwater view');
 const fb = gui.addFolder('Flow bake'); fb.add(P.bake, 'iterations', 10, 400, 10); fb.add({bake}, 'bake').name('bake flow field');
 presetsFolder(gui, {bundled: import.meta.glob('../../presets/water/*.json'), name: 'channel-water',
@@ -90,14 +95,18 @@ presetsFolder(gui, {bundled: import.meta.glob('../../presets/water/*.json'), nam
 const canvas = renderer.domElement, pointer = new THREE.Vector2(), ray = new THREE.Raycaster(); let lastEdit = 0;
 function pick(e) { const b = canvas.getBoundingClientRect(); pointer.set((e.clientX - b.left) / b.width * 2 - 1, 1 - (e.clientY - b.top) / b.height * 2); ray.setFromCamera(pointer, camera); return ray.intersectObject(water.surface)[0]?.point; }
 const disturb = (p, k = 1) => { const a = P.interact.rippleStrength * k; if (a > 0) ripples.splash(p.x, p.z, a); };
+const rippleGesture = bindRippleGesture(canvas, controls, e => {
+  if (diving || P.interact.mode === 'rock' || P.interact.rippleStrength <= 0) return;
+  const p = pick(e);
+  if (p && wetAt(p.x, p.z)) return p;
+}, disturb);
 function moveRock(i, p) { const r = obstacles[i]; if (r.z > 0) ripples.splash(r.x, r.y, P.interact.rippleStrength * .4); r.set(p.x, p.z, .9, 0); syncObstacles(); disturb(p, .55); }
 canvas.addEventListener('pointerdown', e => {
-  if (diving || P.interact.mode === 'orbit' || e.button !== 0) return; const p = pick(e);
-  if (P.interact.mode === 'rock') { const hit = ray.intersectObjects(movableRocks.filter(m => m.visible))[0]; dragged = hit ? movableRocks.indexOf(hit.object) : obstacles.findIndex(r => r.z === 0); if (!hit && p && dragged >= 0) moveRock(dragged, p); else if (!hit) dragged = -1; }
-  else if (p) disturb(p);
+  if (diving || P.interact.mode !== 'rock' || e.button !== 0) return; const p = pick(e);
+  const hit = ray.intersectObjects(movableRocks.filter(m => m.visible))[0]; dragged = hit ? movableRocks.indexOf(hit.object) : obstacles.findIndex(r => r.z === 0); if (!hit && p && dragged >= 0) moveRock(dragged, p); else if (!hit) dragged = -1;
   canvas.setPointerCapture(e.pointerId); lastEdit = e.timeStamp;
 });
-canvas.addEventListener('pointermove', e => { if (!canvas.hasPointerCapture(e.pointerId) || e.timeStamp - lastEdit < 60) return; const p = pick(e); if (!p) return; if (dragged >= 0 && P.interact.mode === 'rock') moveRock(dragged, p); else if (P.interact.mode === 'ripple') disturb(p, .38); lastEdit = e.timeStamp; });
+canvas.addEventListener('pointermove', e => { if (dragged < 0 || P.interact.mode !== 'rock' || !canvas.hasPointerCapture(e.pointerId) || e.timeStamp - lastEdit < 60) return; const p = pick(e); if (p) moveRock(dragged, p); lastEdit = e.timeStamp; });
 canvas.addEventListener('lostpointercapture', () => { dragged = -1; });
 
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
@@ -119,10 +128,11 @@ renderer.setAnimationLoop(now => {
     }
     markers.instanceMatrix.needsUpdate = true;
   }
+  rippleGesture.update(dt);
   ripples.update(dt);
   const fog = scene.fog; if (diving) { underwaterFog.color.set(0x336c65).multiplyScalar(.22 + .78 * weather.system.day.daylight); scene.fog = underwaterFog; }
   try {
-    water.render(flowTime, {foam: P.water.foam, foamFeather: P.water.foamFeather, refraction: P.water.refraction, speed: P.water.speed, clarity: P.water.clarity, reflection: P.water.reflection, tint: P.water.tint, godRays: P.water.godRays,
+    water.render(flowTime, {...P.water,
       waveTime, waveHeight: P.waves.height, wavelength: P.waves.wavelength, waveDirection: THREE.MathUtils.degToRad(weather.system.weather.windHeading + P.waves.direction), waveSpread: THREE.MathUtils.degToRad(P.waves.spread)});
     weather.view.render();
   } finally { scene.fog = fog; }
@@ -130,3 +140,4 @@ renderer.setAnimationLoop(now => {
 });
 document.body.dataset.ready = 'true';
 window.waterBench = {water, ripples, flow, obstacles, weather, scene, camera, renderer, bake, get channel() { return channel; }};
+addEventListener('pagehide', event => { if (!event.persisted) rippleGesture.dispose(); });

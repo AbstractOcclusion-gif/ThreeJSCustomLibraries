@@ -70,14 +70,46 @@ top to bottom, and use RGBA with coverage in alpha. Sheets without `animate` sti
 ### Water
 
 `createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow, foamTexture?})` and
-`createOceanSurface({sky, geometry?, laceTexture?, settings})` draw the sky through the `sky` hook from `sky-binding.js`:
+`createOceanSurface({renderer?, sky, geometry?, laceTexture?, settings})` draw the sky through the `sky` hook from `sky-binding.js`:
 `skyFromWeather(view)` shares the weather adapter's dome, `proceduralSky()` is a static gradient with a sun you drive, and
 `customSky({glsl, uniforms})` takes your own `sky(dir, sunMul)`. Foam and whitecap tiles are generated (`foam-texture.js`); pass
 your own textures to override. `createRipples` / `createFlowBake` take `{origin, size, cell}` grids and `ripples.mask(isWet)`
-takes a callback. The full WebAquarium pond/ocean workshops are not part of this lib.
+takes a callback.
 
-The pond bench adapts Glider 2's procedural waterfall sample to the current channel surface, ripple grid,
-generated foam and depth-aware spray. Set waterfall flow to zero to inspect a still pond.
+For level water, set `settings.planarReflection = {...POND_REFLECTION_DEFAULTS}` on the channel surface to
+capture mirrored scene geometry. `createWaterlineComposite(renderer, {caustics: surface.lighting})` can render a perspective view across the
+waterline. Pass the water height at the eye's horizontal position and optional surface slopes to
+`composite.render(scene, camera, {height, slopeX, slopeZ, waterType})`. The optical presets come from WebAquarium.
+
+With a WebGL2 renderer, the ocean runs WebAquarium's FFT cascades and camera-following clipmap.
+Use `ocean.update(dt, windSpeed, camera.position, windHeading)` before drawing. For scene optics, render
+`ocean.captureScene(scene, camera)` and `ocean.captureWater(waterScene, camera)`, then pass both targets
+to `composite.renderLayers`. Use `SurfaceProbes` to sample the same waves for the waterline or buoyancy.
+Optional `wake: {}` enables the moving ripple window and hull footprints, and `caustics: {}` enables the
+projected sunlight map. With `exclusion: true`, register a hull's lid and shell with `ocean.exclusion.add`.
+`captureScene` takes `excludeHulls` to toggle the depth mask. `FoamTrail` renders a stern ribbon or paints foam into the
+wake field after `ocean.update`. The Ocean bench exercises both with WebAquarium's original motorboat.
+`ocean.setShore(heightAt, bounds)` accepts a terrain height callback, while
+`ocean.shoreBinding` lets a terrain material sample the wave and wet-sand inputs. Weather can run its
+existing fog and sunlight pass over host-provided color, scene depth, and water distance textures.
+
+The Pond bench uses the channel surface with Glider 2's waterfall sample and the Fishing pond's wind wave tuning.
+Set waterfall flow to zero to inspect a still pond. Click for one ripple, hold to pulse, or drag to leave a trail.
+The `Water → Underwater light` folder controls caustics and shafts. With `bedCaustics: 'material'`, bind submerged
+lit materials through `surface.lighting.bindBedMaterial(material)` to receive projected caustics. Pass a list of
+`lightOccluders` to include mesh shadows in the shaft pass.
+
+Run `npm run stage:webaquarium` to bring the sibling WebAquarium project into the local bench. Supply
+`WEBAQUARIUM_ROOT` or pass its path after `--` if it is elsewhere. Aquarium and Fishing load the original browser
+scenes with their renderer, game data, and dev panels. Use `npm run dev` to view the staged scenes locally.
+The build omits the staged game and licensed assets.
+
+### Flocking
+
+`createFishFlock({bounds, counts, surfaceHeight?, floorHeight?})` from `three-kit/flocking` loads
+WebAquarium's fish meshes, instanced swim animation, and schooling behavior. Add the returned
+`group` to a scene and call `update(dt)`. Water and terrain heights are optional host callbacks.
+In the Pond bench, enable **Show fish school** and use **Underwater view**.
 
 ### Fire
 

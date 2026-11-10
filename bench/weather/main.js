@@ -36,7 +36,7 @@ const cloudShapes = {
   stormy: [.94, .92, 2.15, .9, .6],
 };
 const valleyStates = DEFAULT_WEATHER_STATES.map(state => ({...state, cloud: cloudShapes[state.name] ?? state.cloud}));
-const snowy = {...valleyStates.find(s => s.name === 'overcast'), name: 'snowy', snow: 1, rain: 0, wind: 5, visibility: 900, density: .6, sunlight: .3, next: {overcast: 2, clear: 1}};
+const snowy = {...valleyStates.find(s => s.name === 'overcast'), name: 'snowy', temperature: -4, snow: 1, rain: 0, wind: 5, visibility: 900, density: .6, sunlight: .3, next: {overcast: 2, clear: 1}};
 const system = createWeatherSystem({
   weather: {states: [...valleyStates, snowy], initial: 'cloudy 2', seed: 17, windHeading: 20, transitionSeconds: 4, holdSeconds: [20, 45], autoTransitionSeconds: [8, 15]},
   day: {hour: 17.2, cycleSeconds: 120, moonLight: true},
@@ -204,7 +204,7 @@ renderer.setAnimationLoop(now => {
   }
   try { view.update(dt); view.render(); } catch (error) { showError(error); renderer.setAnimationLoop(null); }
   if (now - lastUI > 250) {
-    $('status').textContent = (assetsReady ? '' : 'Loading sky assets…\n') + (privateBase ? '' : 'Bundled free sky textures\n') + system.weather.dominant + ' · ' + hourLabel(system.day.hour) + '\nWind ' + system.weather.wind.toFixed(1) + ' m/s · rain ' + Math.round(system.weather.rain * 100) + '% · snow ' + Math.round(system.weather.snow * 100) + '%';
+    $('status').textContent = (assetsReady ? '' : 'Loading sky assets…\n') + (privateBase ? '' : 'Bundled free sky textures\n') + system.weather.dominant + ' · ' + hourLabel(system.day.hour) + ' · ' + system.weather.temperature.toFixed(1) + ' °C\nWind ' + system.weather.wind.toFixed(1) + ' m/s · rain ' + Math.round(system.weather.rain * 100) + '% · snow ' + Math.round(system.weather.snow * 100) + '%';
     syncControls(); if ($('developer').open) devPanel.refresh(); lastUI = now;
   }
 });

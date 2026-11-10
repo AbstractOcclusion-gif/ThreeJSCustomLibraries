@@ -17,9 +17,11 @@ export function defineWeatherStates(states){
  return Object.freeze(states.map(s=>{
   for(const key of WEATHER_FIELDS)if(!Number.isFinite(s[key])||s[key]<0)throw Error(`${s.name}: ${key} must be finite and non-negative`);
   if(s.visibility<=0)throw Error(`${s.name}: visibility must be positive`);
+  if(s.temperature!==undefined&&!Number.isFinite(s.temperature))throw Error(`${s.name}: temperature must be finite`);
   if(!Array.isArray(s.cloud)||s.cloud.length!==5||!s.cloud.every(v=>Number.isFinite(v)&&v>=0))throw Error(`${s.name}: cloud profile needs five non-negative numbers`);
   for(const [name,odds]of Object.entries(s.next??{}))if(!names.has(name)||!Number.isFinite(odds)||odds<=0)throw Error(`${s.name}: invalid automatic transition to ${name}`);
   return Object.freeze({...s,cloud:Object.freeze([...s.cloud]),next:Object.freeze({...s.next})});
  }));
 }
-export const DEFAULT_WEATHER_STATES=defineWeatherStates(rows);
+const temperatures = [17, 11, 6, 9, 16, 14, 12];
+export const DEFAULT_WEATHER_STATES=defineWeatherStates(rows.map((state, index) => ({...state, temperature: temperatures[index]})));

@@ -18,7 +18,9 @@ iframe{width:100%;height:100%;border:0;background:#213343;display:block}.empty{d
  <a href="?tool=fire" data-tool="fire">Fire<span>Ignite wooden objects, watch heat spread between them, and see them burn out.</span></a>
  <a href="?tool=water" data-tool="water">Water · channel<span>Inland surface: refraction, ripples, rock wakes, baked flow foam, underwater.</span></a>
  <a href="?tool=pond" data-tool="pond">Water · pond &amp; waterfall<span>Waterfall sheet, impact foam, drifting mist, interactive ripples, and underwater view.</span></a>
- <a href="?tool=ocean" data-tool="ocean">Water · ocean<span>Analytic Gerstner ocean with whitecaps, mirroring the weather sky.</span></a>
+ <a href="?tool=ocean" data-tool="ocean">Water · ocean<span>FFT waves, accumulated whitecaps, and the shared weather sky.</span></a>
+ <a href="?tool=aquarium" data-tool="aquarium" data-scene="aquarium-window.html">Water · Aquarium<span>Original tanks and fish. Find the panel under Save &amp; tools → Dev tools.</span></a>
+ <a href="?tool=fishing" data-tool="fishing" data-scene="fishing.html?dev">Water · Fishing<span>Original ponds, tackle, and casting with the pond dev panel.</span></a>
  <a href="?tool=vegetation" data-tool="vegetation">Vegetation<span>Instanced grass (wind, LOD, sweeps, tint), plant specimens, procedural trees.</span></a>
  <a href="?tool=trees" data-tool="trees">Leaved trees<span>Instanced lobed crowns with leaf cards; profile authoring and JSON presets.</span></a>
  <a href="?tool=boundaries" data-tool="boundaries">Boundaries<span>Hedge, fence, wall and electric-line runs; JSON layouts.</span></a>
@@ -40,10 +42,20 @@ let current = null, frame = null;
 function load(tool, push = true) {
   const link = links.find(a => a.dataset.tool === tool); if (!link) return;
   links.forEach(a => a.classList.toggle('active', a === link));
-  frame?.remove(); frame = document.createElement('iframe'); frame.src = `./${tool}/`; frame.title = link.firstChild.textContent;
+  if (link.dataset.scene && !import.meta.env.DEV) {
+    frame?.remove(); frame = null; current = tool;
+    viewport.classList.add('empty'); viewport.textContent = 'This scene needs the local WebAquarium assets. Stage them and open the development bench.';
+    document.getElementById('title').textContent = link.firstChild.textContent;
+    document.getElementById('hint').textContent = '';
+    document.getElementById('open').hidden = document.getElementById('restart').hidden = true;
+    if (push) history.replaceState(null, '', `?tool=${tool}`);
+    return;
+  }
+  const url = link.dataset.scene ? import.meta.env.BASE_URL + 'webaquarium/' + link.dataset.scene : `./${tool}/`;
+  frame?.remove(); frame = document.createElement('iframe'); frame.src = url; frame.title = link.firstChild.textContent;
   frame.allow = 'fullscreen'; viewport.classList.remove('empty'); viewport.replaceChildren(frame); current = tool;
   document.getElementById('title').textContent = link.firstChild.textContent; document.getElementById('hint').textContent = link.querySelector('span').textContent;
-  const open = document.getElementById('open'); open.href = `./${tool}/`; open.hidden = false; document.getElementById('restart').hidden = false;
+  const open = document.getElementById('open'); open.href = url; open.hidden = false; document.getElementById('restart').hidden = false;
   if (push) history.replaceState(null, '', `?tool=${tool}`);
 }
 links.forEach(a => a.addEventListener('click', e => { e.preventDefault(); load(a.dataset.tool); }));

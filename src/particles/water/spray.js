@@ -34,13 +34,16 @@ export function createWaterSpray({
   splash(position, strength = .6, radius = .2) {
    if (!disposed) splash.emitSplash(position.x, position.y, position.z, strength, radius);
   },
-  update(dt) {
+  emitSplash(...args) {
+   if (!disposed) splash.emitSplash(...args);
+  },
+  update(dt, simWindow = null) {
    if (disposed) return;
    if (!Number.isFinite(dt) || dt < 0) throw Error('Water spray dt must be finite and non-negative');
    depth.update();
    mist.update(dt);
    splash.updateSplash(dt);
-   splash.depositFoam(null);
+   splash.depositFoam(simWindow);
   },
   get active() { return {mist: mist.active, droplets: splash.splashStats().droplets}; },
   clear() { mist.clear(); splash.clear(); },

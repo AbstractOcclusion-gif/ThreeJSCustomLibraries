@@ -36,3 +36,14 @@ export function createLaceTexture(size = 256, seed = 7) {
   for (let i = 0; i < size * size; i++) { const v = Math.round(255 * Math.pow(Math.min(1, Math.abs(n[i] - .5) * 2.6), .7)); data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = v; data[i * 4 + 3] = 255; }
   return toTexture(data, size);
 }
+
+// Red encodes the order in which patches freeze. A pond can combine it with local water depth.
+export function createFreezeTexture(size = 128, seed = 31) {
+ const noise = noise2(size, 5, seed);
+ const data = Uint8Array.from(noise, value => Math.round(value * 255));
+ const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat);
+ texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+ texture.minFilter = texture.magFilter = THREE.LinearFilter;
+ texture.needsUpdate = true;
+ return texture;
+}

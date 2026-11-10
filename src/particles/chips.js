@@ -28,6 +28,8 @@ export function createChips(scene,options={}){
   emitPiece(source,position,quaternion,velocity){
    if(disposed||!authored)return false;
    const chip=chips.find(c=>!c.active)??chips.reduce((a,b)=>a.age>b.age?a:b);retire(chip);
+   chip.groundMotion = ROLL;
+   chip.bounce = bounce;
    mesh.optimize();chip.geometryId=mesh.addGeometry(source);chip.slot=mesh.addInstance(chip.geometryId);
    chip.active=true;chip.age=0;chip.life=life[0]+Math.random()*(life[1]-life[0]);chip.ground=0;
    chip.p.copy(position);chip.q.copy(quaternion);chip.v.copy(velocity??new T.Vector3());chip.scale.set(1,1,1);chip.color.setHex(0xffffff);
@@ -41,8 +43,11 @@ export function createChips(scene,options={}){
    const vx=velocity?.x??0,vz=velocity?.z??0,travel=Math.hypot(vx,vz),heading=Math.atan2(vz,vx),forwardShare=travel>1?FORWARD.share[0]+Math.random()*(FORWARD.share[1]-FORWARD.share[0]):0;
    const n=Math.round(style.chips??Math.min(COUNT.max,Math.max(COUNT.min,(g-COUNT.fromG)*COUNT.perG))*(style.count??1)),speed=SPEED.base+g*SPEED.perG;
    let k=0;
+   const groundMotion = style.groundMotion ? {...ROLL, ...style.groundMotion} : ROLL;
    for(let i=0;k<n&&i<pool;i++){const chip=chips[i];if(chip.active)continue;k++;
     chip.active=true;chip.age=0;chip.life=life[0]+Math.random()*(life[1]-life[0]);chip.ground=position.y-.1;
+    chip.groundMotion = groundMotion;
+    chip.bounce = style.bounce ?? bounce;
     chip.p.set(position.x,position.y+.05,position.z);
     if(Math.random()<forwardShare){
      const a=heading+(Math.random()-.5)*2*FORWARD.spread,out=Math.min(FORWARD.maxSpeed,travel*(FORWARD.inherit[0]+Math.random()*(FORWARD.inherit[1]-FORWARD.inherit[0])));
@@ -62,10 +67,19 @@ export function createChips(scene,options={}){
     chip.v.y-=gravity*dt;chip.p.addScaledVector(chip.v,dt);
     const rest=floorAt(chip,chip.p.x,chip.p.z)+chip.scale.y*(options.groundOffset??SINK);
     if(chip.p.y<=rest){
-     chip.p.y=rest;chip.v.y=chip.v.y<-minBounceSpeed?-chip.v.y*bounce:0;
-     const h=.25,gx=(floorAt(chip,chip.p.x+h,chip.p.z)-floorAt(chip,chip.p.x-h,chip.p.z))/(2*h),gz=(floorAt(chip,chip.p.x,chip.p.z+h)-floorAt(chip,chip.p.x,chip.p.z-h))/(2*h);
-     chip.v.x-=gravity*ROLL.slope*gx*dt;chip.v.z-=gravity*ROLL.slope*gz*dt;const keep=Math.exp(-ROLL.drag*dt);chip.v.x*=keep;chip.v.z*=keep;
-     const r=Math.max(.02,chip.scale.y);chip.spin.set(chip.v.z/r*ROLL.spin,chip.spin.y*keep,-chip.v.x/r*ROLL.spin);
+     chip.p.y=rest;chip.v.y=chip.v.y<-minBounceSpeed?-chip.v.y*chip.bounce:0;
+     const motion = chip.groundMotion;
+     if (motion.stick) {
+      chip.v.set(0, 0, 0);
+      chip.spin.set(0, 0, 0);
+     } else {
+      if (motion.slope > 0) {
+       const h=.25,gx=(floorAt(chip,chip.p.x+h,chip.p.z)-floorAt(chip,chip.p.x-h,chip.p.z))/(2*h),gz=(floorAt(chip,chip.p.x,chip.p.z+h)-floorAt(chip,chip.p.x,chip.p.z-h))/(2*h);
+       chip.v.x-=gravity*motion.slope*gx*dt;chip.v.z-=gravity*motion.slope*gz*dt;
+      }
+      const keep=Math.exp(-motion.drag*dt);chip.v.x*=keep;chip.v.z*=keep;
+      const r=Math.max(.02,chip.scale.y);chip.spin.set(chip.v.z/r*motion.spin,chip.spin.y*keep,-chip.v.x/r*motion.spin);
+     }
     }
     dq.setFromEuler(e.set(chip.spin.x*dt,chip.spin.y*dt,chip.spin.z*dt));chip.q.multiply(dq);
     const fade=Math.min(1,(chip.life-chip.age)/.3);s.copy(chip.scale).multiplyScalar(fade);
