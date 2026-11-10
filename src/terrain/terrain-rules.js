@@ -21,22 +21,29 @@ export function validateTerrainPaint(values){
  }
  return values;
 }
+// Noise behind the layers: a local break-up field (cells `scale` m) and two-octave patches (second octave `octave` x finer,
+// offset, weighted `weight`, the sum divided by `norm`). Seeds are offsets from the terrain seed.
+const NOISE=Object.freeze({local:{seed:3,scale:8},patch:{seed:37,octave:2.13,offset:[7,-3],weight:.5,norm:1.5}});
+// How much the local break-up moves each boundary: exposed slope, valley wall, mud basin.
+const BREAKUP=Object.freeze({slope:.2,wall:.15,basin:.8});
+// Forest floor: smoothstep edges over (patch x patchGain + (coverage - .5) x coverGain + .5).
+const FOREST=Object.freeze({edges:[.35,.65],patchGain:.38,coverGain:1.8});
 export function createTerrainRules(seed,settings={}){
  const config={...TERRAIN_PAINT_DEFAULTS,...settings};validateTerrainPaint(config);
- const local=valueNoise(seed+3),patch=valueNoise(seed+37);
+ const local=valueNoise(seed+NOISE.local.seed),patch=valueNoise(seed+NOISE.patch.seed);
  return{config,configure(values){validateTerrainPaint(values);Object.assign(config,values);},
   weights({x,z,height,slope,wall=0,curvature=0,runout=false}){
-   const p=config,n=local(x/8,z/8),large=(patch(x/p.patchScale,z/p.patchScale)+.5*patch(x/p.patchScale*2.13+7,z/p.patchScale*2.13-3))/1.5;
+   const p=config,L=NOISE.local,P=NOISE.patch,n=local(x/L.scale,z/L.scale),large=(patch(x/p.patchScale,z/p.patchScale)+P.weight*patch(x/p.patchScale*P.octave+P.offset[0],z/p.patchScale*P.octave+P.offset[1]))/P.norm;
    const ridge=Math.max(0,-curvature)*p.curvatureInfluence;
-   const exposed=slope-.2*n+p.patchStrength*large+ridge;
-   const rock=Math.max(smooth(p.rockSlope-p.slopeBlend,p.rockSlope+p.slopeBlend,exposed),smooth(p.wallRock-p.wallBlend,p.wallRock+p.wallBlend,wall-.15*n));
+   const exposed=slope-BREAKUP.slope*n+p.patchStrength*large+ridge;
+   const rock=Math.max(smooth(p.rockSlope-p.slopeBlend,p.rockSlope+p.slopeBlend,exposed),smooth(p.wallRock-p.wallBlend,p.wallRock+p.wallBlend,wall-BREAKUP.wall*n));
    const snow=smooth(p.snowLine-p.snowBlend,p.snowLine+p.snowBlend,height-p.snowJitter*n);
-   const basin=p.mudBelow-height+.8*n+Math.max(0,curvature)*p.curvatureInfluence;
+   const basin=p.mudBelow-height+BREAKUP.basin*n+Math.max(0,curvature)*p.curvatureInfluence;
    const mud=(!p.mudFromRunout||runout)?smooth(-p.mudBlend,p.mudBlend,basin):0;
    const soil=1-rock,remaining=soil*(1-snow);
    const dry=remaining*(1-mud);
    if (!p.forestCover) return [dry,rock,soil*snow,remaining*mud];
-   const forest=smooth(.35,.65,large*.38+(p.forestCover-.5)*1.8+.5);
+   const forest=smooth(...FOREST.edges,large*FOREST.patchGain+(p.forestCover-.5)*FOREST.coverGain+.5);
    return [dry*(1-forest),rock,soil*snow,remaining*mud,dry*forest];
   },
  };

@@ -20,13 +20,17 @@ const SURF_MIN_PERIOD = 0.5, SURF_MIN_WAVELENGTH = 1.0, SURF_BEAT_WRAP_FRONTS = 
 const SWASH_MAX_SLOPE_TAN_CEILING = 1000;                    // SurfSwashMaxSlopeTanCeiling (89 deg is a huge tangent)
 export const SURF_WARP_REACH_SPACINGS = 2.0;                       // shore compression reach = this x the front wavelength (ONE curve with ShoreWarpExtra)
 
-export const createSurfUniforms = () => ({ uSurfActive: { value: 0 }, uSurfBeatTime: { value: 0 }, uSurfAmplitude: { value: 0.8 }, uSurfWavelength: { value: 26 }, uSurfPeriod: { value: 9 },
-  uSurfBandDepth: { value: 6 }, uSurfSetStrength: { value: 0.55 }, uSurfLean: { value: 0.35 }, uSurfCompression: { value: 0.6 }, uSurfGreens: { value: 1.35 },
-  uSurfAmbientFade: { value: 0.8 }, uSurfWaterlineFoam: { value: 0.5 }, uSurfSmallWaveFoam: { value: 0 }, uSurfCrestLength: { value: 60 }, uSurfCrestVariation: { value: 0.6 },
-  uSurfCrestPersistence: { value: 0 }, uSurfDirectionality: { value: 0.7 }, uSurfWindDirXZ: { value: new THREE.Vector2(1, 0) },
-  uSurfFoamStrength: { value: 1 }, uSurfFoamFeather: { value: 0.2 }, uSurfFoamTileSize: { value: 8 }, uSurfFoamColor: { value: new THREE.Color(1, 1, 1) }, uSurfFoamOpacity: { value: 1 },
-  uSurfFoamCrestCap: { value: 0 }, uSurfFoamBoreGain: { value: 1 }, uSurfFoamTrailGain: { value: 1 }, uSurfFoamTrailLength: { value: 1 },
-  uSurfSwashAmplitude: { value: 1 }, uSurfSwashMaxSlopeTan: { value: Math.tan(35 * Math.PI / 180) }, uWetDryTimeSeconds: { value: 3 }, uSurfSwashFoam: { value: 0.8 }, uSurfSwashFoamWidth: { value: 0.25 }, uSurfSwashFoamDissolve: { value: 0.6 } });
+// Breaker shape uniforms that have no setting: front compression and the green-water lift of the face.
+const SURF_SHAPE = Object.freeze({ compression: 0.6, greens: 1.35 });
+// Starting values from SURF_DEFAULTS; applySurf() sets them from the host's settings.
+const D = SURF_DEFAULTS;
+export const createSurfUniforms = () => ({ uSurfActive: { value: 0 }, uSurfBeatTime: { value: 0 }, uSurfAmplitude: { value: D.amplitude }, uSurfWavelength: { value: D.wavelength }, uSurfPeriod: { value: D.period },
+  uSurfBandDepth: { value: D.bandDepth }, uSurfSetStrength: { value: D.setStrength }, uSurfLean: { value: D.lean }, uSurfCompression: { value: SURF_SHAPE.compression }, uSurfGreens: { value: SURF_SHAPE.greens },
+  uSurfAmbientFade: { value: D.ambientFade }, uSurfWaterlineFoam: { value: D.waterlineFoam }, uSurfSmallWaveFoam: { value: D.smallWaveFoam }, uSurfCrestLength: { value: D.crestLength }, uSurfCrestVariation: { value: D.crestVariation },
+  uSurfCrestPersistence: { value: D.crestPersistence }, uSurfDirectionality: { value: D.directionality }, uSurfWindDirXZ: { value: new THREE.Vector2(1, 0) },
+  uSurfFoamStrength: { value: D.foamStrength }, uSurfFoamFeather: { value: D.foamFeather }, uSurfFoamTileSize: { value: D.foamTileSize }, uSurfFoamColor: { value: new THREE.Color(1, 1, 1) }, uSurfFoamOpacity: { value: D.foamOpacity },
+  uSurfFoamCrestCap: { value: D.foamCrestCap }, uSurfFoamBoreGain: { value: D.foamBoreGain }, uSurfFoamTrailGain: { value: D.foamTrailGain }, uSurfFoamTrailLength: { value: D.foamTrailLength },
+  uSurfSwashAmplitude: { value: D.swashAmplitude }, uSurfSwashMaxSlopeTan: { value: Math.tan(D.swashMaxSlopeDeg * Math.PI / 180) }, uWetDryTimeSeconds: { value: D.dryTimeSeconds }, uSurfSwashFoam: { value: D.swashFoam }, uSurfSwashFoamWidth: { value: D.swashFoamWidth }, uSurfSwashFoamDissolve: { value: D.swashFoamDissolve } });
 
 // Include-guarded like SHORE_GLSL: carried by the FFT sampling chunk, which several stages include together.
 export const SURF_GLSL = /* glsl */`

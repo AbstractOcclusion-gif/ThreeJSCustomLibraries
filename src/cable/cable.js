@@ -12,6 +12,13 @@ export const CABLE_BUDGET=Object.freeze({segments:24,subdivisions:96,radialSides
 // Wind drag on a link: 0.5 * air density * drag coefficient * (diameter * length) * |v| * v, v = wind - link velocity.
 const AIR_DENSITY=1.225,DRAG_COEFFICIENT=1.2,GUST_HZ=.35,GUST_SWING=.5,GUST_PHASE_PER_LINK=.7;
 const WIND_WAKE_DELTA=.5;   // m/s of wind change that wakes a sleeping cable
+const MIN_SEGMENTS=4,SOLVER_STEP_LIMITS=[128,32];   // [iterations, sub-steps] upper bounds
+const MIN_SPAN=2,SLACK=[1.01,1.3];   // m; cable length as [min, max] x span
+const SAG_FIT_ITERATIONS=45;         // bisection passes fitting the hanging polygon to the cable length
+// Link collision box: half length = max(minHalf, size / 2 - gap) so neighbouring boxes never overlap at the joints.
+const LINK_BOX=Object.freeze({minHalf:.01,gap:.006});
+const COLLISION=Object.freeze({group:2,mask:3});   // cable links: their own group, colliding with the default group and themselves
+const TENSION_FILTER_SECONDS=.025,MAX_STEP=1/120;   // s: tension low-pass time constant; s: largest fixed step
 const finite=v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite);
 
 // No clock, renderer, structural damage graph or electrical dependency. Body
@@ -20,23 +27,23 @@ const finite=v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite);
 // folding. Projected tensile force, not total joint force, drives cable rupture.
 export function createCable({world,endpoints,length,segments=16,preset='rope',breakStrength=5000,moveFixedBody,solverSteps=[32,8],retentionDistance=120}={}){
  const profile=CABLE_PRESETS[preset];if(!Number.isFinite(retentionDistance)||retentionDistance<1)throw Error('Invalid cable retention distance');
- if(!world?.addBody||!profile||!Number.isInteger(segments)||segments<4||segments>CABLE_BUDGET.segments||!(Number.isFinite(breakStrength)&&breakStrength>0))throw Error('Invalid cable options');
+ if(!world?.addBody||!profile||!Number.isInteger(segments)||segments<MIN_SEGMENTS||segments>CABLE_BUDGET.segments||!(Number.isFinite(breakStrength)&&breakStrength>0))throw Error('Invalid cable options');
  if(!Array.isArray(endpoints)||endpoints.length!==2)throw Error('Cable needs two explicit attachments');
- if(!Array.isArray(solverSteps)||solverSteps.length!==2||solverSteps.some((n,i)=>!Number.isInteger(n)||n<1||n>(i?32:128)))throw Error('Invalid cable solver steps');
+ if(!Array.isArray(solverSteps)||solverSteps.length!==2||solverSteps.some((n,i)=>!Number.isInteger(n)||n<1||n>SOLVER_STEP_LIMITS[i]))throw Error('Invalid cable solver steps');
  const position=a=>{if(a?.kind==='body'&&a.body?.world===world&&finite(a.localPoint))return a.body.pointToWorldFrame(new C.Vec3(...a.localPoint));if(a?.kind==='driven'&&world.nativeSleep&&typeof moveFixedBody!=='function')throw Error('Driven Jolt attachment requires moveFixedBody');if(['fixed','driven'].includes(a?.kind)&&finite(a.position))return new C.Vec3(...a.position);throw Error('Invalid cable attachment');};
  const start=position(endpoints[0]),end=position(endpoints[1]),span=start.distanceTo(end);
- if(!(span>=2&&Number.isFinite(length)&&length>=span*1.01&&length<=span*1.3))throw Error('Cable length must be 1–30% longer than a span of at least 2 m');
+ if(!(span>=MIN_SPAN&&Number.isFinite(length)&&length>=span*SLACK[0]&&length<=span*SLACK[1]))throw Error('Cable length must be 1–30% longer than a span of at least 2 m');
  // Fit the actual polygon length, rather than treating sag as extra stretch.
  const direction=end.vsub(start).scale(1/span),sagAxis=new C.Vec3(0,-1,0);sagAxis.vsub(direction.scale(sagAxis.dot(direction)),sagAxis);
  // Vertical hanging ropes need a sideways slack bow; subtracting only world Y
  // would fold the initial chain back along itself rather than give it slack.
  if(sagAxis.lengthSquared()<1e-8)sagAxis.set(1,0,0);else sagAxis.normalize();
  const pointsAt=sag=>Array.from({length:segments+1},(_,i)=>{const t=i/segments,p=new C.Vec3();start.lerp(end,t,p);p.vadd(sagAxis.scale(4*sag*t*(1-t)),p);return p;});
- let low=0,high=length,points;for(let i=0;i<45;i++){const sag=(low+high)/2;points=pointsAt(sag);const sum=points.slice(1).reduce((n,p,j)=>n+p.distanceTo(points[j]),0);if(sum>length)high=sag;else low=sag;}
+ let low=0,high=length,points;for(let i=0;i<SAG_FIT_ITERATIONS;i++){const sag=(low+high)/2;points=pointsAt(sag);const sum=points.slice(1).reduce((n,p,j)=>n+p.distanceTo(points[j]),0);if(sum>length)high=sag;else low=sag;}
  const links=[],joints=[],attachments=[null,null],listeners=new Set();let disposed=false,revision=0,time=0,fractureEnabled=true,maxGap=0,peakTension=0;
  const emit=event=>{revision++;for(const fn of listeners)fn({...event,time,revision});};
  for(let i=0;i<segments;i++){
-  const delta=points[i+1].vsub(points[i]),size=delta.length(),body=new C.Body({mass:size*profile.massPerMetre,shape:new C.Box(new C.Vec3(Math.max(.01,size/2-.006),profile.radius,profile.radius)),position:points[i].vadd(points[i+1]).scale(.5),quaternion:new C.Quaternion().setFromVectors(new C.Vec3(1,0,0),delta.unit()),linearDamping:profile.damping,angularDamping:profile.damping,collisionFilterGroup:2,collisionFilterMask:3});
+  const delta=points[i+1].vsub(points[i]),size=delta.length(),body=new C.Body({mass:size*profile.massPerMetre,shape:new C.Box(new C.Vec3(Math.max(LINK_BOX.minHalf,size/2-LINK_BOX.gap),profile.radius,profile.radius)),position:points[i].vadd(points[i+1]).scale(.5),quaternion:new C.Quaternion().setFromVectors(new C.Vec3(1,0,0),delta.unit()),linearDamping:profile.damping,angularDamping:profile.damping,collisionFilterGroup:COLLISION.group,collisionFilterMask:COLLISION.mask});
   body._noSettleFreeze=true;body.cableLink=true;world.addBody(body);links.push({body,length:size});
  }
  function joint(a,b,point,index,tip=point){const pivotA=a.pointToLocalFrame(point),pivotB=b.pointToLocalFrame(tip),constraint=new C.PointToPointConstraint(a,pivotA,b,pivotB,1e8);constraint.collideConnected=false;constraint._nativeSteps=solverSteps.slice();world.addConstraint(constraint);return{a,b,pivotA,pivotB,constraint,index,broken:false,tension:0,compression:0,force:0,gap:0};}
@@ -66,7 +73,7 @@ export function createCable({world,endpoints,length,segments=16,preset='rope',br
   // Adapter lambda points opposite tensile pull along a -> b. At a fixing use
   // the cable's own axis, not the support COM (which can be far below the tip).
   const axial=-reaction.dot(axis);j.force=reaction.length();j.tension=Math.max(0,axial);j.compression=Math.max(0,-axial);j.a.pointToWorldFrame(j.pivotA,pivotAWorld);j.gap=pivotAWorld.distanceTo(pivotBWorld);maxGap=Math.max(maxGap,j.gap);peakTension=Math.max(peakTension,j.tension);
-  j.filtered=(j.filtered??0)+(j.tension-(j.filtered??0))*(1-Math.exp(-dt/.025));
+  j.filtered=(j.filtered??0)+(j.tension-(j.filtered??0))*(1-Math.exp(-dt/TENSION_FILTER_SECONDS));
  }
  // Optional core/environment.js contract. Sleeping links are left asleep until the wind changes noticeably.
  let environment=null,wokenWindX=0,wokenWindZ=0;
@@ -89,7 +96,7 @@ export function createCable({world,endpoints,length,segments=16,preset='rope',br
   moveEndpoint(end,p){const a=attachments[end];if(!a?.owned||a.kind!=='driven'||!finite(p))throw Error('Endpoint is not a driven world attachment');a.body.position.set(...p);a.body.aabbNeedsUpdate=true;moveFixedBody?.(a.body);wake();},
   setFracture(enabled){fractureEnabled=!!enabled;},
   setEnvironment(next){environment=next??null;},
-  beforeStep(dt){if(disposed)return;if(!(dt>0&&dt<=1/120))throw Error('Cable requires fixed steps <= 1/120 s');time+=dt;for(let i=0;i<2;i++)if(attachments[i]&&attachments[i].body.world!==world)release(i,'body-removed');if(environment)applyWind();},
+  beforeStep(dt){if(disposed)return;if(!(dt>0&&dt<=MAX_STEP))throw Error('Cable requires fixed steps <= 1/120 s');time+=dt;for(let i=0;i<2;i++)if(attachments[i]&&attachments[i].body.world!==world)release(i,'body-removed');if(environment)applyWind();},
   afterStep(dt){if(disposed)return;for(const j of joints){measure(j,dt);if(fractureEnabled&&!j.broken&&j.filtered>breakStrength)breakAt(j.index,'tension');}for(let i=0;i<2;i++){const a=attachments[i];if(a){measure(a.joint,dt);if(fractureEnabled&&a.joint.filtered>breakStrength)release(i,'tension');}}},
   describe(){return{length,profile,links:links.map(l=>({length:l.length,body:{id:l.body.id,mass:l.body.mass,position:l.body.position.toArray(),quaternion:l.body.quaternion.toArray()}}))};},
   snapshot(){return{revision,sections:sections(),removedBodyIds:links.filter(l=>l.retired).map(l=>l.body.id),broken:joints.map(j=>j.broken),attachments:attachments.map(a=>a?{kind:a.kind,bodyId:a.body.id,point:a.body.pointToWorldFrame(a.localPoint).toArray(),tension:a.joint.tension}:null),tension:Math.max(0,...joints.filter(j=>!j.broken).map(j=>j.tension)),compression:Math.max(0,...joints.filter(j=>!j.broken).map(j=>j.compression)),peakTension,maxGap,segments:links.filter(l=>!l.retired).length,sleeping:links.every(l=>l.body.sleepState===2),breakStrength};},
