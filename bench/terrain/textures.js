@@ -6,11 +6,11 @@ const files = import.meta.glob([
 ], {eager: true, query: '?url', import: 'default'});
 const sets = {grass: 'sparse_grass', rock: 'rock_wall_02', snow: 'snow_02', mud: 'mud_forest'};
 
-export async function loadTerrainTextures(renderer) {
+export async function loadTerrainTextures(renderer, {forest = false} = {}) {
  const loader = new THREE.ImageLoader();
  const load = (set, map) => loader.loadAsync(files[`../../assets/terrain/${set}/${map}.jpg`]);
  const [images, rockNormal] = await Promise.all([
-  Promise.all(Object.entries(sets).map(([layer, set]) =>
+  Promise.all(Object.entries(forest ? {...sets, mud: 'brown_mud', forest: 'mud_forest'} : sets).map(([layer, set]) =>
    Promise.all([layer, load(set, 'color'), load(set, 'height')]))),
   load(sets.rock, 'normal'),
  ]);

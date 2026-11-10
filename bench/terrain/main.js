@@ -63,7 +63,7 @@ function tile(pixel, colorSpace = THREE.NoColorSpace) {
  texture.needsUpdate = true;
  return texture;
 }
-const layerColors = {grass: [99, 108, 62], rock: [118, 110, 100], snow: [204, 216, 219], mud: [97, 77, 59]};
+const layerColors = {grass: [99, 108, 62], rock: [118, 110, 100], snow: [204, 216, 219], mud: [108, 83, 62], forest: [64, 52, 39]};
 let layers = Object.fromEntries(Object.entries(layerColors).map(([name, rgb], index) => [name, tile((u, v) => {
  const h = relief(u + index * .17, v);
  const grain = periodicNoise(u + index * .31, v, 33);
@@ -77,7 +77,7 @@ let detail = tile((u, v) => {
  return [(n.x * .5 + .5) * 255, (n.y * .5 + .5) * 255, (n.z * .5 + .5) * 255, 255];
 });
 try {
- const photos = await loadTerrainTextures(renderer);
+ const photos = await loadTerrainTextures(renderer, {forest: true});
  Object.values(layers).forEach(texture => texture.dispose());
  detail.dispose();
  ({layers, detail} = photos);
@@ -94,7 +94,7 @@ const heights = Float32Array.from({length: resolution * resolution}, (_, i) => {
  const cliff = (10 + 4 * noise(x * .08, z * .08) + 1.1 * noise(x * .27, z * .24)) * escarpment;
  return 1.55 + basin + cliff + .52 * noise(x * .12, z * .12) + .14 * noise(x * .48, z * .48);
 });
-const rules = {rockSlope: .71, snowLine: 13.5, snowBlend: 2, snowJitter: 1.5, mudBelow: .75, mudBlend: .8, patchStrength: .32};
+const rules = {rockSlope: .71, snowLine: 13.5, snowBlend: 2, snowJitter: 1.5, mudBelow: .75, mudBlend: .8, patchStrength: .32, forestCover: .5};
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules});
 const appearance = createTerrainAppearance(), surfaceWeather = createSurfaceWeather();
 appearance.rockScale.value = .36;
@@ -190,7 +190,7 @@ function stampDemo() {
 const gui = new GUI({title: 'Terrain material'});
 const controlsState = {blendObjects: true, water: true, wetPreview: false};
 const meadow = createFreeVegetation({meadowBlades: true});
-const cover = {grass: 1, rock: 0, snow: 0, mud: .06, patchiness: .85, patchSize: 5};
+const cover = {grass: 1, rock: 0, snow: 0, mud: 0, forest: .24, patchiness: .85, patchSize: 5};
 const patchNoise = valueNoise(23);
 const meadowGreen = new THREE.Color('#50762e'), meadowDry = new THREE.Color('#c2aa61'), meadowTint = new THREE.Color();
 let terrainGrass, grassDirty = false;
@@ -253,8 +253,9 @@ const automatic = gui.addFolder('Automatic layers');
 for (const [key, min, max, step] of [['rockSlope', .2, 2, .05], ['snowLine', -2, 22, .5], ['mudBelow', -3, 6, .1]]) {
  automatic.add(rules, key, min, max, step).onFinishChange(() => { field.updateRules(rules); rebuildGrass(); });
 }
+automatic.add(rules, 'forestCover', 0, 1, .01).name('Forest floor coverage').onFinishChange(() => { field.updateRules(rules); rebuildGrass(); });
 const groundCover = gui.addFolder('Grass cover');
-for (const [layer, label] of [['grass', 'Meadow'], ['mud', 'Mud / forest floor'], ['rock', 'Rock'], ['snow', 'Snow']]) {
+for (const [layer, label] of [['grass', 'Meadow'], ['mud', 'Mud'], ['forest', 'Forest floor'], ['rock', 'Rock'], ['snow', 'Snow']]) {
  groundCover.add(cover, layer, 0, 1, .01).name(label + ' density').onFinishChange(rebuildGrass);
 }
 groundCover.add(cover, 'patchiness', 0, 1, .01).name('Patch contrast').onFinishChange(rebuildGrass);

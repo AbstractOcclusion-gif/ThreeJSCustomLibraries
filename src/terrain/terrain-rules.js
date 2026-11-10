@@ -2,7 +2,7 @@ import {valueNoise} from './terrain-noise.js';
 const number=(label,min,max,step)=>({label,min,max,step});
 export const TERRAIN_PAINT_DEFAULTS=Object.freeze({
  rockSlope:1,wallRock:1.15,snowLine:150,snowJitter:10,mudBelow:3.5,mudFromRunout:true,
- slopeBlend:.25,wallBlend:.18,snowBlend:12,mudBlend:1.4,patchScale:18,patchStrength:.18,curvatureInfluence:.2,
+ slopeBlend:.25,wallBlend:.18,snowBlend:12,mudBlend:1.4,patchScale:18,patchStrength:.18,curvatureInfluence:.2,forestCover:0,
 });
 export const TERRAIN_PAINT_FIELDS={
  rockSlope:number('Rock slope threshold · rise/run',.2,3,.05),slopeBlend:number('Slope transition softness',.02,1,.01),
@@ -10,9 +10,10 @@ export const TERRAIN_PAINT_FIELDS={
  snowLine:number('Snow altitude · m',-20,300,1),snowBlend:number('Snow-line transition · m',1,60,1),snowJitter:number('Snow-line breakup · m',0,40,1),
  mudBelow:number('Mud basin altitude · m',-20,30,.5),mudBlend:number('Mud transition · m',.1,10,.1),
  patchScale:number('Natural patch size · m',3,100,1),patchStrength:number('Patch variation',0,.8,.01),curvatureInfluence:number('Ridge / basin influence',0,1,.05),
+ forestCover:number('Forest floor coverage',0,1,.01),
 };
 const smooth=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
-export const TERRAIN_LAYERS=Object.freeze(['grass','rock','snow','mud']);
+export const TERRAIN_LAYERS=Object.freeze(['grass','rock','snow','mud','forest']);
 export function validateTerrainPaint(values){
  for(const [key,value]of Object.entries(values)){
   if(key==='mudFromRunout'){if(typeof value!=='boolean')throw Error('Invalid mudFromRunout');continue;}
@@ -33,7 +34,10 @@ export function createTerrainRules(seed,settings={}){
    const basin=p.mudBelow-height+.8*n+Math.max(0,curvature)*p.curvatureInfluence;
    const mud=(!p.mudFromRunout||runout)?smooth(-p.mudBlend,p.mudBlend,basin):0;
    const soil=1-rock,remaining=soil*(1-snow);
-   return[remaining*(1-mud),rock,soil*snow,remaining*mud];
+   const dry=remaining*(1-mud);
+   if (!p.forestCover) return [dry,rock,soil*snow,remaining*mud];
+   const forest=smooth(.35,.65,large*.38+(p.forestCover-.5)*1.8+.5);
+   return [dry*(1-forest),rock,soil*snow,remaining*mud,dry*forest];
   },
  };
 }

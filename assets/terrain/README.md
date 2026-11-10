@@ -1,6 +1,6 @@
 # Terrain texture library
 
-These 1K JPEG maps are from Poly Haven under [CC0](https://polyhaven.com/license). Each set includes color, OpenGL normal, height, and roughness.
+These 1K JPEG maps are from Poly Haven under [CC0](https://polyhaven.com/license). Brown Mud includes color and height. The other sets also include OpenGL normal and roughness.
 
 | Set | Source |
 | --- | --- |
@@ -8,5 +8,6 @@ These 1K JPEG maps are from Poly Haven under [CC0](https://polyhaven.com/license
 | `rock_wall_02` | [Rock Wall 02](https://polyhaven.com/a/rock_wall_02) |
 | `snow_02` | [Snow 02](https://polyhaven.com/a/snow_02) |
 | `mud_forest` | [Mud Forest](https://polyhaven.com/a/mud_forest) |
+| `brown_mud` | [Brown Mud](https://polyhaven.com/a/brown_mud) |
 
 The terrain bench packs height into the color map’s alpha channel and uses the rock normal as shared detail. Color is sRGB. Normal, height, and roughness are data maps.

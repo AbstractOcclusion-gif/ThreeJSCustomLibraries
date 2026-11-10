@@ -26,9 +26,13 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  const weights = new Uint8Array(samples.length * 4);
  const weightMap = new THREE.DataTexture(weights, nx, nz);
  weightMap.minFilter = weightMap.magFilter = THREE.LinearFilter;
+ const forestWeights = settings?.forestCover !== undefined ? new Uint8Array(samples.length) : null;
+ const forestMap = forestWeights ? new THREE.DataTexture(forestWeights, nx, nz, THREE.RedFormat) : null;
+ if (forestMap) forestMap.minFilter = forestMap.magFilter = THREE.LinearFilter;
  heightMap.needsUpdate = true;
  const bounds = new THREE.Vector4(...origin, ...size);
  function updateRules(values = {}) {
+  if (!forestMap && values.forestCover > 0) throw Error('Enable forest cover when creating the terrain field');
   rules.configure(values);
   for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
    const index = z * nx + x, height = samples[index];
@@ -39,8 +43,10 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    const curvature = (left + right - 2 * height) / (stepX * stepX) + (north + south - 2 * height) / (stepZ * stepZ);
    const layers = rules.weights({x: bounds.x + x * stepX, z: bounds.y + z * stepZ, height, slope: Math.hypot(dx, dz), curvature});
    for (let i = 0; i < 4; i++) weights[index * 4 + i] = Math.round(layers[i] * 255);
+   if (forestWeights) forestWeights[index] = Math.round((layers[4] ?? 0) * 255);
   }
   weightMap.needsUpdate = true;
+  if (forestMap) forestMap.needsUpdate = true;
  }
  function heightAt(x, z) {
   const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ;
@@ -55,10 +61,13 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   const gx = THREE.MathUtils.clamp((x - bounds.x) / stepX, 0, nx - 1);
   const gz = THREE.MathUtils.clamp((z - bounds.y) / stepZ, 0, nz - 1);
   const ix = Math.min(Math.floor(gx), nx - 2), iz = Math.min(Math.floor(gz), nz - 2);
-  const i = (iz * nx + ix) * 4 + layer;
+  if (layer === 4 && !forestWeights) return 0;
+  const data = layer === 4 ? forestWeights : weights;
+  const stride = layer === 4 ? 1 : 4;
+  const i = (iz * nx + ix) * stride + (layer === 4 ? 0 : layer);
   const lerp = THREE.MathUtils.lerp;
-  const north = lerp(weights[i], weights[i + 4], gx - ix);
-  const south = lerp(weights[i + nx * 4], weights[i + nx * 4 + 4], gx - ix);
+  const north = lerp(data[i], data[i + stride], gx - ix);
+  const south = lerp(data[i + nx * stride], data[i + (nx + 1) * stride], gx - ix);
   return lerp(north, south, gz - iz) / 255;
  }
  let minX = nx, minZ = nz, maxX = -1, maxZ = -1;
@@ -181,6 +190,6 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, snowMap, snowCover, heightAt, layerWeightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover,
-  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); snowMap.dispose(); }};
+ return {geometry, bounds, heightMap, weightMap, forestMap, snowMap, snowCover, heightAt, layerWeightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover,
+  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); snowMap.dispose(); }};
 }

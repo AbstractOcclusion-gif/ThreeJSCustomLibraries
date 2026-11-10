@@ -16,6 +16,9 @@ export function createTerrainAppearance() {
 // Triplanar sampling adapted from Glider's stunt/cart/terrain-material.js.
 const TERRAIN_GLSL = /* glsl */`
 uniform sampler2D terrainHeights, terrainLayers, terrainGrass, terrainRock, terrainSnow, terrainMud, terrainDetail;
+#ifdef TERRAIN_FOREST_FLOOR
+uniform sampler2D terrainForestWeight, terrainForest;
+#endif
 uniform vec4 terrainBounds;
 uniform float terrainTiling, terrainSharpness, terrainAntiTiling, terrainDetailStrength, terrainHeightBlend;
 uniform float terrainRockScale;
@@ -111,15 +114,24 @@ const TERRAIN_FRAGMENT = /* glsl */`
  if (terrainWeights.w > 0.0) mud = terrainTriplanar(terrainMud, terrainP * 1.4, terrainDx * 1.4, terrainDy * 1.4, terrainSign, terrainAxes);
  vec4 microHeight = vec4(grass.a, rock.a, snow.a, mud.a);
  terrainWeights *= exp2((microHeight - .5) * terrainHeightBlend * 8.0);
- terrainWeights /= max(dot(terrainWeights, vec4(1.0)), .0001);
+ vec4 forest = vec4(0.0);
+ float forestWeight = 0.0;
+ #ifdef TERRAIN_FOREST_FLOOR
+ forestWeight = textureLod(terrainForestWeight, (terrainGrid + .5) / terrainSize, 0.0).r;
+ if (forestWeight > 0.0) forest = terrainTriplanar(terrainForest, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
+ forestWeight *= exp2((forest.a - .5) * terrainHeightBlend * 8.0);
+ #endif
+ float totalWeight = max(dot(terrainWeights, vec4(1.0)) + forestWeight, .0001);
+ terrainWeights /= totalWeight;
+ forestWeight /= totalWeight;
  if (terrainProp) {
-  float relief = dot(microHeight - .5, terrainWeights);
+  float relief = dot(microHeight - .5, terrainWeights) + (forest.a - .5) * forestWeight;
   float seam = terrainContactBand * clamp(1.0 + relief * terrainHeightBlend, .55, 1.45);
   terrainContact = 1.0 - smoothstep(0.0, seam, aboveGround);
  }
- vec3 terrainColor = grass.rgb * terrainWeights.x + rock.rgb * terrainWeights.y + snow.rgb * terrainWeights.z + mud.rgb * terrainWeights.w;
+ vec3 terrainColor = grass.rgb * terrainWeights.x + rock.rgb * terrainWeights.y + snow.rgb * terrainWeights.z + mud.rgb * terrainWeights.w + forest.rgb * forestWeight;
  diffuseColor.rgb = mix(diffuseColor.rgb, terrainColor, terrainContact);
- roughnessFactor = mix(roughnessFactor, dot(terrainWeights, vec4(.95, .85, .82, .75)), terrainContact);
+ roughnessFactor = mix(roughnessFactor, dot(terrainWeights, vec4(.95, .85, .82, .75)) + .92 * forestWeight, terrainContact);
  metalnessFactor *= 1.0 - terrainContact;
  if (terrainDetailStrength > 0.0) {
   vec3 detail = terrainNormalDetail(terrainP * 3.4, terrainDx * 3.4, terrainDy * 3.4, terrainSign, terrainAxes);
@@ -142,11 +154,14 @@ export function createTerrainMaterial(parameters = {}, {
   throw Error('Terrain material needs a field, four layer textures and a detail normal');
  }
  if (contactBand !== undefined && (!Number.isFinite(contactBand) || contactBand < 0)) throw Error('Contact band must be a non-negative distance');
+ if (field.forestMap && !layers.forest?.isTexture) throw Error('Terrain forest cover needs a forest floor texture');
  const material = createWeatherSurfaceMaterial(parameters, surface);
+ if (field.forestMap) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
  const compileSurface = material.onBeforeCompile;
  const uniforms = {
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap}, terrainBounds: {value: field.bounds},
   terrainGrass: {value: layers.grass}, terrainRock: {value: layers.rock}, terrainSnow: {value: layers.snow}, terrainMud: {value: layers.mud},
+  terrainForest: {value: layers.forest ?? null}, terrainForestWeight: {value: field.forestMap ?? null},
   terrainDetail: {value: detailNormal}, terrainProp: {value: contactBand !== undefined}, terrainContactBand: {value: contactBand ?? 0},
   terrainTiling: appearance.tiling, terrainSharpness: appearance.sharpness, terrainAntiTiling: appearance.antiTiling,
   terrainRockScale: appearance.rockScale ?? {value: .55},
