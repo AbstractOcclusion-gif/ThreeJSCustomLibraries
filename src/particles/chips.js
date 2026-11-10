@@ -23,7 +23,7 @@ export function createChips(scene,options={}){
  const floorAt=(chip,x,z)=>groundAt?.(x,z)??chip.ground;
  function retire(chip){chip.active=false;if(authored&&chip.slot!=null){mesh.deleteInstance(chip.slot);mesh.deleteGeometry(chip.geometryId);chip.slot=null;}}
 
- return{
+ const api={
   // Exact authored fragments borrow their material; BatchedMesh copies geometry.
   emitPiece(source,position,quaternion,velocity){
    if(disposed||!authored)return false;
@@ -60,7 +60,7 @@ export function createChips(scene,options={}){
    }
    return k;
   },
-  tick(dt){
+  update(dt){
    if(disposed)return;let count=0;
    for(const chip of chips){
     if(!chip.active)continue;chip.age+=dt;if(chip.age>=chip.life||options.isRelevant&&!options.isRelevant(chip.p)){retire(chip);continue;}
@@ -92,4 +92,6 @@ export function createChips(scene,options={}){
   setGround(fn){groundAt=fn;},
   dispose(){if(disposed)return;disposed=true;scene.remove(mesh);if(ownsGeometry)geometry.dispose();if(ownsMaterial)material.dispose();mesh.dispose();},
  };
+ api.tick=api.update;   // former name, kept for existing callers
+ return api;
 }

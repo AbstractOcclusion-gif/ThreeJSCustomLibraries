@@ -3,6 +3,7 @@ import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createChips, createParticlePrefab, createPuffs, createParticleDepthBinding, createWaterSpray, OCEAN_SHEET_FILES} from '../../src/particles/index.js';
+import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
@@ -34,13 +35,13 @@ const blitScene = new T.Scene(), blitCamera = new T.OrthographicCamera(-1, 1, 1,
 const blit = new T.Mesh(new T.PlaneGeometry(2, 2), new T.MeshBasicMaterial({map: target.texture, depthTest: false, depthWrite: false})); blitScene.add(blit);
 const fxScene = new T.Scene();
 const depth = createParticleDepthBinding({THREE: T, camera, depthTexture: target.depthTexture, viewport, softDistance: .2, waterPlane: new T.Vector4(0, 1, 0, -WATER_Y)});
-const lighting = {uniforms: {uSunCol: {value: sun.color.clone().multiplyScalar(.9)}, uFxAmbient: {value: new T.Color(.35, .42, .5)}}, direction: sun.position.clone().normalize(), ambient: new T.Color(.35, .42, .5)};
 
 async function detectSheets() {
   try { const r = await fetch(import.meta.env.BASE_URL + 'water/' + OCEAN_SHEET_FILES['mist (8x8)'], {method: 'HEAD'}); return r.ok && (r.headers.get('content-type') || '').startsWith('image') ? import.meta.env.BASE_URL + 'water/' : undefined; } catch { return undefined; }
 }
 const assetBaseUrl = await detectSheets();
-const spray = createWaterSpray({THREE: T, scene: fxScene, renderer, depth, lighting, assets: {assetBaseUrl},
+// No `lighting` passed: the spray owns its default light, which the optional environment below may drive.
+const spray = createWaterSpray({THREE: T, scene: fxScene, renderer, depth, assets: {assetBaseUrl},
   surface: {glsl: `uniform float uOceanAmplitude; float surfaceHeightAt(vec2 xz) { return ${WATER_Y.toFixed(2)}; }`, uniforms: {uOceanAmplitude: {value: 1}}},
   onDeposit: () => {}});
 
@@ -54,7 +55,15 @@ const chips = createChips(scene, {pool: 128}); chips.setGround(() => 0);
 const fragmentMaterial = new T.MeshStandardMaterial({color: 0xef9c63}), fragmentGeometry = new T.BoxGeometry(.38, .08, .28);
 const fragments = createChips(scene, {pool: 16, authored: true, material: fragmentMaterial}); fragments.setGround(() => 0);
 
-const state = {chipColor: '#e0ae88', chipCount: 28, shock: 26, sprayLoop: false, mistSize: 1, splashStrength: .6};
+const state = {chipColor: '#e0ae88', chipCount: 28, shock: 26, sprayLoop: false, mistSize: 1, splashStrength: .6, environment: false, windSpeed: 6, windHeading: 0, light: 1};
+const environment = createEnvironment(), SUN_INTENSITY = sun.intensity, HEMI_INTENSITY = hemi.intensity;
+environment.sun.direction.copy(sun.position).normalize();
+function applyEnvironment() {
+  const active = state.environment ? environment : null, light = state.environment ? state.light : 1;
+  setEnvironmentWind(environment, state.windSpeed, state.windHeading); environment.light.setScalar(state.light);
+  sun.intensity = SUN_INTENSITY * light; hemi.intensity = HEMI_INTENSITY * light;
+  puffs.setEnvironment(active); prefabs.forEach(p => p.setEnvironment(active)); spray.setEnvironment(environment);
+}
 const fx = {
   impactDust: () => { stop(); dust.start(); }, campfire: () => { stop(); fire.start(); }, smokePlume: () => { stop(); smoke.start(); }, stopEmitters: stop,
   mortar: () => puffs.mortar(origin, 1.3),
@@ -66,7 +75,7 @@ const fx = {
   clear: () => { stop(); prefabs.forEach(p => p.clear()); puffs.clear(); chips.clear(); fragments.clear(); spray.clear(); },
 };
 const gui = createBenchPanel('Particles');
-particleControls(gui, {state, fx, depth, spray});
+particleControls(gui, {state, fx, depth, spray, applyEnvironment});
 
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); target.dispose(); target = makeTarget(); blit.material.map = target.texture; depth.uniforms.tFxDepth.value = target.depthTexture; viewport.set(target.width, target.height); }
 addEventListener('resize', resize);
@@ -74,7 +83,7 @@ let previous = null, loopTimer = 0, lastUI = 0;
 renderer.setAnimationLoop(now => {
   const dt = previous === null ? 0 : Math.min((now - previous) / 1000, .05); previous = now; controls.update();
   if (state.sprayLoop) { loopTimer -= dt; if (loopTimer <= 0) { loopTimer = .35; fx.mist(); if (Math.random() < .5) fx.splash(); } }
-  puffs.tick(dt); prefabs.forEach(p => p.tick(dt)); chips.tick(dt); fragments.tick(dt);
+  puffs.update(dt); prefabs.forEach(p => p.update(dt)); chips.update(dt); fragments.update(dt);
   renderer.setRenderTarget(target); renderer.render(scene, camera);
   renderer.setRenderTarget(null); renderer.render(blitScene, blitCamera);
   spray.update(dt); renderer.autoClear = false; renderer.render(fxScene, camera); renderer.autoClear = true;

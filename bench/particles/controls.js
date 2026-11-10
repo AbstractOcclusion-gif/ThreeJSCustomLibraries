@@ -12,9 +12,20 @@ export function sprayControls(gui, {spray, depth, state, fx}) {
   return folder;
 }
 
-export function particleControls(gui, {state, fx, depth, spray}) {
+// Optional environment (core/environment.js): off = the modules run standalone, exactly as before.
+export function environmentControls(gui, {state, apply}) {
+  const folder = gui.addFolder('Environment (optional)');
+  folder.add(state, 'environment').name('react to environment').onChange(apply);
+  folder.add(state, 'windSpeed', 0, 20, .5).name('wind · m/s').onChange(apply);
+  folder.add(state, 'windHeading', 0, 360, 5).name('wind heading · °').onChange(apply);
+  folder.add(state, 'light', 0, 1, .01).name('scene light (1 = noon)').onChange(apply);
+  return folder;
+}
+
+export function particleControls(gui, {state, fx, depth, spray, applyEnvironment}) {
   const f1 = gui.addFolder('Puffs & prefabs'); for (const k of ['impactDust', 'campfire', 'smokePlume', 'stopEmitters', 'mortar', 'sparks']) f1.add(fx, k);
   const f2 = gui.addFolder('Chips & fragments'); f2.addColor(state, 'chipColor'); f2.add(state, 'chipCount', 1, 120, 1); f2.add(state, 'shock', 4, 60, 1); f2.add(fx, 'chips'); f2.add(fx, 'fragments');
   sprayControls(gui, {spray, depth, state, fx});
+  if (applyEnvironment) environmentControls(gui, {state, apply: applyEnvironment});
   gui.add(fx, 'clear');
 }

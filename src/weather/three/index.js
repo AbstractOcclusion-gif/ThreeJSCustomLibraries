@@ -6,6 +6,7 @@ import {createSunScattering} from './sun-scattering.js';
 import {createLightning} from './lightning.js';
 import {createCloudShadows} from './cloud-shadows.js';
 import {resolveVisualConfig} from './settings.js';
+import {createEnvironment,setEnvironmentWind} from '../../core/environment.js';
 export {SKY_FIELDS,APPEARANCE_FIELDS,PRECIPITATION_FIELDS,resolveVisualConfig} from './settings.js';
 
 export {DYNAMIC_SKY_DEFAULTS,CLOUD_QUALITY};
@@ -28,6 +29,8 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  const uniforms=createSkyUniforms(sunDir),dome=createSkyDome(uniforms,{radius:100,defines:skyDefines({dynamic:true,celestial:true}),atFarPlane:true});group.add(dome);
  const fogObject=new THREE.FogExp2();if(look.fog)scene.fog=fogObject;
  let ownedEnvironment=null,disposed=false;
+ // Shared contract (core/environment.js) the other modules may read; refreshed by update(). wind.gust is left to the host.
+ const shared=createEnvironment();
  const defaultEnvironment={active:false,setDynamic(texture){ownedEnvironment=texture;scene.environment=texture;this.active=true;},setBlend(){},clear(){if(scene.environment===ownedEnvironment)scene.environment=saved.environment;ownedEnvironment=null;this.active=false;}};
  const dynamic=new DynamicSky(settings,uniforms,{renderer,camera:{position:worldPosition},environment:environment??defaultEnvironment,assetBaseUrl:assets,fetch,loadTexture});
  const cloudShadows=createCloudShadows(dynamic.cloudUniforms);
@@ -55,7 +58,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
   flashRemaining=.18;
   groundStrike=true;
  }
- const view={group,settings,uniforms,sun,hemi,sky:dynamic,ready:dynamic.readyPromise,get precipitationCount(){return rain?.instanceCount??0;},
+ const view={group,settings,uniforms,sun,hemi,environment:shared,sky:dynamic,ready:dynamic.readyPromise,get precipitationCount(){return rain?.instanceCount??0;},
   get lightningFlash(){return flashStrength;},
   addCloudShadowReceiver(material){
    if(disposed)throw Error('Weather view is disposed');
@@ -103,6 +106,9 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    const ambientLight=(.3+.7*w.sunlight)*(d.settings.nightLight+(1-d.settings.nightLight)*d.daylight);
    hemi.intensity=look.hemiIntensity*ambientLight;
    fogObject.color.set(look.fogColor).multiply(lightTint).multiplyScalar(ambientLight);
+   setEnvironmentWind(shared,w.wind,w.windHeading);shared.sun.direction.copy(lightDirection);shared.sun.color.copy(sun.color).multiplyScalar(sun.intensity);
+   shared.ambient.sky.copy(hemi.color).multiplyScalar(hemi.intensity);shared.ambient.ground.copy(hemi.groundColor).multiplyScalar(hemi.intensity);
+   shared.light.copy(lightTint).multiplyScalar(ambientLight);shared.daylight=d.daylight;shared.rain=w.rain;shared.snow=w.snow;
    if(look.fog)fogObject.density=Math.sqrt(-Math.log(.02))*w.density/(w.visibility*look.visibilityScale);
    if(look.heightFog){
     bankTime+=dt;

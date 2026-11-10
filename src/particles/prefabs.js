@@ -6,6 +6,7 @@ const sheets = {
   plume: {url: new URL('../../assets/particles/smoke-flipbook.png', import.meta.url).href, cols: 4, rows: 4, animate: true, billow: true},
   impact: {url: new URL('../../assets/particles/dust-flipbook.png', import.meta.url).href, cols: 4, rows: 4, animate: true},
 };
+const FLAME_WIND = 0.4;   // flames and embers lean with the wind; they are not carried like smoke
 const random = (min, max) => min + Math.random() * (max - min);
 
 export async function createParticlePrefab(scene, type, {position, size = 1, ...options} = {}) {
@@ -55,8 +56,9 @@ export async function createParticlePrefab(scene, type, {position, size = 1, ...
     }
   }
 
-  return {
+  const api = {
     position: origin,
+    setEnvironment(environment) { puffs.setEnvironment(environment); },
     get active() { return puffs.active; },
     start() {
       if (type === 'dust') impactDust();
@@ -65,9 +67,9 @@ export async function createParticlePrefab(scene, type, {position, size = 1, ...
     stop() { running = false; },
     clear() { puffs.clear(); },
     dispose() { running = false; puffs.clear(); puffs.dispose(); },
-    tick(dt) {
+    update(dt) {
       if (!Number.isFinite(dt) || dt < 0) return;
-      puffs.tick(dt);
+      puffs.update(dt);
       if (!running) return;
       countdown -= dt;
       if (countdown > 0) return;
@@ -80,12 +82,14 @@ export async function createParticlePrefab(scene, type, {position, size = 1, ...
       emit('flame', 0.11, 0.31, random(0.75, 1.3), random(0.82, 1.18),
         random(0.31, 0.47), 0xff9939,
         {gravity: -0.3 * size, grow: -0.4, opacity: 0.96, fadeIn: 0.045,
-          aspect: 0.63, rotation: random(-0.16, 0.16)});
+          aspect: 0.63, rotation: random(-0.16, 0.16), wind: FLAME_WIND});
       if (burst % 2 === 0) {
         emit('dust-soft', 0.23, 0.53, random(1.9, 2.7), random(0.045, 0.075), random(0.45, 0.85),
-          0xffb240, {gravity: 0.55 * size, grow: -0.5, opacity: 0.8, blending: AdditiveBlending});
+          0xffb240, {gravity: 0.55 * size, grow: -0.5, opacity: 0.8, blending: AdditiveBlending, wind: FLAME_WIND});
       }
       if (burst % 3 === 0) puff(true);
     },
   };
+  api.tick = api.update;   // former name, kept for existing callers
+  return api;
 }

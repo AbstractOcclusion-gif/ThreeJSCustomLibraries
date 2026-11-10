@@ -4,11 +4,20 @@ import {createOceanSplash} from './ocean-splash.js';
 
 // Airborne water effects (mist sprites + ballistic droplets). The caller schedules the target scene after its composite.
 // assets: {assetBaseUrl, sheets, dropletUrl, loadTexture} — all optional; without them the generated soft disc is used.
+// lighting: {uniforms: {uSunCol, uFxAmbient}, direction, ambient} - optional; without it the spray owns a clear-noon set
+// that setEnvironment() (core/environment.js contract) keeps in step with the scene light.
+const SPRAY_SUN = [1, .96, .9], SPRAY_AMBIENT = [.35, .45, .55], SPRAY_SUN_DIRECTION = [.3, .8, .5];
 export function createWaterSpray({
  THREE, scene, renderer, depth, surface, lighting, onDeposit = null, assets = {},
 }) {
- if (!THREE || !scene || !renderer || !depth || !surface || !lighting) {
-  throw Error('Water spray needs Three.js, a target scene, renderer, depth, surface and lighting bindings');
+ if (!THREE || !scene || !renderer || !depth || !surface) {
+  throw Error('Water spray needs Three.js, a target scene, renderer, depth and surface bindings');
+ }
+ const ownsLighting = !lighting;
+ if (ownsLighting) {
+  const ambient = new THREE.Color(...SPRAY_AMBIENT);
+  lighting = {uniforms: {uSunCol: {value: new THREE.Color(...SPRAY_SUN)}, uFxAmbient: {value: ambient}},
+   direction: new THREE.Vector3(...SPRAY_SUN_DIRECTION).normalize(), ambient};
  }
  const sheets = createOceanSheets({THREE, assetBaseUrl: assets.assetBaseUrl, sheets: assets.sheets, loadTexture: assets.loadTexture});
  const mistSheet = sheets.SHEETS['mist (8x8)'] ? 'mist (8x8)' : SOFT_DISC;
@@ -36,6 +45,13 @@ export function createWaterSpray({
   },
   emitSplash(...args) {
    if (!disposed) splash.emitSplash(...args);
+  },
+  // Follow a shared environment. Only applies to the spray's own lighting: a host that passed `lighting` drives it itself.
+  setEnvironment(environment) {
+   if (disposed || !ownsLighting || !environment) return;
+   lighting.uniforms.uSunCol.value.setRGB(...SPRAY_SUN).multiply(environment.light);
+   lighting.uniforms.uFxAmbient.value.setRGB(...SPRAY_AMBIENT).multiply(environment.light);
+   lighting.direction.copy(environment.sun.direction);
   },
   update(dt, simWindow = null) {
    if (disposed) return;
