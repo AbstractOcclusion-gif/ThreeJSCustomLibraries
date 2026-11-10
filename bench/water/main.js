@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
-import {createChannel, createChannelSurface, createRipples, createFlowBake, skyFromWeather} from '../../src/water/index.js';
-import {createSurfaceWeather, createWeatherSurfaceMaterial} from '../../src/surface/index.js';
+import {createChannel, createChannelSurface, createRipples, createFlowBake, proceduralSky} from '../../src/water/index.js';
+import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize} from '../kit/page.js';
-import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
+import {stageControls} from '../kit/controls.js';
 import {channelControls, inlandOpticsDefaults} from './controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
@@ -15,16 +15,16 @@ const renderer = benchRenderer();
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, .2, 800);
 camera.position.set(46, 39, 63);
 const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.minDistance = 7; controls.maxDistance = 135; controls.maxPolarAngle = Math.PI * .485; controls.target.set(4, 0, 0); controls.update();
-const weather = await createBenchWeather({scene, renderer, camera, initial: 'cloudy 1', hour: 15, precipitation: {count: 420, radius: 40, height: 44, floorHeight: -2}});
+// Standalone: the basic stage gives the sun, light and wind heading; the water draws its sky through the procedural sky hook.
+const stage = createBasicStage({scene, ground: false});
+const sky = proceduralSky();
 
 const ripples = createRipples();
 const flow = createFlowBake();
 const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
-const water = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view), ripples, obstacles, flow});
-const bankWeather = createSurfaceWeather();
-const surfaceOptions = {weather: bankWeather, puddles: 0};
-const bed = new THREE.Mesh(new THREE.BufferGeometry(), createWeatherSurfaceMaterial({vertexColors: true, roughness: .94}, surfaceOptions)); scene.add(bed);
-const stone = new THREE.IcosahedronGeometry(1, 1), stoneMaterial = createWeatherSurfaceMaterial({color: 0x736754, roughness: .95, flatShading: true}, surfaceOptions);
+const water = createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow});
+const bed = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({vertexColors: true, roughness: .94})); scene.add(bed);
+const stone = new THREE.IcosahedronGeometry(1, 1), stoneMaterial = new THREE.MeshStandardMaterial({color: 0x736754, roughness: .95, flatShading: true});
 const rocks = new THREE.InstancedMesh(stone, stoneMaterial, 28); scene.add(rocks);
 const movableRocks = obstacles.map(() => { const m = new THREE.Mesh(stone, stoneMaterial); m.visible = false; scene.add(m); return m; });
 const markers = new THREE.InstancedMesh(new THREE.SphereGeometry(.22, 10, 6), new THREE.MeshBasicMaterial({color: 0xff9e35}), 22); markers.frustumCulled = false; scene.add(markers);
@@ -77,8 +77,8 @@ function toggleUnderwater() {
 rebuild();
 
 const gui = createBenchPanel('Channel water');
-const wf = mountWeatherControls(weather);
-const banks = channelControls(gui, {settings: P, bankWeather, rebuild, toggleUnderwater, bake,
+const stageUI = stageControls(gui, stage, {onChange: () => sky.setEnvironment(stage.environment)}); stageUI.apply();
+channelControls(gui, {settings: P, rebuild, toggleUnderwater, bake,
   setInteraction(mode) { rippleGesture.cancel(); controls.enabled = !diving && mode === 'orbit'; },
   clearRocks() { for (const rock of obstacles) rock.set(0, 0, 0, 0); syncObstacles(); },
   bundled: import.meta.glob('../../presets/water/*.json'),
@@ -108,8 +108,7 @@ renderer.setAnimationLoop(now => {
   if (document.hidden) { last = null; return; }
   const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
   flowTime += dt * P.water.speed; waveTime += dt * P.waves.speed;
-  if (!diving) controls.update(); weather.system.update(dt); weather.view.update(dt);
-  if (!weather.system.paused) bankWeather.update(dt, banks.state === 'follow weather' ? weather.system.weather : null);
+  if (!diving) controls.update(); stage.update(camera);
   markers.visible = P.interact.markers;
   if (markers.visible) {
     pose.rotation.set(0, 0, 0); pose.scale.setScalar(1);
@@ -122,14 +121,14 @@ renderer.setAnimationLoop(now => {
   }
   rippleGesture.update(dt);
   ripples.update(dt);
-  const fog = scene.fog; if (diving) { underwaterFog.color.set(0x336c65).multiplyScalar(.22 + .78 * weather.system.day.daylight); scene.fog = underwaterFog; }
+  const fog = scene.fog; if (diving) { underwaterFog.color.set(0x336c65).multiplyScalar(.22 + .78 * stage.environment.daylight); scene.fog = underwaterFog; }
   try {
     water.render(flowTime, {...P.water,
-      waveTime, waveHeight: P.waves.height, wavelength: P.waves.wavelength, waveDirection: THREE.MathUtils.degToRad(weather.system.weather.windHeading + P.waves.direction), waveSpread: THREE.MathUtils.degToRad(P.waves.spread)});
-    weather.view.render();
+      waveTime, waveHeight: P.waves.height, wavelength: P.waves.wavelength, waveDirection: THREE.MathUtils.degToRad(stageUI.state.windHeading + P.waves.direction), waveSpread: THREE.MathUtils.degToRad(P.waves.spread)});
+    renderer.render(scene, camera);
   } finally { scene.fog = fog; }
-  if (now - lastUI > 250) { lastUI = now; wf.sync(); $('status').textContent = (weather.assetBaseUrl === 'bundled' ? 'Bundled sky textures\n' : '') + weather.system.weather.dominant + ' · ' + weather.hourLabel(weather.system.day.hour) + '\n' + bakeStatus + (ripples.active ? '\nripples active' : ''); }
+  if (now - lastUI > 250) { lastUI = now; $('status').textContent = bakeStatus + (ripples.active ? '\nripples active' : ''); }
 });
 document.body.dataset.ready = 'true';
-window.waterBench = {water, ripples, flow, obstacles, weather, scene, camera, renderer, bake, get channel() { return channel; }};
+window.waterBench = {water, ripples, flow, obstacles, stage, scene, camera, renderer, bake, get channel() { return channel; }};
 addEventListener('pagehide', event => { if (!event.persisted) rippleGesture.dispose(); });

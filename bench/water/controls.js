@@ -105,11 +105,7 @@ export function inlandWaterControls(folder, {settings, freeze, toggleUnderwater,
 }
 
 
-export function channelControls(gui, {settings: P, bankWeather, rebuild, setInteraction, clearRocks, toggleUnderwater, bake, bundled}) {
-  const banks = {state: 'follow weather'};
-  gui.add(banks, 'state', ['follow weather', 'dry', 'wet', 'snow']).name('Bank surface').onChange(state => {
-    if (state !== 'follow weather') bankWeather.set({wetness: Number(state === 'wet'), snow: Number(state === 'snow')});
-  });
+export function channelControls(gui, {settings: P, rebuild, setInteraction, clearRocks, toggleUnderwater, bake, bundled}) {
   const fc = gui.addFolder('Channel'); fc.add(P.channel, 'preset', ['stream', 'river']).onChange(rebuild); fc.add(P.channel, 'width', .6, 1.6, .05).onChange(rebuild); fc.add(P.channel, 'drop', 0, 6, .1).name('drop · m').onChange(rebuild); fc.add(P.channel, 'depth', .4, 2, .05).onChange(rebuild);
   inlandWaterControls(gui.addFolder('Water'), {settings: P.water, toggleUnderwater});
   const fv = gui.addFolder('Wind waves'); fv.add(P.waves, 'height', 0, .16, .005); fv.add(P.waves, 'wavelength', .35, 4, .05); fv.add(P.waves, 'direction', -180, 180, 5).name('direction vs wind °'); fv.add(P.waves, 'spread', 0, 90, 5); fv.add(P.waves, 'speed', 0, 2, .05); fv.close();
@@ -119,5 +115,4 @@ export function channelControls(gui, {settings: P, bankWeather, rebuild, setInte
   presetsFolder(gui, {bundled, name: 'channel-water',
     getState: () => ({schema: 'three-kit.channel-water', version: 1, channel: {...P.channel}, water: {...P.water}, waves: {...P.waves}}),
     apply: p => { Object.assign(P.channel, p.channel); Object.assign(P.water, p.water); Object.assign(P.waves, p.waves); rebuild(); gui.controllersRecursive().forEach(c => c.updateDisplay()); }});
-  return banks;
 }

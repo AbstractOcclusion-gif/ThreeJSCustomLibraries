@@ -5,14 +5,14 @@
 // porous-wet term), and gets a mirror-flat sheen; WHERE it is wet comes from the band above the live surface and the swash's wet line.
 import * as THREE from 'three';
 import {createLighting} from '../core/lighting.js';
-import {valueNoise} from './terrain-noise.js';
+import {valueNoise} from '../core/value-noise.js';
 
 export const TERRAIN_DEFAULTS = Object.freeze({ on: true, centerX: 0, centerZ: 220, peakHeight: 18, hillRadius: 70, beachRadius: 85, slopeEndRadius: 330, abyssDepth: 100, noiseAmp: 5, noiseScale: 55, seed: 7 });
 const ISLAND_EXTENT = 400, CELL = 2, ABYSS_EXTENT = 20000;   // island mesh half-size (m), grid cell (m), abyss plane half-size (m)
 // WaterTerrain.shader wetness defaults: _WetStrength 1, _WetBandHeight .25, _WetSwashStrength 1, _BeachWetDarken .85, _BeachWetSmoothness .85.
 export const WET_DEFAULTS = Object.freeze({ strength: 1, bandHeight: 0.25, swashStrength: 1, darken: 0.85, smoothness: 0.85 });
 
-// 5-octave fbm over the shared terrain value noise (terrain-noise.js), deterministic per seed
+// 5-octave fbm over the shared terrain value noise (core/value-noise.js), deterministic per seed
 function makeNoise(seed) {
   const value = valueNoise(seed);
   return (x, y) => { let a = 0, w = 0.5, f = 1; for (let o = 0; o < 5; o++) { a += value(x * f, y * f) * w; w *= 0.5; f *= 2.1; } return a; };

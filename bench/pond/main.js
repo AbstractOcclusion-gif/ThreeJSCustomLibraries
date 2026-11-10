@@ -9,7 +9,7 @@ import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {detectAssets} from '../kit/assets.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
-import {valueNoise} from '../../src/terrain/terrain-noise.js';
+import {valueNoise} from '../../src/core/value-noise.js';
 import {sprayControls} from '../particles/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';

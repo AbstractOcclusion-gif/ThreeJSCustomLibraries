@@ -1,5 +1,5 @@
-// Existing seeded terrain noise, shared by geometry and paint. Keep the integer
-// hash unchanged so paint improvements cannot move the authored course.
+// Seeded 2D value noise in [-1, 1], shared by terrain geometry and paint, bench layouts and plant patches. Keep the
+// integer hash unchanged so paint improvements cannot move an authored course.
 export function valueNoise(seed){
  const hash=(i,j)=>{let h=Math.imul(i,374761393)+Math.imul(j,668265263)+Math.imul(seed,982451653)|0;h=Math.imul(h^h>>>13,1274126177);return((h^h>>>16)>>>0)/4294967296*2-1;};
  const fade=t=>t*t*(3-2*t);

@@ -3,7 +3,7 @@ import {createWeatherSurfaceMaterial} from '../surface/index.js';
 import {TERRAIN_LAYERS} from './terrain-rules.js';
 export {createTerrainField} from './field.js';
 export {TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
-export {valueNoise} from './terrain-noise.js';
+export {valueNoise} from '../core/value-noise.js';
 export {OceanCoastTerrain, TERRAIN_DEFAULTS as OCEAN_COAST_DEFAULTS, WET_DEFAULTS as OCEAN_COAST_WET_DEFAULTS} from './coast.js';
 
 export function createTerrainAppearance() {

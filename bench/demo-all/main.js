@@ -4,7 +4,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS} from '../../src/terrain/index.js';
 import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
 import {seededRandom} from '../../src/core/hash.js';
-import {valueNoise} from '../../src/terrain/terrain-noise.js';
+import {valueNoise} from '../../src/core/value-noise.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createChannelSurface, createFlowBake, createFreezeTexture, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';

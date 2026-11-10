@@ -1,4 +1,4 @@
-import {valueNoise} from './terrain-noise.js';
+import {valueNoise} from '../core/value-noise.js';
 const number=(label,min,max,step)=>({label,min,max,step});
 export const TERRAIN_PAINT_DEFAULTS=Object.freeze({
  rockSlope:1,wallRock:1.15,snowLine:150,snowJitter:10,mudBelow:3.5,mudFromRunout:true,

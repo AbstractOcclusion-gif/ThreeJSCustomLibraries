@@ -1,12 +1,13 @@
-import {Body, Box, Cylinder, Sphere, Vec3, World} from 'cannon-es';
+import {Body, Box, Cylinder, Plane, Sphere, Vec3, World} from 'cannon-es';
 import {BoxGeometry, Mesh, MeshStandardMaterial, SphereGeometry} from 'three';
-import {createTerrainCollider} from '../terrain/heightfield.js';
 
-export function createRollingBodies({scene, field, onContact}) {
+// Balls and boxes rolling over a flat ground at y = 0 (the basic stage); onContact reports each ground contact for the grass.
+export function createRollingBodies({scene, onContact}) {
   const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
   world.defaultContactMaterial.friction = .35;
   world.defaultContactMaterial.restitution = .38;
-  const ground = createTerrainCollider(field);
+  const ground = new Body({mass: 0, shape: new Plane()});
+  ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);   // Cannon's plane faces +Z: turn it to face up
   world.addBody(ground);
   const sphereGeometry = new SphereGeometry(1, 24, 16);
   const boxGeometry = new BoxGeometry(2, 2, 2);
@@ -41,7 +42,6 @@ export function createRollingBodies({scene, field, onContact}) {
       for (const hit of hits) {
         const groundFirst = hit.bi === ground;
         const offset = groundFirst ? hit.ri : hit.rj;
-        // Cannon can report a convex proxy for a box on a heightfield.
         const shape = body.shapes.length === 1 ? body.shapes[0] : groundFirst ? hit.sj : hit.si;
         const to = {x: ground.position.x + offset.x, z: ground.position.z + offset.z};
         onContact({x: to.x + dx, z: to.z + dz}, to, shape);
@@ -72,7 +72,7 @@ export function createRollingBodies({scene, field, onContact}) {
         const top = h * (1 - crown.depth + crown.depth * trunk.topIntoCrown);
         const bottom = -h * trunk.belowGround;
         const shape = new Cylinder(r * trunk.radiusTop, r * trunk.radiusBottom, top - bottom, trunk.sides);
-        const body = new Body({mass: 0, shape, position: new Vec3(x, field.heightAt(x, z) + (top + bottom) * .5, z)});
+        const body = new Body({mass: 0, shape, position: new Vec3(x, (top + bottom) * .5, z)});
         trunks.push(body);
         world.addBody(body);
       }
@@ -81,7 +81,7 @@ export function createRollingBodies({scene, field, onContact}) {
       const shape = box ? new Box(new Vec3(radius, radius * .65, radius)) : new Sphere(radius);
       const body = new Body({
         mass: 22, shape, linearDamping: .14, angularDamping: .12,
-        position: new Vec3(x, field.heightAt(x, z) + radius + .08, z),
+        position: new Vec3(x, radius + .08, z),
         velocity: new Vec3(-speed, 0, 0), angularVelocity: new Vec3(0, 0, box ? 0 : speed / radius),
       });
       const mesh = new Mesh(box ? boxGeometry : sphereGeometry, material);
