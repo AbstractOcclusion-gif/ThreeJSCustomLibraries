@@ -38,6 +38,7 @@
     "./destruction": "./src/destruction/index.js",
     "./destruction/three": "./src/destruction/three.js",
     "./camera": "./src/camera/index.js",
+    "./camera/panel.css": "./src/camera/panel.css",
     "./presets/*": "./presets/*",
     "./src/*": "./src/*"
   },

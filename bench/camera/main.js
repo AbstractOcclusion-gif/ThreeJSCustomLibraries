@@ -4,6 +4,7 @@ import {createReplay} from '../../src/camera/replay.js';
 import {createCameraPost} from '../../src/camera/post.js';
 import {createCameraCollision} from '../../src/camera/collision.js';
 import {createCameraPanel} from '../../src/camera/panel.js';
+import '../../src/camera/panel.css';
 import '../ui-demo.js';
 import {bindResize} from '../kit/page.js';
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;document.body.append(renderer.domElement);

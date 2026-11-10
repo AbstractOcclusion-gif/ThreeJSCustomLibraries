@@ -1,5 +1,5 @@
-import './panel.css';
-// Optional DOM adapter: shot select, bullet time, replay controls, post settings. Styles in panel.css.
+// Optional DOM adapter: shot select, bullet time, replay controls, post settings. Styles in panel.css: the host loads them
+// (three-kit/camera/panel.css), as with ui/theme.css, so this file stays plain ESM that runs without a bundler.
 export function createCameraPanel({director,replay,post,onReplay,onExit,onSeek=()=>{},onShot=()=>{},shots=['auto','side','orbit'],floating=false,parent=document.body}){
  const root=document.createElement('details');root.className='camera-panel'+(floating?' camera-floating':'');const summary=document.createElement('summary');summary.textContent='◉ CAMERA';root.append(summary);
  const content=document.createElement('div');content.className='camera-content';root.append(content);
