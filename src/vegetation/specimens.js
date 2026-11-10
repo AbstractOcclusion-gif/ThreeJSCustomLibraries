@@ -108,7 +108,8 @@ export function createSpecimens({scene, parts, atlas, atlasRects, placements, pr
       uniforms.plantTime.value = 0;
       uniforms.plantSweep.value.set(0, 0, 0, 1);
     },
-    update(dt, {windX, windZ, gust, sweep}) {
+    // Wind comes from windX/windZ/gust, else from an optional `environment` (core/environment.js), else calm.
+    update(dt, {environment, windX = environment?.wind.x ?? 0, windZ = environment?.wind.z ?? 0, gust = environment?.wind.gust ?? 0, sweep} = {}) {
       uniforms.plantTime.value += dt;
       uniforms.plantWind.value.set(windX, windZ).multiplyScalar(0.055).clampLength(0, 0.7);
       uniforms.plantGust.value = gust;

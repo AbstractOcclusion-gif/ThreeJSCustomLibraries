@@ -414,6 +414,7 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
   if (!clipmap) mesh.frustumCulled = false;
   const state = {...OCEAN_DEFAULTS, ...settings};
   let shoreSettings, surfSettings, shoreHeading, fftTime = 0;
+  let environment = null;   // optional core/environment.js contract: supplies the wind update() was not given
   function syncSurf(heading) {
     if (!surfSettings || heading === shoreHeading) return;
     const wavelength = applySurf(fft.surf, surfSettings, fft.sea.swellHeight, THREE.MathUtils.degToRad(heading), shoreSettings);
@@ -552,7 +553,13 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
       syncSurf(state.heading);
     },
     // windSpeed (m/s) optionally sharpens chop like the weather-driven demo did.
-    update(dt, windSpeed, cameraPosition, windHeading = state.heading, wakeFocus = cameraPosition) {
+    setEnvironment(next) { environment = next ?? null; },
+    update(dt, windSpeed, cameraPosition, windHeading, wakeFocus = cameraPosition) {
+      if (environment) {
+        windSpeed ??= environment.wind.speed;
+        if (windHeading === undefined && environment.wind.speed > 0) windHeading = THREE.MathUtils.radToDeg(Math.atan2(environment.wind.z, environment.wind.x));
+      }
+      windHeading ??= state.heading;
       uniforms.clock.value += dt * state.waveSpeed;
       if (capture) uniforms.uOceanSceneReady.value = false;
       uniforms.chop.value = state.chop * (windSpeed ? .75 + .045 * windSpeed : 1);

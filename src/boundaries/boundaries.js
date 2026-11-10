@@ -68,6 +68,7 @@ export function createBoundaries({scene, assets = {}, lighting, sampleGround = (
       return this;
     },
     setHedge(options) { Object.assign(hedgeOptions, options); },
+    setEnvironment(environment) { hedges?.setEnvironment(environment); },   // optional: hedges sway and light with it
     update(dt) { hedges?.update(dt); },
     clear() { for (const child of [...view.children]) if (child !== hedges?.group) view.remove(child); for (const g of wires) g.dispose(); wires.clear(); hedges?.clear(); },
     dispose() { this.clear(); hedges?.dispose(); wireMaterial.dispose(); pole.traverse(o => { o.geometry?.dispose(); o.material?.dispose?.(); }); for (const a of Object.values(resolved)) a.model?.traverse(o => { o.geometry?.dispose(); o.material?.dispose?.(); }); for (const o of owned) o.dispose(); scene.remove(view); },

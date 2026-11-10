@@ -69,3 +69,11 @@ export function syncLighting(uniforms, {sun, hemi, fog, fogRange} = {}) {
     } else uniforms.uFogRange.value.set(fog.near, fog.far);
   } else if (fogRange) uniforms.uFogRange.value.set(fogRange[0], fogRange[1]);
 }
+
+// Same, from the shared environment (core/environment.js) instead of Three lights. Fog is left to the scene.
+export function syncLightingFromEnvironment(uniforms, environment) {
+  uniforms.uSunDir.value.copy(environment.sun.direction);
+  uniforms.uSunColor.value.copy(environment.sun.color);
+  uniforms.uHemiSky.value.copy(environment.ambient.sky);
+  uniforms.uHemiGround.value.copy(environment.ambient.ground);
+}

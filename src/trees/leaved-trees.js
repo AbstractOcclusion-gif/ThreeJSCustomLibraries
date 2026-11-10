@@ -5,9 +5,12 @@ import {hash2} from '../core/hash.js';
 import {leavedTreeGeometry} from './leaved-geometry.js';
 import {resolveProfile} from './profiles.js';
 import {createLeavedMaterial, meanLeafLuminance} from './leaved-material.js';
-import {createVegetationAtlas, FREE_ATLAS_RECTS} from '../vegetation/free-assets.js';
+import {createLighting, syncLightingFromEnvironment} from '../core/lighting.js';
+import {createVegetationAtlas, FREE_ATLAS_RECTS} from '../core/vegetation-atlas.js';
 
 const SCALE_RANGE = [.35, 2.2];
+// Environment wind (m/s) to sway strength: per m/s, extra per m/s at full gust, and the cap.
+const WIND_SWAY = Object.freeze({perSpeed: .08, perGust: .1, max: 3});
 
 export class LeavedTrees {
   /**
@@ -20,6 +23,8 @@ export class LeavedTrees {
     this.scene = scene; this.cellSize = cellSize; this.sampleGround = sampleGround;
     this.group = new THREE.Group(); this.group.name = 'leaved-trees'; scene.add(this.group);
     this.meshes = []; this.items = []; this.scaleMultiplier = 1;
+    // Without a `lighting` hook the trees own a default one, which setEnvironment() may drive.
+    this.ownsLighting = !lighting; lighting ??= createLighting(); this.environment = null;
     this.ownsLeaf = !leafTexture;
     this.leafTexture = leafTexture ?? createVegetationAtlas();
     this.leafRect = leafRect ?? (leafTexture ? [0, 0, 1, 1] : FREE_ATLAS_RECTS.leaf);
@@ -64,7 +69,15 @@ export class LeavedTrees {
     }
   }
 
-  update(dt) { this.material.uniforms.uTime.value += dt; }
+  // Optional shared environment (core/environment.js), held by reference: wind sets the sway, and its light drives the
+  // trees' own lighting. A host that passed its own `lighting` hook keeps driving that itself. null detaches.
+  setEnvironment(environment) { this.environment = environment ?? null; }
+  update(dt) {
+    this.material.uniforms.uTime.value += dt;
+    const environment = this.environment; if (!environment) return;
+    this.setWind(Math.min(WIND_SWAY.max, environment.wind.speed * (WIND_SWAY.perSpeed + environment.wind.gust * WIND_SWAY.perGust)));
+    if (this.ownsLighting) syncLightingFromEnvironment(this.material.uniforms, environment);
+  }
   setWind(strength) { this.material.uniforms.uWind.value = strength; }
   setNearHole(centre, inner, outer) { this.material.uniforms.uNearCentre.value.copy(centre); this.material.uniforms.uNearRadius.value.set(inner, outer); }
   get count() { return this.meshes.reduce((n, m) => n + m.count, 0); }

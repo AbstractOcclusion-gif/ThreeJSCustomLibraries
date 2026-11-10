@@ -13,12 +13,14 @@ export function sprayControls(gui, {spray, depth, state, fx}) {
 }
 
 // Optional environment (core/environment.js): off = the modules run standalone, exactly as before.
+// state: {environment, windSpeed, windHeading, gust?, light?} - the gust and light sliders appear only when the state has them.
 export function environmentControls(gui, {state, apply}) {
   const folder = gui.addFolder('Environment (optional)');
   folder.add(state, 'environment').name('react to environment').onChange(apply);
   folder.add(state, 'windSpeed', 0, 20, .5).name('wind · m/s').onChange(apply);
   folder.add(state, 'windHeading', 0, 360, 5).name('wind heading · °').onChange(apply);
-  folder.add(state, 'light', 0, 1, .01).name('scene light (1 = noon)').onChange(apply);
+  if ('gust' in state) folder.add(state, 'gust', 0, 1, .01).name('gust').onChange(apply);
+  if ('light' in state) folder.add(state, 'light', 0, 1, .01).name('scene light (1 = noon)').onChange(apply);
   return folder;
 }
 

@@ -61,3 +61,19 @@ export function benchRenderer() {
   renderer.debug.onShaderError = (gl, program, v, f) => { const msg = 'Shader error: ' + gl.getProgramInfoLog(program) + ' ' + gl.getShaderInfoLog(v) + ' ' + gl.getShaderInfoLog(f); if (error) { error.hidden = false; error.textContent = msg; } console.error(msg); };
   return renderer;
 }
+
+// Controls for a basic stage (src/stage): the standalone environment every module demo can react to.
+export function stageControls(gui, stage, {wind = true, onChange = () => {}} = {}) {
+  const folder = gui.addFolder('Stage · sun, light, wind');
+  const state = {elevation: 50, azimuth: 35, light: 1, windSpeed: 0, windHeading: 0, gust: 0};
+  const apply = () => { stage.setSun(state.elevation, state.azimuth).setLight(state.light).setWind(state.windSpeed, state.windHeading, state.gust); onChange(state); };
+  folder.add(state, 'elevation', 2, 88, 1).name('sun elevation · °').onChange(apply);
+  folder.add(state, 'azimuth', 0, 360, 5).name('sun azimuth · °').onChange(apply);
+  folder.add(state, 'light', 0, 1, .01).name('light (1 = noon)').onChange(apply);
+  if (wind) {
+    folder.add(state, 'windSpeed', 0, 20, .5).name('wind · m/s').onChange(apply);
+    folder.add(state, 'windHeading', 0, 360, 5).name('wind heading · °').onChange(apply);
+    folder.add(state, 'gust', 0, 1, .01).name('gust').onChange(apply);
+  }
+  return {folder, state, apply};
+}

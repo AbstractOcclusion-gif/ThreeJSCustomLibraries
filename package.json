@@ -18,6 +18,7 @@
     "./ui": "./src/ui/index.js",
     "./ui/theme.css": "./src/ui/theme.css",
     "./core": "./src/core/index.js",
+    "./stage": "./src/stage/index.js",
     "./weather": "./src/weather/index.js",
     "./weather/three": "./src/weather/three/index.js",
     "./weather/dev-panel": "./src/weather/three/dev-panel.js",

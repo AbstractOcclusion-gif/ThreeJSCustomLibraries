@@ -5,6 +5,8 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createCable, createThreeCableView} from '../../src/cable/index.js';
 import {benchRenderer} from '../shared.js';
+import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
+import {environmentControls} from '../particles/controls.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
@@ -18,18 +20,22 @@ const step = 1 / 120;
 const S = {preset: 'rope', span: 8, slack: 1.1, breakStrength: 1e6, segments: 16};
 const markers = [-1, 1].map(() => { const m = new T.Mesh(new T.SphereGeometry(.13), new T.MeshBasicMaterial({color: 0x66d6e5})); scene.add(m); return m; });
 let cable, view, state, previous = null, elapsed = 0, lastUI = 0;
+// Optional wind: off = the cable hangs still, as before.
+const wind = {environment: false, windSpeed: 10, windHeading: 90, gust: .5}, environment = createEnvironment();
+function applyWind() { setEnvironmentWind(environment, wind.windSpeed, wind.windHeading); environment.wind.gust = wind.gust; cable.setEnvironment(wind.environment ? environment : null); }
 function refresh() { state = cable.snapshot(); }
 function reset() {
   view?.dispose(); cable?.dispose();
   const endpoints = [-S.span / 2, S.span / 2].map(x => ({kind: 'fixed', position: [x, 3, 0]}));
   markers.forEach((m, i) => m.position.set(...endpoints[i].position));
   cable = createCable({world, endpoints, length: S.span * S.slack, preset: S.preset, breakStrength: S.breakStrength, segments: S.segments});
-  refresh(); cable.subscribe(refresh);
+  refresh(); cable.subscribe(refresh); applyWind();
   view = createThreeCableView({scene, cable: {links: cable.links, profile: cable.profile, get sections() { return state.sections; }}});
 }
 reset();
 const gui = createBenchPanel('Cable');
 cableControls(gui, {settings: S, reset, cut: () => cable.breakAt(Math.floor(cable.joints.length / 2)), release: () => cable.release(0)});
+environmentControls(gui, {state: wind, apply: applyWind});
 
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize);

@@ -173,14 +173,13 @@ renderer.setAnimationLoop(now => {
   if (document.hidden) { last = null; return; }
   const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
   controls.update(); weather.system.update(dt); weather.view.update(dt);
-  const w = weather.system.weather, heading = THREE.MathUtils.degToRad(w.windHeading), windX = Math.cos(heading) * w.wind, windZ = Math.sin(heading) * w.wind;
+  const w = weather.system.weather, environment = weather.view.environment; environment.wind.gust = P.plants.gust;
   surfaceWeather.update(dt, w);
   syncLighting(lighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});
-  const wind = THREE.MathUtils.clamp(w.wind * (.08 + P.plants.gust * .1), 0, 3);
-  trees.setWind(wind); bushes.setWind(wind);
+  trees.setEnvironment(environment); bushes.setEnvironment(environment);
   trees.update(dt); bushes.update(dt);
   balls.update(dt);
-  grass.update(dt, {camera, windX, windZ, gust: P.plants.gust, transmission: P.grass.transmission * weather.system.day.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density, recoverySeconds: P.interact.recoverySeconds});
+  grass.update(dt, {camera, environment, transmission: P.grass.transmission * weather.system.day.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density, recoverySeconds: P.interact.recoverySeconds});
   weather.view.render();
   if (now - lastUI > 250) { lastUI = now; wf.sync(); const s = grass.stats; $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + (weather.assetBaseUrl === 'bundled' ? ' · bundled sky textures' : '') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\n${w.dominant} · ${weather.hourLabel(weather.system.day.hour)} · wind ${w.wind.toFixed(1)} m/s`; }
 });

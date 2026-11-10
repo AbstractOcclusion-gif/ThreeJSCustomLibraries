@@ -9,6 +9,9 @@ export const CABLE_PRESETS=Object.freeze({
  support:Object.freeze({massPerMetre:3,radius:.045,damping:.08,color:0x8e9ca8}),
 });
 export const CABLE_BUDGET=Object.freeze({segments:24,subdivisions:96,radialSides:6,cullDistance:60,disposeDistance:120});
+// Wind drag on a link: 0.5 * air density * drag coefficient * (diameter * length) * |v| * v, v = wind - link velocity.
+const AIR_DENSITY=1.225,DRAG_COEFFICIENT=1.2,GUST_HZ=.35,GUST_SWING=.5,GUST_PHASE_PER_LINK=.7;
+const WIND_WAKE_DELTA=.5;   // m/s of wind change that wakes a sleeping cable
 const finite=v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite);
 
 // No clock, renderer, structural damage graph or electrical dependency. Body
@@ -65,13 +68,28 @@ export function createCable({world,endpoints,length,segments=16,preset='rope',br
   const axial=-reaction.dot(axis);j.force=reaction.length();j.tension=Math.max(0,axial);j.compression=Math.max(0,-axial);j.a.pointToWorldFrame(j.pivotA,pivotAWorld);j.gap=pivotAWorld.distanceTo(pivotBWorld);maxGap=Math.max(maxGap,j.gap);peakTension=Math.max(peakTension,j.tension);
   j.filtered=(j.filtered??0)+(j.tension-(j.filtered??0))*(1-Math.exp(-dt/.025));
  }
+ // Optional core/environment.js contract. Sleeping links are left asleep until the wind changes noticeably.
+ let environment=null,wokenWindX=0,wokenWindZ=0;
+ function applyWind(){
+  const w=environment.wind;
+  if(Math.hypot(w.x-wokenWindX,w.z-wokenWindZ)>WIND_WAKE_DELTA){wokenWindX=w.x;wokenWindZ=w.z;wake();}
+  if(w.speed<=0)return;
+  for(let i=0;i<links.length;i++){
+   const link=links[i],body=link.body;if(link.retired||body.sleepState===C.Body.SLEEPING)continue;
+   const gust=1+w.gust*GUST_SWING*Math.sin(time*GUST_HZ*2*Math.PI+i*GUST_PHASE_PER_LINK);
+   const x=w.x*gust-body.velocity.x,y=-body.velocity.y,z=w.z*gust-body.velocity.z;
+   const drag=.5*AIR_DENSITY*DRAG_COEFFICIENT*2*profile.radius*link.length*Math.hypot(x,y,z);
+   body.force.x+=drag*x;body.force.y+=drag*y;body.force.z+=drag*z;
+  }
+ }
  endpoints.forEach((a,i)=>attach(i,a));
  return{links,joints,profile,length,attachments,get revision(){return revision;},get disposed(){return disposed;},get sleeping(){return links.every(l=>l.body.sleepState===C.Body.SLEEPING);},
   subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},attach,release,breakAt,wake,
   retireDistant(reference){if(disposed)return 0;if(!finite(reference))throw Error('Invalid cable retention reference');const p=new C.Vec3(...reference);let removed=0;for(const section of sections()){if(section.first===0&&attachments[0]||section.last===links.length-1&&attachments[1])continue;const group=links.slice(section.first,section.last+1);if(!group.every(l=>l.body.sleepState===C.Body.SLEEPING&&l.body.position.distanceTo(p)>retentionDistance))continue;for(let i=section.first;i<section.last;i++){const j=joints[i];j.broken=true;world.removeConstraint(j.constraint);}for(const l of group){l.retired=true;world.removeBody(l.body);removed++;}emit({type:'cable:retired',...section});}return removed;},
   moveEndpoint(end,p){const a=attachments[end];if(!a?.owned||a.kind!=='driven'||!finite(p))throw Error('Endpoint is not a driven world attachment');a.body.position.set(...p);a.body.aabbNeedsUpdate=true;moveFixedBody?.(a.body);wake();},
   setFracture(enabled){fractureEnabled=!!enabled;},
-  beforeStep(dt){if(disposed)return;if(!(dt>0&&dt<=1/120))throw Error('Cable requires fixed steps <= 1/120 s');time+=dt;for(let i=0;i<2;i++)if(attachments[i]&&attachments[i].body.world!==world)release(i,'body-removed');},
+  setEnvironment(next){environment=next??null;},
+  beforeStep(dt){if(disposed)return;if(!(dt>0&&dt<=1/120))throw Error('Cable requires fixed steps <= 1/120 s');time+=dt;for(let i=0;i<2;i++)if(attachments[i]&&attachments[i].body.world!==world)release(i,'body-removed');if(environment)applyWind();},
   afterStep(dt){if(disposed)return;for(const j of joints){measure(j,dt);if(fractureEnabled&&!j.broken&&j.filtered>breakStrength)breakAt(j.index,'tension');}for(let i=0;i<2;i++){const a=attachments[i];if(a){measure(a.joint,dt);if(fractureEnabled&&a.joint.filtered>breakStrength)release(i,'tension');}}},
   describe(){return{length,profile,links:links.map(l=>({length:l.length,body:{id:l.body.id,mass:l.body.mass,position:l.body.position.toArray(),quaternion:l.body.quaternion.toArray()}}))};},
   snapshot(){return{revision,sections:sections(),removedBodyIds:links.filter(l=>l.retired).map(l=>l.body.id),broken:joints.map(j=>j.broken),attachments:attachments.map(a=>a?{kind:a.kind,bodyId:a.body.id,point:a.body.pointToWorldFrame(a.localPoint).toArray(),tension:a.joint.tension}:null),tension:Math.max(0,...joints.filter(j=>!j.broken).map(j=>j.tension)),compression:Math.max(0,...joints.filter(j=>!j.broken).map(j=>j.compression)),peakTension,maxGap,segments:links.filter(l=>!l.retired).length,sleeping:links.every(l=>l.body.sleepState===2),breakStrength};},

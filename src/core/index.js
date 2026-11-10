@@ -1,4 +1,7 @@
-export {LIGHT_GLSL, NOISE_GLSL, LIGHTING_DEFAULTS, createLighting, createLightingUniforms, syncLighting} from './lighting.js';
+export {LIGHT_GLSL, NOISE_GLSL, LIGHTING_DEFAULTS, createLighting, createLightingUniforms, syncLighting, syncLightingFromEnvironment} from './lighting.js';
 export {createEnvironment, setEnvironmentWind} from './environment.js';
+export {createTrackMask} from './track-mask.js';
+export {createVegetationAtlas, FREE_ATLAS_RECTS} from './vegetation-atlas.js';
+export {SKY_GLSL, skyDefines, createSkyUniforms, createSkyDome, sunFromHdr} from './sky.js';
 export {hash2, seededRandom} from './hash.js';
 export {presetFile, assertPreset, downloadJson, readJsonFile} from './presets.js';

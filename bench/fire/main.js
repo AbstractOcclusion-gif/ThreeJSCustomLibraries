@@ -5,6 +5,8 @@ import {createBenchPanel} from '../panel.js';
 import {createFireSystem} from '../../src/fire/index.js';
 import {createParticlePrefab} from '../../src/particles/index.js';
 import {benchRenderer} from '../shared.js';
+import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
+import {environmentControls} from '../particles/controls.js';
 import '../bench.css';
 
 const renderer = benchRenderer();
@@ -78,6 +80,14 @@ const reset = () => {
 };
 const gui = createBenchPanel('Fire');
 fireControls(gui, {ignite: () => crates[0].fire.ignite(), reset});
+// Optional wind: off = even spread and upright flames, as before.
+const wind = {environment: false, windSpeed: 8, windHeading: 0}, environment = createEnvironment();
+function applyWind() {
+  setEnvironmentWind(environment, wind.windSpeed, wind.windHeading);
+  const active = wind.environment ? environment : null;
+  system.setEnvironment(active); for (const crate of crates) crate.fx.setEnvironment(active);
+}
+environmentControls(gui, {state: wind, apply: applyWind});
 
 const ray = new T.Raycaster();
 const pointer = new T.Vector2();
@@ -103,7 +113,7 @@ let last, lastStatus = '';
 renderer.setAnimationLoop(now => {
   const dt = last === undefined ? 0 : Math.min(0.05, (now - last) / 1000);
   last = now;
-  system.tick(dt);
+  system.update(dt);
   let burning = 0, burned = 0;
   for (const [index, crate] of crates.entries()) {
     const {fire, fx, light, plank, trim} = crate;
@@ -115,7 +125,7 @@ renderer.setAnimationLoop(now => {
     }
     burning += Number(isBurning);
     burned += Number(fire.phase === 'burned');
-    fx.tick(dt);
+    fx.update(dt);
     plank.color.copy(wood).lerp(char, 1 - fire.fuel);
     trim.color.copy(plank.color).multiplyScalar(0.75);
     light.intensity = isBurning ? 2.8 * Math.min(1, fire.fuel * 3) * (0.9 + 0.1 * Math.sin(now * 0.017 + index)) : 0;

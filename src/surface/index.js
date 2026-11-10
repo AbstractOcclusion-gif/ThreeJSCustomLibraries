@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {NOISE_GLSL} from '../core/lighting.js';
-export {createTrackMask} from './tracks.js';
+export {createTrackMask} from '../core/track-mask.js';
 
 export function createSurfaceWeather() {
  const levels = {value: new THREE.Vector2()};

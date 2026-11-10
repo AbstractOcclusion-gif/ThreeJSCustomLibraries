@@ -115,7 +115,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
     const heading=THREE.MathUtils.degToRad(w.windHeading),drift=w.wind*dt*.25;
     bankOffset.x+=Math.cos(heading)*drift;bankOffset.y+=Math.sin(heading)*drift;
    }
-   rain?.update(dt,w,d,worldPosition);
+   rain?.update(dt,shared,worldPosition);
    const stormWeight=w.weights[w.names.indexOf('stormy')]??0;
    flashRemaining=Math.max(0,flashRemaining-dt);
    const lightningEnabled=settings.lightningStrength>0&&!reducedMotion?.matches;

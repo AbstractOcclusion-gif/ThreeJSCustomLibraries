@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {createTrackMask} from '../surface/tracks.js';
+import {createTrackMask} from '../core/track-mask.js';
 
 const RECOVERY_SECONDS = 0.9;
 const MAX_BEND = 0.38;
@@ -106,6 +106,7 @@ function patchMaterial(material, uniforms, lit, flatColorMix) {
 
 // Placements are world-space {x, y, z, yaw (radians), scale (>0), tint? [r, g, b] linear}.
 // LOD geometries and map are borrowed. With followTracks, the host paints and clears the supplied mask.
+const VIEW_DEFAULTS = Object.freeze({transmission: 1.45, lodDistance: 26, farDensity: .45, shadowDistance: 18, density: 1});
 export function createGrassField({scene, geometries, map, color, placements, tileSize = 5, flatColorMix = 0, contactTracks, followTracks = false}) {
   if (directionalCall < 0 || directionalEnd < 0 || callEnd <= directionalCall) {
     throw new Error('Unsupported Three.js directional lighting shader');
@@ -195,7 +196,10 @@ export function createGrassField({scene, geometries, map, color, placements, til
     setCutoff(value) {
       material.alphaTest = depth.alphaTest = value;
     },
-    update(dt, {camera, windX, windZ, gust, transmission, lodDistance, farDensity, shadowDistance, density, recoverySeconds = RECOVERY_SECONDS}) {
+    // Only `camera` is required. Wind comes from windX/windZ/gust, else from an optional `environment` (core/environment.js), else calm.
+    update(dt, {camera, environment, windX = environment?.wind.x ?? 0, windZ = environment?.wind.z ?? 0, gust = environment?.wind.gust ?? 0,
+      transmission = VIEW_DEFAULTS.transmission * (environment?.daylight ?? 1), lodDistance = VIEW_DEFAULTS.lodDistance, farDensity = VIEW_DEFAULTS.farDensity,
+      shadowDistance = VIEW_DEFAULTS.shadowDistance, density = VIEW_DEFAULTS.density, recoverySeconds = RECOVERY_SECONDS}) {
       uniforms.grassTime.value += dt;
       uniforms.grassWind.value.set(windX, windZ).multiplyScalar(0.035).clampLength(0, MAX_BEND);
       uniforms.grassGust.value = gust;

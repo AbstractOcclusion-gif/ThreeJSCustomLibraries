@@ -29,12 +29,15 @@ export function createPrecipitation({THREE,group,count=512,radius=24,height=26,f
    }`});
   const mesh=new THREE.Mesh(geometry,material);mesh.frustumCulled=false;mesh.visible=false;mesh.renderOrder=10;group.add(mesh);parts.push({snow,mesh,geometry,material,uniforms});
  }
- return{update(dt,weather,day,position){
+ // update(dt, environment, position): the shared contract (core/environment.js) gives rain, snow, wind and daylight.
+ // The former update(dt, weather, day, position) is still accepted.
+ return{update(dt,source,second,third){
   if (disposed) return;
-  const angle=weather.windHeading*Math.PI/180;
-  for(const p of parts){const amount=Math.max(0,Math.min(1,p.snow?weather.snow:weather.rain)),u=p.uniforms;p.mesh.visible=amount>.001;p.geometry.instanceCount=Math.round(count*amount);if(!p.mesh.visible)continue;
-   u.uCenter.value.copy(position);u.uVelocity.value.set(Math.cos(angle)*weather.wind*.3,p.snow?-1.5:-22,Math.sin(angle)*weather.wind*.3);u.uOffset.value.addScaledVector(u.uVelocity.value,dt);const o=u.uOffset.value;o.x%=radius*2;o.y%=height;o.z%=radius*2;u.uTime.value+=dt;
-   u.uColor.value.setRGB(p.snow?.85:.55,p.snow?.9:.65,p.snow?1:.75).multiplyScalar(.08+.92*day.daylight);
+  const legacy=third!==undefined,position=legacy?third:second,daylight=legacy?second.daylight:source.daylight;
+  const angle=legacy?source.windHeading*Math.PI/180:0,windX=legacy?Math.cos(angle)*source.wind:source.wind.x,windZ=legacy?Math.sin(angle)*source.wind:source.wind.z;
+  for(const p of parts){const amount=Math.max(0,Math.min(1,p.snow?source.snow:source.rain)),u=p.uniforms;p.mesh.visible=amount>.001;p.geometry.instanceCount=Math.round(count*amount);if(!p.mesh.visible)continue;
+   u.uCenter.value.copy(position);u.uVelocity.value.set(windX*.3,p.snow?-1.5:-22,windZ*.3);u.uOffset.value.addScaledVector(u.uVelocity.value,dt);const o=u.uOffset.value;o.x%=radius*2;o.y%=height;o.z%=radius*2;u.uTime.value+=dt;
+   u.uColor.value.setRGB(p.snow?.85:.55,p.snow?.9:.65,p.snow?1:.75).multiplyScalar(.08+.92*daylight);
   }
  },dispose(){if (disposed) return;disposed=true;for(const p of parts){group.remove(p.mesh);p.geometry.dispose();p.material.dispose();}},get instanceCount(){return disposed?0:parts.reduce((sum,p)=>sum+(p.mesh.visible?p.geometry.instanceCount:0),0);}};
 }
