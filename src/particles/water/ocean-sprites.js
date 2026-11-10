@@ -1,6 +1,7 @@
 import {makePool, reuploadAll} from './pool.js';
 import {BILLOW_GLSL} from '../billow-glsl.js';
 // The host supplies its renderer, surface, depth, lighting and impact bindings.
+const RENDER_ORDER = 11;   // over the splash droplets (10)
 export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, SURFACE_HEIGHT_GLSL, surfaceHeightUniforms, FLIPBOOK_GLSL, applyLook, applySheet, sheetUniforms}) {
   // particles/sheet-sprites.js -- upright flipbook billboards standing on the drawn surface, facing the camera: splash / mist
   // frames fired where the spray pump sprays (emitSplash hook), later the blowhole jet. One-shot flipbook over the sprite's life
@@ -53,7 +54,7 @@ export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, S
             gl_FragColor = vec4(fxFog(c.rgb, vWorldFx), alpha);
             #include <colorspace_fragment>
           }` }));
-      this.mesh.frustumCulled = false; this.mesh.renderOrder = 11; fxScene.add(this.mesh);
+      this.mesh.frustumCulled = false; this.mesh.renderOrder = RENDER_ORDER; fxScene.add(this.mesh);
       this.applySettings();
     }
     applySettings(settings = {}) { const s = Object.assign(this.s, settings), u = this.mesh.material.uniforms; applySheet(this.mesh.material, s.sheet); applyLook(this.mesh.material, s);

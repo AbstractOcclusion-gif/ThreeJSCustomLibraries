@@ -1,6 +1,11 @@
 import {DataTexture, FloatType, RedFormat, Vector4} from 'three';
 
 const step = 1 / 60;
+// WebAquarium's ripple solver per step: velocity gains waveSpeed x laplacian, then keeps `damping`; height keeps `decay`.
+const WAVE = Object.freeze({waveSpeed: .16, damping: .966, decay: .997});
+// A splash: a cosine dip radius m wide, strength x depth m/step at the centre, over a square of reach cells.
+const SPLASH = Object.freeze({radius: 1.1, depth: .115, reach: 3});
+const ACTIVE_SECONDS = 6;   // the field runs this long after the last splash, then clears to rest
 
 // Interactive ripple height field on a fixed world grid. origin = [xMin, zMin] (m), size = [columns, rows], cell (m).
 // mask(isWet) takes a callback (x, z) -> boolean that decides which cells carry water (channel section, minus obstacles…).
@@ -29,14 +34,14 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = .4
 
  function splash(x, z, strength) {
   const cx = Math.floor((x - xMin) / cell), cz = Math.floor((z - zMin) / cell);
-  for (let row = Math.max(1, cz - 3); row <= Math.min(rows - 2, cz + 3); row++) {
-   for (let col = Math.max(1, cx - 3); col <= Math.min(columns - 2, cx + 3); col++) {
+  for (let row = Math.max(1, cz - SPLASH.reach); row <= Math.min(rows - 2, cz + SPLASH.reach); row++) {
+   for (let col = Math.max(1, cx - SPLASH.reach); col <= Math.min(columns - 2, cx + SPLASH.reach); col++) {
     const i = row * columns + col;
     const distance = Math.hypot(xMin + (col + .5) * cell - x, zMin + (row + .5) * cell - z);
-    if (wet[i] && distance < 1.1) velocity[i] -= strength * .115 * (.5 + .5 * Math.cos(Math.PI * distance / 1.1));
+    if (wet[i] && distance < SPLASH.radius) velocity[i] -= strength * SPLASH.depth * (.5 + .5 * Math.cos(Math.PI * distance / SPLASH.radius));
    }
   }
-  active = 6;
+  active = ACTIVE_SECONDS;
  }
 
  function update(dt) {
@@ -51,8 +56,8 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = .4
     const h = heights[i];
     const laplacian = (wet[i - 1] ? heights[i - 1] : h) + (wet[i + 1] ? heights[i + 1] : h) +
      (wet[i - columns] ? heights[i - columns] : h) + (wet[i + columns] ? heights[i + columns] : h) - 4 * h;
-    velocity[i] = (velocity[i] + .16 * laplacian) * .966;
-    next[i] = (h + velocity[i]) * .997;
+    velocity[i] = (velocity[i] + WAVE.waveSpeed * laplacian) * WAVE.damping;
+    next[i] = (h + velocity[i]) * WAVE.decay;
    }
    for (let i = 0; i < heights.length; i++) heights[i] = wet[i] ? next[i] : 0;
   }

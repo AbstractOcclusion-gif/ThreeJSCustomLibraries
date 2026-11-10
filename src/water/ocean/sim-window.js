@@ -35,9 +35,15 @@ export const SIM_WINDOW_DEFAULTS = Object.freeze({ halfSizeMeters: 32, resolutio
   foamGenRate: 0.6, foamDecayFresh: 0.96, foamDecayResidual: 0.993, foamDecayRate: 1.25, foamSpread: 0.2, foamGenThreshold: 0.716, foamMinWaveHeight: 0.166,
   foamAdvect: 3, foamFromSpeed: 6, foamFromCurvature: 30, foamDeposit: 0.45, foamCrestBias: 0.028, foamHeadroom: 1 });
 
+// Obstacle injection: footprint-delta gain and the dead band that keeps a resting hull still; a solid-mask texel above
+// SOLID_THRESHOLD blocks the water. STEP_ROUNDING: a frame owing this much of a step already takes it.
+const OBSTACLE_INJECTION = Object.freeze({strength: 0.05, deadband: 0.0006});
+const SOLID_THRESHOLD = 0.02, STEP_ROUNDING = 0.25;
+const D = SIM_WINDOW_DEFAULTS;
+
 // Read by the surface, the sampler and the foam particles later: the window frame + its textures.
 const createSimUniforms = () => ({ tSim: { value: null }, tSimFoam: { value: null }, uSimOn: { value: 0 }, uSimCenter: { value: new THREE.Vector2() },
-  uSimHalf: { value: 32 }, uSimTexel: { value: 1 / 256 }, uSimEdgeFadeTexels: { value: 12 } });
+  uSimHalf: { value: D.halfSizeMeters }, uSimTexel: { value: 1 / D.resolution }, uSimEdgeFadeTexels: { value: D.edgeFadeTexels } });
 // Ripple sample at a world xz: (height, velocity, normal xz) faded to rest over the edge band; fade = 0 outside the window.
 export const SIM_SAMPLE_GLSL = /* glsl */`
 uniform sampler2D tSim, tSimFoam; uniform float uSimOn, uSimHalf, uSimTexel, uSimEdgeFadeTexels; uniform vec2 uSimCenter;
@@ -73,7 +79,7 @@ export class SimWindow {
     // wave motion of its own, and a neighbour there reads as the cell itself, so waves reflect off the hull. The obstacle map's V is
     // flipped relative to the sim (Unity obstacleFlipY).
     this.updateMat = new THREE.ShaderMaterial({ vertexShader: QV, uniforms: { tWater: { value: null }, uSpeed: { value: s.waveSpeed }, uDamp: { value: s.damping }, uTexel: { value: TEXEL }, uVisc: { value: s.viscosity },
-        tSolid: OBSTACLE_U.tObstacleSolid, uSolidOn: OBSTACLE_U.uSolidOn, uSolidThreshold: { value: 0.02 }, uRestDip: { value: 0 } },
+        tSolid: OBSTACLE_U.tObstacleSolid, uSolidOn: OBSTACLE_U.uSolidOn, uSolidThreshold: { value: SOLID_THRESHOLD }, uRestDip: { value: 0 } },
       fragmentShader: `uniform sampler2D tWater, tSolid; uniform float uSpeed, uDamp, uVisc, uSolidOn, uSolidThreshold, uRestDip; uniform vec2 uTexel; varying vec2 vUv;
       bool solid(vec2 uv){ return uSolidOn > 0.5 && texture2D(tSolid, vec2(uv.x, 1.0 - uv.y)).r > uSolidThreshold; }
       vec2 nN(vec2 uv, vec2 self){ return solid(uv) ? self : texture2D(tWater, uv).rg; }
@@ -95,9 +101,9 @@ export class SimWindow {
     // diffused toward its neighbours, generated from a speed + shear activity and negative curvature behind a threshold / minimum
     // wave height gate (relaxed where foam already sits), deposited, and decayed with a fresh / residual survival pair.
     this.foamMat = new THREE.ShaderMaterial({ vertexShader: QV, uniforms: { tFoam: { value: null }, tWater: { value: null }, uTexel: { value: TEXEL },
-        uAdvect: { value: 3 }, uSpread: { value: 0.2 }, uFromSpeed: { value: 6 }, uFromCurv: { value: 30 }, uCrestBias: { value: 0 }, uGenThreshold: { value: 0.716 },
-        uMinWaveHeight: { value: 0.166 }, uGenRate: { value: 0.6 }, uDeposit: { value: 0.45 }, uHeadroom: { value: 1 }, uDecayFresh: { value: 0.96 }, uDecayResidual: { value: 0.993 },
-        uDecayRate: { value: 1.25 }, uDtSteps: { value: 1 } },
+        uAdvect: { value: D.foamAdvect }, uSpread: { value: D.foamSpread }, uFromSpeed: { value: D.foamFromSpeed }, uFromCurv: { value: D.foamFromCurvature }, uCrestBias: { value: 0 }, uGenThreshold: { value: D.foamGenThreshold },
+        uMinWaveHeight: { value: D.foamMinWaveHeight }, uGenRate: { value: D.foamGenRate }, uDeposit: { value: D.foamDeposit }, uHeadroom: { value: D.foamHeadroom }, uDecayFresh: { value: D.foamDecayFresh }, uDecayResidual: { value: D.foamDecayResidual },
+        uDecayRate: { value: D.foamDecayRate }, uDtSteps: { value: 1 } },
       fragmentShader: `uniform sampler2D tFoam, tWater; uniform vec2 uTexel;
       uniform float uAdvect, uSpread, uFromSpeed, uFromCurv, uCrestBias, uGenThreshold, uMinWaveHeight, uGenRate, uDeposit, uHeadroom, uDecayFresh, uDecayResidual, uDecayRate, uDtSteps;
       varying vec2 vUv;
@@ -133,7 +139,7 @@ export class SimWindow {
         gl_FragColor = inGrid ? textureLod(tSrc, uv, 0.0) : uRest; }` });
     // ---- Obstacle (WaterSim.compute Obstacle): inject the frame-to-frame footprint delta, 5x5 binomial-blurred, dead-banded, scaled
     this.obstacleMat = new THREE.ShaderMaterial({ vertexShader: QV, uniforms: { tWater: { value: null }, tPrev: OBSTACLE_U.tObstaclePrev, tCurr: OBSTACLE_U.tObstacleCurr,
-        uTexel: { value: TEXEL }, uStrength: { value: 0.05 }, uDeadband: { value: 0.0006 } },
+        uTexel: { value: TEXEL }, uStrength: { value: OBSTACLE_INJECTION.strength }, uDeadband: { value: OBSTACLE_INJECTION.deadband } },
       fragmentShader: `uniform sampler2D tWater, tPrev, tCurr; uniform vec2 uTexel; uniform float uStrength, uDeadband; varying vec2 vUv;
       const float W[5] = float[5](1.0, 4.0, 6.0, 4.0, 1.0);
       void main(){ vec4 info = texture2D(tWater, vUv); vec2 oc = vec2(vUv.x, 1.0 - vUv.y); float delta = 0.0;
@@ -271,8 +277,8 @@ export class SimWindow {
   step(dt) {
     const pass = this.pass.render;
     this.stepObstacle(); this.stepDrops(); this.stepSpheres();
-    this.simAcc += dt; const nSteps = Math.min(Math.max(0, Math.floor(this.simAcc * REF_FPS + 0.25)), MAX_STEPS_PER_FRAME);
-    this.simAcc = THREE.MathUtils.clamp(this.simAcc - nSteps / REF_FPS, -0.25 / REF_FPS, 1 / REF_FPS);
+    this.simAcc += dt; const nSteps = Math.min(Math.max(0, Math.floor(this.simAcc * REF_FPS + STEP_ROUNDING)), MAX_STEPS_PER_FRAME);
+    this.simAcc = THREE.MathUtils.clamp(this.simAcc - nSteps / REF_FPS, -STEP_ROUNDING / REF_FPS, 1 / REF_FPS);
     for (let i = 0; i < nSteps; i++) { this.updateMat.uniforms.tWater.value = this.sim.read.texture; pass(this.updateMat, this.sim.write); this.sim.swap(); }
     if (nSteps > 0) { this.normalMat.uniforms.tWater.value = this.sim.read.texture; pass(this.normalMat, this.sim.write); this.sim.swap(); }
     const f = this.foamMat.uniforms;

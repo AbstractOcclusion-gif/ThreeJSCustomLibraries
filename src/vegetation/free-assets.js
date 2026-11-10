@@ -27,22 +27,29 @@ export function createGrassClumpGeometries({rect = FREE_ATLAS_RECTS.grass, heigh
   return [build(cards), build(2)];
 }
 
+// Meadow blade clump: blades around the root on the golden angle. Ranges are [min, span] in metres; halfWidth is
+// [taper share at the root, tip]; the atlas u wanders around centre by sway[1] at sway[0] rad per unit height.
+const MEADOW_BLADES = Object.freeze({count: 9, rows: 3, seed: 19, root: [.035, .13], height: [.24, .34], lean: [.06, .17],
+  halfWidth: [.025, .001], atlas: {centre: .12, sway: [3, .035], maxV: .98}});
+const GOLDEN_ANGLE = 2.39996;   // rad
+
 // Near meadow LOD: individual tapered blades. Sample the opaque center of a
 // blade in the existing atlas so geometry owns the silhouette.
 function createMeadowBladeGeometry() {
   const position = [], uv = [], bend = [], indices = [];
   const [ru, rv, rw, rh] = FREE_ATLAS_RECTS.grass;
-  for (let blade = 0; blade < 9; blade++) {
-    const angle = blade * 2.39996, dx = Math.cos(angle), dz = Math.sin(angle);
-    const root = .035 + hash2(blade, 1, 19) * .13;
-    const height = .24 + hash2(blade, 2, 19) * .34;
-    const lean = .06 + hash2(blade, 3, 19) * .17;
+  const B = MEADOW_BLADES;
+  for (let blade = 0; blade < B.count; blade++) {
+    const angle = blade * GOLDEN_ANGLE, dx = Math.cos(angle), dz = Math.sin(angle);
+    const root = B.root[0] + hash2(blade, 1, B.seed) * B.root[1];
+    const height = B.height[0] + hash2(blade, 2, B.seed) * B.height[1];
+    const lean = B.lean[0] + hash2(blade, 3, B.seed) * B.lean[1];
     const base = position.length / 3;
-    for (let row = 0; row <= 3; row++) {
-      const t = row / 3, distance = root + lean * t * t, halfWidth = .025 * (1 - t) + .001;
+    for (let row = 0; row <= B.rows; row++) {
+      const t = row / B.rows, distance = root + lean * t * t, halfWidth = B.halfWidth[0] * (1 - t) + B.halfWidth[1];
       for (const side of [-1, 1]) {
         position.push(dx * distance - dz * side * halfWidth, height * t, dz * distance + dx * side * halfWidth);
-        uv.push(ru + rw * (.12 + Math.sin(t * 3) * .035 * t), rv + rh * Math.min(.98, t));
+        uv.push(ru + rw * (B.atlas.centre + Math.sin(t * B.atlas.sway[0]) * B.atlas.sway[1] * t), rv + rh * Math.min(B.atlas.maxV, t));
         bend.push(t);
       }
       if (row) {

@@ -1,10 +1,22 @@
 import * as THREE from 'three';
 import {createTerrainRules} from './terrain-rules.js';
 
+const MAX_RESOLUTION = 1025;   // samples per side
+const BYTE = 255;              // 8-bit weight and coverage scale
+const BASE_LAYERS = 4;         // grass, rock, snow, mud: one RGBA weight texel; layer 4 (forest floor) has its own map
+const FOREST_LAYER = 4;
+const MAX_DIG = .65;           // m below the original surface a deformation may dig
+// The mesh bounds are padded once to cover every edit: down by MAX_DIG, up by the deepest snow drift (.31 + .12 m).
+const EDIT_ENVELOPE = Object.freeze({below: MAX_DIG, above: .43});
+const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
+const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: recompute all normals at once
+// Snow cover: depth = (drift + variation x sin(x f + cos(z f))) x smoothstep(flatness); shown above coverage[0] m.
+const SNOW = Object.freeze({drift: .31, variation: .12, frequency: [.18, .14], flatness: [.55, .95], coverage: [.015, .11]});
+
 // Heights are row-major along +X and +Z, in metres. The mesh and shaders share this grid.
 export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings} = {}) {
  const [nx, nz] = resolution ?? [];
- if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= 1025) || heights?.length !== nx * nz ||
+ if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
      !size.every(n => Number.isFinite(n) && n > 0) || !Number.isInteger(seed)) throw Error('Invalid terrain grid');
  const samples = Float32Array.from(heights);
@@ -19,8 +31,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  geometry.computeVertexNormals();
  // All edits stay inside this envelope, so local edits need no bounds scan.
  geometry.computeBoundingBox();
- geometry.boundingBox.min.y -= .65;
- geometry.boundingBox.max.y += .43;
+ geometry.boundingBox.min.y -= EDIT_ENVELOPE.below;
+ geometry.boundingBox.max.y += EDIT_ENVELOPE.above;
  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
  const heightMap = new THREE.DataTexture(samples, nx, nz, THREE.RedFormat, THREE.FloatType);
  const weights = new Uint8Array(samples.length * 4);
@@ -42,8 +54,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    const dz = (south - north) / (stepZ * (z === 0 || z === nz - 1 ? 1 : 2));
    const curvature = (left + right - 2 * height) / (stepX * stepX) + (north + south - 2 * height) / (stepZ * stepZ);
    const layers = rules.weights({x: bounds.x + x * stepX, z: bounds.y + z * stepZ, height, slope: Math.hypot(dx, dz), curvature});
-   for (let i = 0; i < 4; i++) weights[index * 4 + i] = Math.round(layers[i] * 255);
-   if (forestWeights) forestWeights[index] = Math.round((layers[4] ?? 0) * 255);
+   for (let i = 0; i < BASE_LAYERS; i++) weights[index * BASE_LAYERS + i] = Math.round(layers[i] * BYTE);
+   if (forestWeights) forestWeights[index] = Math.round((layers[FOREST_LAYER] ?? 0) * BYTE);
   }
   weightMap.needsUpdate = true;
   if (forestMap) forestMap.needsUpdate = true;
@@ -61,14 +73,15 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   const gx = THREE.MathUtils.clamp((x - bounds.x) / stepX, 0, nx - 1);
   const gz = THREE.MathUtils.clamp((z - bounds.y) / stepZ, 0, nz - 1);
   const ix = Math.min(Math.floor(gx), nx - 2), iz = Math.min(Math.floor(gz), nz - 2);
-  if (layer === 4 && !forestWeights) return 0;
-  const data = layer === 4 ? forestWeights : weights;
-  const stride = layer === 4 ? 1 : 4;
-  const i = (iz * nx + ix) * stride + (layer === 4 ? 0 : layer);
+  const forest = layer === FOREST_LAYER;
+  if (forest && !forestWeights) return 0;
+  const data = forest ? forestWeights : weights;
+  const stride = forest ? 1 : BASE_LAYERS;
+  const i = (iz * nx + ix) * stride + (forest ? 0 : layer);
   const lerp = THREE.MathUtils.lerp;
   const north = lerp(data[i], data[i + stride], gx - ix);
   const south = lerp(data[i + nx * stride], data[i + (nx + 1) * stride], gx - ix);
-  return lerp(north, south, gz - iz) / 255;
+  return lerp(north, south, gz - iz) / BYTE;
  }
  let minX = nx, minZ = nz, maxX = -1, maxZ = -1;
  const soil = samples.slice();
@@ -97,7 +110,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  function writeHeight(index, value, onSample) {
   samples[index] = value;
   positions.setY(index, samples[index]);
-  const coverage = snowEnabled ? Math.round(255 * THREE.MathUtils.smoothstep(snow[index], .015, .11)) : 0;
+  const coverage = snowEnabled ? Math.round(BYTE * THREE.MathUtils.smoothstep(snow[index], ...SNOW.coverage)) : 0;
   if (snowMask[index] !== coverage) {
    snowMask[index] = coverage;
    snowMaskDirty = true;
@@ -115,8 +128,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    for (let i = Math.max(0, Math.ceil(gx - radius / stepX)); i <= Math.min(nx - 1, Math.floor(gx + radius / stepX)); i++) {
     const distance = Math.hypot((i - gx) * stepX, (j - gz) * stepZ);
     const index = j * nx + i, previous = samples[index];
-    const falloff = 1 - THREE.MathUtils.smoothstep(distance / radius, .15, 1);
-    const minimum = snowEnabled ? soil[index] : original[index] - .65;
+    const falloff = 1 - THREE.MathUtils.smoothstep(distance / radius, DIG_FALLOFF_START, 1);
+    const minimum = snowEnabled ? soil[index] : original[index] - MAX_DIG;
     const next = Math.fround(Math.max(minimum, previous - depth * falloff));
     if (next === previous) continue;
     if (snowEnabled) snow[index] = next - soil[index];
@@ -134,7 +147,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   // Every changed face also affects the normals of its immediate neighbors.
   minX = Math.max(0, minX - 1); maxX = Math.min(nx - 1, maxX + 1);
   minZ = Math.max(0, minZ - 1); maxZ = Math.min(nz - 1, maxZ + 1);
-  if ((maxX - minX + 1) * (maxZ - minZ + 1) > samples.length / 3) {
+  if ((maxX - minX + 1) * (maxZ - minZ + 1) > samples.length / FULL_NORMALS_DIVISOR) {
    normals.addUpdateRange(0, normals.array.length);
    geometry.computeVertexNormals();
   } else {
@@ -177,8 +190,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    snow = new Float32Array(samples.length);
    for (let index = 0; index < snow.length; index++) {
     const x = index % nx, z = Math.floor(index / nx);
-    const drift = .31 + .12 * Math.sin(x * .18 + Math.cos(z * .14));
-    snow[index] = drift * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], .55, .95);
+    const drift = SNOW.drift + SNOW.variation * Math.sin(x * SNOW.frequency[0] + Math.cos(z * SNOW.frequency[1]));
+    snow[index] = drift * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], ...SNOW.flatness);
    }
   }
   snowEnabled = enabled;

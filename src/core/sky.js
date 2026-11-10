@@ -222,26 +222,32 @@ export function skyDefines({ dynamic = false, celestial = false, water = false, 
   if (celestial) d.SKY_CELESTIAL = 1;
   return d;
 }
+// Starting look of the sky uniforms: moon disc radius (rad), earthshine and galaxy brightness, ambient grey, effect ambient.
+const SKY_UNIFORM_DEFAULTS = Object.freeze({moonPhase: 0.5, moonRadius: 0.026, earthshine: 0.02, galaxy: 0.2, ambient: 0.3, fxAmbient: 0.35});
+const LUMA = [0.2126, 0.7152, 0.0722];        // Rec. 709 luminance weights
+const INV_TWO_PI = 0.1591549, INV_PI = 0.3183099;   // the equirect uv scales, as SKY_GLSL's skyUv writes them
+const DOME_SEGMENTS = [32, 16];               // sphere width x height segments
+
 // the sky-dome.js uniforms a page that has no shared uniform set needs (the ocean; the pond's shaders/common.js U carries them).
 // sunDir: the page's live sun direction. uSkyMode is JS-side state for the ocean's GUI / presets (0 procedural, 1 hdr, 2 dynamic);
 // the shader reads uSky / uSkyDyn, which the page derives from it.
 export function createSkyUniforms(sunDir) {
-  return { uSunDir: { value: sunDir }, uSkySun: { value: sunDir }, uSkySunDir: { value: sunDir.clone() }, uSunCol: { value: new THREE.Color(...CLEAR_NOON_SUN) }, uAmb: { value: new THREE.Color(0.3, 0.3, 0.3) },
+  return { uSunDir: { value: sunDir }, uSkySun: { value: sunDir }, uSkySunDir: { value: sunDir.clone() }, uSunCol: { value: new THREE.Color(...CLEAR_NOON_SUN) }, uAmb: { value: new THREE.Color().setScalar(SKY_UNIFORM_DEFAULTS.ambient) },
     uSkyMode: { value: 0 }, uSky: { value: 0 }, uSkyDyn: { value: 0 }, uDaylight: { value: 1 }, tEnv: { value: null }, tEnvB: { value: null },
     tDynamicSky: { value: null }, tDynamicSkyPrev: { value: null }, uDynamicSkyBlend: { value: 1 },
-    tMoon: { value: null }, tStars: { value: null }, tGalaxy: { value: null }, uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoonOn: { value: 1 }, uMoonPhase: { value: 0.5 }, uMoonRadius: { value: 0.026 },
-    uMoonIntensity: { value: 1 }, uMoonEarthshine: { value: 0.02 }, uStarIntensity: { value: 1 }, uStarReflection: { value: 1 }, uGalaxyIntensity: { value: 0.2 }, uNightIntensity: { value: 1 }, uStarsRotation: { value: 0 },
+    tMoon: { value: null }, tStars: { value: null }, tGalaxy: { value: null }, uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoonOn: { value: 1 }, uMoonPhase: { value: SKY_UNIFORM_DEFAULTS.moonPhase }, uMoonRadius: { value: SKY_UNIFORM_DEFAULTS.moonRadius },
+    uMoonIntensity: { value: 1 }, uMoonEarthshine: { value: SKY_UNIFORM_DEFAULTS.earthshine }, uStarIntensity: { value: 1 }, uStarReflection: { value: 1 }, uGalaxyIntensity: { value: SKY_UNIFORM_DEFAULTS.galaxy }, uNightIntensity: { value: 1 }, uStarsRotation: { value: 0 },
     uAuroraDirection: { value: new THREE.Vector2(1, 0) }, uAuroraIntensity: { value: 0 }, uAuroraTime: { value: 0 },
     uEnvI: { value: 1 }, uEnvRot: { value: 0 }, uEnvTransform: { value: new THREE.Matrix3() }, uEnvBTransform: { value: new THREE.Matrix3() },
-    uWeatherWeights: { value: new THREE.Vector4(1, 0, 0, 0) }, uNightBlend: { value: 0 }, uDayTint: { value: new THREE.Color(1, 1, 1) }, uFxAmbient: { value: new THREE.Color(0.35, 0.35, 0.35) } };
+    uWeatherWeights: { value: new THREE.Vector4(1, 0, 0, 0) }, uNightBlend: { value: 0 }, uDayTint: { value: new THREE.Color(1, 1, 1) }, uFxAmbient: { value: new THREE.Color().setScalar(SKY_UNIFORM_DEFAULTS.fxAmbient) } };
 }
 // brightest texel of a Float equirect HDR -> world direction (the shader's uv convention, flipY data) and its colour
 export function sunFromHdr(texture) {
   const { data, width, height } = texture.image; let best = -1, bi = 0;
-  for (let i = 0; i < width * height; i++) { const l = data[i * 4] * 0.2126 + data[i * 4 + 1] * 0.7152 + data[i * 4 + 2] * 0.0722; if (l > best) { best = l; bi = i; } }
+  for (let i = 0; i < width * height; i++) { const l = data[i * 4] * LUMA[0] + data[i * 4 + 1] * LUMA[1] + data[i * 4 + 2] * LUMA[2]; if (l > best) { best = l; bi = i; } }
   const px = bi % width, row = Math.floor(bi / width);
   const u = (px + 0.5) / width, v = texture.flipY ? 1 - (row + 0.5) / height : (row + 0.5) / height;
-  const azimuth = (u - 0.5) / 0.1591549, y = Math.sin((v - 0.5) / 0.3183099), c = Math.sqrt(Math.max(1 - y * y, 0));
+  const azimuth = (u - 0.5) / INV_TWO_PI, y = Math.sin((v - 0.5) / INV_PI), c = Math.sqrt(Math.max(1 - y * y, 0));
   const color = new THREE.Color(data[bi * 4], data[bi * 4 + 1], data[bi * 4 + 2]);
   const m = Math.max(color.r, color.g, color.b) || 1; color.multiplyScalar(1 / m);
   return { direction: new THREE.Vector3(Math.cos(azimuth) * c, y, Math.sin(azimuth) * c), color, radiance: best };
@@ -256,7 +262,7 @@ export function createSkyDome(uniforms, { radius, defines = {}, glsl = SKY_GLSL,
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }` });
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 16), material);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, ...DOME_SEGMENTS), material);
   mesh.frustumCulled = false; mesh.renderOrder = renderOrder;
   return mesh;
 }

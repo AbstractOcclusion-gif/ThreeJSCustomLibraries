@@ -3,6 +3,12 @@ import {DataTexture, LinearFilter, MathUtils, RGBAFormat, Vector4} from 'three';
 // Reduced browser adaptation of WebGPUWater's River Fluid pressure projection.
 // Face fluxes enforce solid walls and leave the first and last cross sections open.
 const clamp = MathUtils.clamp;
+const VELOCITY_RANGE = 10;   // m/s either way: a texel's 0..1 maps to -10..10 around .5
+const BYTE = 255;
+// Shear foam behind rocks: (shear - from) x gain x influence; influence starts lead m upstream of a rock, squashed
+// across x by xSquash, and reaches radius + reach m.
+const SHEAR_FOAM = Object.freeze({from: .08, gain: 1.9});
+const ROCK_INFLUENCE = Object.freeze({lead: .25, xSquash: .45, reach: 1.4});
 
 // Steady flow field baked from a channel (sectionAt) and rock obstacles [x, z, radius, _]. origin = [left, bottom] (m),
 // size = [width, height] cells, cell (m). rgb = velocity (0.5 centred, ±10 m/s), b = shear foam, a = wet.
@@ -79,15 +85,15 @@ export function createFlowBake({origin = [-34, -28.6], size: gridSize = [112, 88
    const i = z * width + x, j = i * 4;
    const wx = left + (x + .5) * cell, wz = bottom + (z + .5) * cell;
    const influence = rocks.reduce((max, rock) => {
-    if (!rock.z || wx < rock.x - .25) return max;
-    return Math.max(max, 1 - Math.hypot((wx - rock.x) * .45, wz - rock.y) / (rock.z + 1.4));
+    if (!rock.z || wx < rock.x - ROCK_INFLUENCE.lead) return max;
+    return Math.max(max, 1 - Math.hypot((wx - rock.x) * ROCK_INFLUENCE.xSquash, wz - rock.y) / (rock.z + ROCK_INFLUENCE.reach));
    }, 0);
    const shear = Math.abs((open(x, z + 1) ? vx[i + width] : vx[i]) -
     (open(x, z - 1) ? vx[i - width] : vx[i])) / (2 * cell);
-   pixels[j] = Math.round(clamp(.5 + vx[i] / 10, 0, 1) * 255);
-   pixels[j + 1] = Math.round(clamp(.5 + vz[i] / 10, 0, 1) * 255);
-   pixels[j + 2] = wet[i] ? Math.round(clamp((shear - .08) * influence * 1.9, 0, 1) * 255) : 0;
-   pixels[j + 3] = wet[i] * 255;
+   pixels[j] = Math.round(clamp(.5 + vx[i] / VELOCITY_RANGE, 0, 1) * BYTE);
+   pixels[j + 1] = Math.round(clamp(.5 + vz[i] / VELOCITY_RANGE, 0, 1) * BYTE);
+   pixels[j + 2] = wet[i] ? Math.round(clamp((shear - SHEAR_FOAM.from) * influence * SHEAR_FOAM.gain, 0, 1) * BYTE) : 0;
+   pixels[j + 3] = wet[i] * BYTE;
   }
   ready = true;
   texture.needsUpdate = true;
