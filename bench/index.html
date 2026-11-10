@@ -7,6 +7,9 @@ nav a{display:block;padding:11px 14px;border:1px solid #ffffff25;border-radius:1
 nav .foot{margin-top:auto;font-size:11px;color:#a5b7ae;line-height:1.6}nav .foot a{display:inline;padding:0;border:0;background:none;color:#e6be79}
 main{position:relative;display:grid;grid-template-rows:44px 1fr}main .bar{display:flex;align-items:center;gap:12px;padding:0 16px;font-size:12px;color:#c8d7ce;border-bottom:1px solid #ffffff20}main .bar b{color:#f3eee2;font-weight:550}main .bar a{color:#e6be79;text-decoration:none;margin-left:auto}main .bar button{font:inherit;color:inherit;background:#ffffff0c;border:1px solid #ffffff35;border-radius:8px;padding:5px 10px;cursor:pointer}
 iframe{width:100%;height:100%;border:0;background:#213343;display:block}.empty{display:grid;place-content:center;text-align:center;color:#a5b7ae;font-size:14px;line-height:1.7}
+.ui-tool{position:absolute;z-index:3;left:12px;top:52px;width:min(400px,calc(100% - 24px));max-height:calc(100% - 64px);overflow:auto;padding:12px;border:1px solid #ffffff35;border-radius:12px;background:#1d3030f5;color:#f3eee2;font-size:12px}
+.ui-tool h2{font-size:15px;margin:0 0 8px}.ui-tool input{width:100%;padding:8px;background:#1d292b;color:inherit;border:1px solid #ffffff50;border-radius:6px}.ui-tool p{color:#c8d7ce}
+.ui-tool ul{list-style:none;margin:0;padding:0}.ui-tool li{display:flex;gap:4px;margin-top:4px}.ui-tool button{font:inherit;text-align:left;color:inherit;background:#ffffff0c;border:1px solid #ffffff28;border-radius:6px;padding:5px 7px;cursor:pointer}.ui-tool li button:first-child{flex:1;overflow-wrap:anywhere}
 @media(max-width:760px){body{grid-template-columns:1fr;grid-template-rows:auto 1fr}nav{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid #ffffff20;padding:12px}nav h1,nav small,nav .foot,nav a span{display:none}nav a{padding:8px 12px;font-size:13px}}
 </style></head>
 <body>
@@ -32,17 +35,27 @@ iframe{width:100%;height:100%;border:0;background:#213343;display:block}.empty{d
   <code style="font-size:10px">npm i github:AbstractOcclusion-gif/ThreeJSCustomLibraries#v0.1.0</code></p>
 </nav>
 <main>
- <div class="bar"><b id="title">Pick a module</b><span id="hint"></span><button id="restart" type="button" hidden>Restart</button><a id="open" href="#" target="_blank" rel="noopener" hidden>Open separately ↗</a></div>
+ <div class="bar"><b id="title">Pick a module</b><button id="toggle-ui" type="button" aria-expanded="false" aria-controls="ui-tool">UI Tool</button><span id="hint"></span><button id="restart" type="button" hidden>Restart</button><a id="open" href="#" target="_blank" rel="noopener" hidden>Open separately ↗</a></div>
  <div id="viewport" class="empty"><div>Select a module on the left.<br>Each page has its own lil-gui panel and preset save/load.</div></div>
+ <section id="ui-tool" class="ui-tool" aria-labelledby="ui-tool-title" hidden>
+  <h2 id="ui-tool-title">UI Tool</h2>
+  <input type="search" aria-label="Find a demo control" placeholder="Find a demo control…">
+  <p role="status"></p>
+  <ul aria-label="Controls and pins"></ul>
+ </section>
 </main>
 <script type="module">
+import {createUITool} from './ui-tool.js';
 const links = [...document.querySelectorAll('nav a[data-tool]')], viewport = document.getElementById('viewport');
 let current = null, frame = null;
+const uiPanel = document.getElementById('ui-tool');
+const uiTool = createUITool({panel: uiPanel, toggle: document.getElementById('toggle-ui'), onOpenDemo: load});
 function load(tool, push = true) {
   const link = links.find(a => a.dataset.tool === tool); if (!link) return;
   links.forEach(a => a.classList.toggle('active', a === link));
   if (link.dataset.scene && !import.meta.env.DEV) {
     frame?.remove(); frame = null; current = tool;
+    uiTool.setDemo(tool, null);
     viewport.classList.add('empty'); viewport.textContent = 'This scene needs the local WebAquarium assets. Stage them and open the development bench.';
     document.getElementById('title').textContent = link.firstChild.textContent;
     document.getElementById('hint').textContent = '';
@@ -53,6 +66,7 @@ function load(tool, push = true) {
   const url = link.dataset.scene ? import.meta.env.BASE_URL + 'webaquarium/' + link.dataset.scene : `./${tool}/`;
   frame?.remove(); frame = document.createElement('iframe'); frame.src = url; frame.title = link.firstChild.textContent;
   frame.allow = 'fullscreen'; viewport.classList.remove('empty'); viewport.replaceChildren(frame); current = tool;
+  uiTool.setDemo(tool, frame);
   document.getElementById('title').textContent = link.firstChild.textContent; document.getElementById('hint').textContent = link.querySelector('span').textContent;
   const open = document.getElementById('open'); open.href = url; open.hidden = false; document.getElementById('restart').hidden = false;
   if (push) history.replaceState(null, '', `?tool=${tool}`);
@@ -62,6 +76,7 @@ document.getElementById('restart').onclick = () => current && load(current, fals
 const initial = new URLSearchParams(location.search).get('tool');
 if (initial === 'trees') load('vegetation');
 else if (initial) load(initial, false);
+else if (!uiPanel.hidden && uiTool.lastDemo) load(uiTool.lastDemo, false);
 // Entries with data-scene open an app served from private-assets/ (never deployed): show them only when it answers.
 for (const a of links.filter(a => a.dataset.scene)) fetch(import.meta.env.BASE_URL + 'webaquarium/' + a.dataset.scene.split('?')[0], {method: 'HEAD'}).then(r => { if (!r.ok || !(r.headers.get('content-type') || '').includes('html')) a.remove(); }).catch(() => a.remove());
 </script>

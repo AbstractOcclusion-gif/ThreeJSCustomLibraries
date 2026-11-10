@@ -3,6 +3,8 @@
 **Live bench:** https://abstractocclusion-gif.github.io/ThreeJSCustomLibraries/ — public module demos run in the browser
 (deep links: `…/bench/?tool=vegetation`). Deployed from `main` by `.github/workflows/pages.yml`.
 
+Open **UI Tool** in the bench toolbar to search the active demo's controls, reveal a setting in its original panel, or pin it for later. Pins and the last demo are remembered in the current browser. Use the demo's preset controls to save scene values. Shared module panels live beside their owning bench. Terrain and Vegetation both use `bench/terrain/controls.js` for terrain and grass coverage.
+
 Neutral Three.js modules extracted from Abstract Occlusion's projects. Plain ESM under `src/`, no build step; `bench/` holds one
 authoring page per module (Vite), `presets/` the JSON they save, `assets/` only free assets. Anything licensed (Synty packs,
 Enviro-derived sky textures, commercial FX sheets) is never in the repo: drop it in `private-assets/` and every module falls back
