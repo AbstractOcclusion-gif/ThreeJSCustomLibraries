@@ -133,8 +133,9 @@ and builds all its meshes from primitives. This port covers rigid members and ex
 `createGrassField({scene, geometries, map, color, placements, tileSize, flatColorMix})` — placements may carry `tint: [r, g, b]`
 (linear) which becomes `instanceColor`. `createSpecimens({scene, parts, atlas, atlasRects, placements, profiles})` instances one
 batch per kind with sway / flutter / contact sweep. `createProceduralMeadowTree(reference, {width, depth, crownHeight,
-asymmetry})` builds bark + leaf-card parts for it. `createFreeVegetation()` supplies a generated atlas, grass clump LODs and a
-tree reference so nothing licensed is needed; `loadSyntyVegetation({baseUrl})` / `createSyntyVariantLoader({baseUrl})` load a
+asymmetry})` and `createProceduralMeadowBush(reference)` build bark and leaf-card parts for it. The bush has several stems
+rooted at ground level and works with the specimen `bush` motion profile. `createFreeVegetation()` supplies a generated atlas,
+grass clump LODs and a shared plant reference; `loadSyntyVegetation({baseUrl})` / `createSyntyVariantLoader({baseUrl})` load a
 private prepared pack (SYNTY.md).
 
 ### Leaved trees

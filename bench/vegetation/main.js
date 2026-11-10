@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
-import {createGrassField, createSpecimens, createProceduralMeadowTree, createFreeVegetation, loadSyntyVegetation} from '../../src/vegetation/index.js';
+import {createGrassField, createSpecimens, createProceduralMeadowTree, createProceduralMeadowBush, createFreeVegetation, loadSyntyVegetation} from '../../src/vegetation/index.js';
 import {hash2, seededRandom} from '../../src/core/hash.js';
 import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder, detectAssets} from '../shared.js';
 import '../bench.css';
@@ -47,12 +47,19 @@ function buildGrass() {
 }
 function buildPlants() {
   specimens?.dispose();
-  const random = seededRandom(11), sites = kind => Array.from({length: kind === 'tree' ? P.plants.trees : P.plants.bushes}, () => { const a = random() * Math.PI * 2, r = 6 + random() * 34, x = Math.cos(a) * r, z = Math.sin(a) * r; return {x, z, y: heightAt(x, z) - .05, yaw: random() * Math.PI * 2, scale: kind === 'tree' ? .8 + random() * .5 : .35 + random() * .25}; });
+  function sites(kind) {
+    const tree = kind === 'tree', random = seededRandom(tree ? 11 : 13);
+    return Array.from({length: tree ? P.plants.trees : P.plants.bushes}, () => {
+      const a = random() * Math.PI * 2, r = 6 + random() * 34, x = Math.cos(a) * r, z = Math.sin(a) * r;
+      const yaw = random() * Math.PI * 2, size = random();
+      return {x, z, y: heightAt(x, z) - .05, yaw, scale: tree ? .8 + size * .5 : pack?.parts.bush ? .35 + size * .25 : .55 + size * .4};
+    });
+  }
   const reference = pack ? {parts: pack.parts.birch ?? Object.values(pack.parts)[0]} : free.reference;
   const treeParts = createProceduralMeadowTree(reference, {width: P.plants.treeWidth, depth: P.plants.treeWidth, crownHeight: P.plants.treeCrown, asymmetry: P.plants.asymmetry});
-  const bushParts = pack?.parts.bush ?? createProceduralMeadowTree(reference, {width: 1.3, depth: 1.3, crownHeight: .55, asymmetry: .6});
+  const bushParts = pack?.parts.bush ?? createProceduralMeadowBush(reference);
   specimens = createSpecimens({scene, parts: {tree: treeParts, bush: bushParts}, atlas: (pack ?? free).atlas, atlasRects: (pack ?? free).atlasRects,
-    placements: {tree: sites('tree'), bush: sites('bush')}, profiles: {tree: {mode: 'tree', height: 6.5}, bush: pack ? {mode: 'bush', height: 2.7} : {mode: 'bush', height: 3.4}}});
+    placements: {tree: sites('tree'), bush: sites('bush')}, profiles: {tree: {mode: 'tree', height: 6.5}, bush: {mode: 'bush', height: pack?.parts.bush ? 2.7 : 2.2}}});
   specimens.setCount(1e6);
 }
 buildGrass(); buildPlants();
