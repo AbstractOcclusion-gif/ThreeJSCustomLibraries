@@ -9,6 +9,22 @@ import {createPondShadow, POND_SHADOW_GLSL} from './pond-shadow.js';
 
 // WebAquarium's Fishing pond reflection settings.
 export const POND_REFLECTION_DEFAULTS = Object.freeze({on: true, mix: .75, distort: .08, resolution: 512, hz: 15, floor: .15});
+// What render(seconds, settings) uses for a setting the host leaves out. clarity drives the refraction; pondClarity is the
+// pond-optics clarity, read from the same settings.clarity but with its own default.
+const RENDER_DEFAULTS = Object.freeze({
+  clarity: 1, pondClarity: .93, haze: .25, depthDark: 1.2, bankFoam: 1, godRays: 0,
+  f0: .02, fresnelPower: 5, sunGlint: .07, reflection: 1, rippleStrength: 1, microRipples: 0,
+  caustics: 0, causticDepth: 2.4, causticFalloff: .35, causticFocus: .3, causticNormalScale: 1,
+  shaftLength: 4, godFalloff: .9, godSteps: 24, godColor: '#bfeaff', pondColor: '#377e68',
+  waveHeight: 0, wavelength: 1.2, waveDirection: 0, waveSpread: Math.PI / 4,   // m, m, rad, rad
+});
+const MAX_GOD_STEPS = 40;             // ray-march steps of the light shafts, upper bound
+const WATER_IOR = 1.333;              // refraction of the sun direction into the water
+const MIN_SUN_HEIGHT = .025;          // sun direction y: below this no caustics, shafts or pond shadow are drawn
+const MIN_MIRROR_EYE_HEIGHT = .005;   // m: an eye this close to the surface skips the planar mirror
+const CAUSTIC_MAP_SIZE = 512;         // texels of the projected caustic map
+const POND_CAUSTIC_MIP = 2.5;         // mip bias the volumetric shafts read the caustic map at (pond optics)
+const FALLBACK_AMBIENT = [.3, .3, .3];   // pond ambient when the sky hook has no uAmb
 const POND_ICE_LIGHT_GLSL = `
  uniform float freezeProgress;
  uniform sampler2D iceDamageMap;
@@ -76,7 +92,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
  const depth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
  const capture = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthTexture: depth});
  const waves = createWaveBank();
- const causticTarget = new THREE.WebGLRenderTarget(512, 512, {type: THREE.HalfFloatType, depthBuffer: false,
+ const causticTarget = new THREE.WebGLRenderTarget(CAUSTIC_MAP_SIZE, CAUSTIC_MAP_SIZE, {type: THREE.HalfFloatType, depthBuffer: false,
   ...(pondOptics ? {generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter} : {})});
  const causticGrid = new THREE.PlaneGeometry(2, 2, causticSegments, causticSegments).rotateX(-Math.PI / 2);
  const shadow = lightOccluders ? createPondShadow(renderer, lightOccluders) : null;
@@ -85,6 +101,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
  const ownsFoam = !foamTexture;
  const foamTile = foamTexture ?? createFoamTexture();
  foamTile.wrapS = foamTile.wrapT = THREE.RepeatWrapping;
+ const R = RENDER_DEFAULTS;
  const uniforms = {
   ...shadow?.uniforms,
   ...sky.uniforms,
@@ -94,24 +111,24 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   clipRange: {value: new THREE.Vector2(camera.near, camera.far)},
   bedClipToWorld: {value: new THREE.Matrix4()},
   causticMap: {value: causticTarget.texture},
-  causticDepth: {value: 2.4},
-  causticFalloff: {value: .35},
-  causticFocus: {value: .3},
-  causticNormalScale: {value: 1},
+  causticDepth: {value: R.causticDepth},
+  causticFalloff: {value: R.causticFalloff},
+  causticFocus: {value: R.causticFocus},
+  causticNormalScale: {value: R.causticNormalScale},
   // Volumetric shafts are a wide light sample; use filtered projection to avoid
   // reading the caustic triangles as a checker pattern through the volume.
-  pondCausticMip: {value: pondOptics ? 2.5 : 0},
+  pondCausticMip: {value: pondOptics ? POND_CAUSTIC_MIP : 0},
   uCausticOn: {value: 0},
   pondLightLevel: {value: 0},
   pondRefractedSun: {value: new THREE.Vector3(0, -1, 0)},
-  shaftLength: {value: 4},
-  godFalloff: {value: .9},
-  godColor: {value: new THREE.Color('#bfeaff')},
-  godSteps: {value: 24},
+  shaftLength: {value: R.shaftLength},
+  godFalloff: {value: R.godFalloff},
+  godColor: {value: new THREE.Color(R.godColor)},
+  godSteps: {value: R.godSteps},
   pondGodHalf: {value: false}, tPondGod: {value: null},
   currentTime: {value: 0},
   foamAmount: {value: .55},
-  bankFoam: {value: 1},
+  bankFoam: {value: R.bankFoam},
   foamFeather: {value: .65},
   refraction: {value: 1},
   rippleMap: {value: ripples.texture},
@@ -128,20 +145,20 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   godRays: {value: .55},
   impactFoam: {value: new THREE.Vector4()},
   waterTint: {value: new THREE.Color()},
-  pondColor: {value: new THREE.Color('#377e68')}, pondHaze: {value: .25}, pondDepthDark: {value: 1.2}, pondClarity: {value: .93},
-  pondAmbient: sky.uniforms.uAmb ?? {value: new THREE.Color(.3, .3, .3)},
-  f0: {value: .02}, fresnelPower: {value: 5}, sunGlint: {value: .07},
-  clarity: {value: 1},
-  reflectionStrength: {value: 1},
+  pondColor: {value: new THREE.Color(R.pondColor)}, pondHaze: {value: R.haze}, pondDepthDark: {value: R.depthDark}, pondClarity: {value: R.pondClarity},
+  pondAmbient: sky.uniforms.uAmb ?? {value: new THREE.Color(...FALLBACK_AMBIENT)},
+  f0: {value: R.f0}, fresnelPower: {value: R.fresnelPower}, sunGlint: {value: R.sunGlint},
+  clarity: {value: R.clarity},
+  reflectionStrength: {value: R.reflection},
   tPlanar: {value: null},
   uPlanarMatrix: {value: new THREE.Matrix4()},
   uPlanarMix: {value: 0},
   uPlanarDistort: {value: 0},
   uPlanarFloor: {value: 0},
   uUnderMirror: {value: 0},
-  rippleStrength: {value: 1},
-  microRipples: {value: 0},
-  caustics: {value: 0},
+  rippleStrength: {value: R.rippleStrength},
+  microRipples: {value: R.microRipples},
+  caustics: {value: R.caustics},
   freezeProgress: {value: 0},
   freezeMap: {value: freezeMap ?? foamTile},
   ...(iceDamage ? {iceDamageMap: {value: iceDamage.texture}, iceDamageBounds: {value: iceDamage.bounds},
@@ -516,7 +533,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   if (!settings?.on || uniforms.reflectionStrength.value <= 0) return;
   const waterLevel = surface.getWorldPosition(worldPosition).y;
   const eyeHeight = camera.getWorldPosition(eye).y - waterLevel;
-  if (Math.abs(eyeHeight) <= .005) return;
+  if (Math.abs(eyeHeight) <= MIN_MIRROR_EYE_HEIGHT) return;
   const below = eyeHeight < 0;
   const {resolution, mix, distort, floor, hz} = {...POND_REFLECTION_DEFAULTS, ...settings};
   planar.render(scene, camera, {height: waterLevel, below, resolution, hz});
@@ -582,16 +599,16 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    uniforms.uCausticOn.value = 0;
    if (shadow) shadow.uniforms.pondShadowOn.value = 0;
    uniforms.pondGodHalf.value = false;
-   uniforms.pondClarity.value = settings.clarity ?? .93;
+   uniforms.pondClarity.value = settings.clarity ?? R.pondClarity;
    if (settings.pondColor) uniforms.pondColor.value.set(settings.pondColor);
-   uniforms.pondHaze.value = settings.haze ?? .25;
-   uniforms.pondDepthDark.value = settings.depthDark ?? 1.2;
+   uniforms.pondHaze.value = settings.haze ?? R.haze;
+   uniforms.pondDepthDark.value = settings.depthDark ?? R.depthDark;
    if ((uniforms.freezeProgress.value >= 1 && !iceDamage?.active.value) || !surface.visible) return;
    renderer.getDrawingBufferSize(size);
    capture.setSize(Math.max(1, Math.floor(size.x * captureScale)), Math.max(1, Math.floor(size.y * captureScale)));
    uniforms.currentTime.value = seconds;
    uniforms.foamAmount.value = settings.foam;
-   uniforms.bankFoam.value = settings.bankFoam ?? 1;
+   uniforms.bankFoam.value = settings.bankFoam ?? R.bankFoam;
    uniforms.foamFeather.value = settings.foamFeather;
    uniforms.refraction.value = settings.refraction;
    uniforms.flowSpeed.value = settings.speed;
@@ -599,31 +616,31 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    uniforms.bakedFlow.value = flow.ready;
    uniforms.waveTime.value = settings.waveTime ?? seconds;
    uniforms.uWindTime.value = uniforms.waveTime.value;
-   uniforms.godRays.value = settings.godRays ?? 0;
+   uniforms.godRays.value = settings.godRays ?? R.godRays;
    if (settings.tint) uniforms.waterTint.value.set(settings.tint);
-   uniforms.clarity.value = settings.clarity ?? 1;
-   uniforms.f0.value = settings.f0 ?? .02;
-   uniforms.fresnelPower.value = settings.fresnelPower ?? 5;
-   uniforms.sunGlint.value = settings.sunGlint ?? .07;
-   uniforms.reflectionStrength.value = settings.reflection ?? 1;
-   uniforms.rippleStrength.value = settings.rippleStrength ?? 1;
-   uniforms.microRipples.value = settings.microRipples ?? 0;
-   uniforms.caustics.value = settings.caustics ?? 0;
-   uniforms.causticDepth.value = settings.causticDepth ?? 2.4;
-   uniforms.causticFalloff.value = settings.causticFalloff ?? .35;
-   uniforms.causticFocus.value = Math.max(0, settings.causticFocus ?? .3);
-   uniforms.causticNormalScale.value = Math.max(0, settings.causticNormalScale ?? 1);
-   uniforms.shaftLength.value = settings.shaftLength ?? 4;
-   uniforms.godFalloff.value = settings.godFalloff ?? .9;
-   uniforms.godSteps.value = THREE.MathUtils.clamp(Math.round(settings.godSteps ?? 24), 1, 40);
+   uniforms.clarity.value = settings.clarity ?? R.clarity;
+   uniforms.f0.value = settings.f0 ?? R.f0;
+   uniforms.fresnelPower.value = settings.fresnelPower ?? R.fresnelPower;
+   uniforms.sunGlint.value = settings.sunGlint ?? R.sunGlint;
+   uniforms.reflectionStrength.value = settings.reflection ?? R.reflection;
+   uniforms.rippleStrength.value = settings.rippleStrength ?? R.rippleStrength;
+   uniforms.microRipples.value = settings.microRipples ?? R.microRipples;
+   uniforms.caustics.value = settings.caustics ?? R.caustics;
+   uniforms.causticDepth.value = settings.causticDepth ?? R.causticDepth;
+   uniforms.causticFalloff.value = settings.causticFalloff ?? R.causticFalloff;
+   uniforms.causticFocus.value = Math.max(0, settings.causticFocus ?? R.causticFocus);
+   uniforms.causticNormalScale.value = Math.max(0, settings.causticNormalScale ?? R.causticNormalScale);
+   uniforms.shaftLength.value = settings.shaftLength ?? R.shaftLength;
+   uniforms.godFalloff.value = settings.godFalloff ?? R.godFalloff;
+   uniforms.godSteps.value = THREE.MathUtils.clamp(Math.round(settings.godSteps ?? R.godSteps), 1, MAX_GOD_STEPS);
    if (settings.godColor) uniforms.godColor.value.set(settings.godColor);
    uniforms.pondLightLevel.value = surface.getWorldPosition(worldPosition).y;
-   const sun = uniforms.uSkySun.value, eta = 1 / 1.333;
+   const sun = uniforms.uSkySun.value, eta = 1 / WATER_IOR;
    uniforms.pondRefractedSun.value.set(-eta * sun.x, -Math.sqrt(1 - eta * eta * (1 - sun.y * sun.y)), -eta * sun.z);
    uniforms.clipRange.value.set(camera.near, camera.far);
    if (settings.impactFoam) uniforms.impactFoam.value.copy(settings.impactFoam);
    if (settings.windWaves) waves.configure(settings.windWaves);
-   else waves.update(settings.waveHeight ?? 0, settings.wavelength ?? 1.2, settings.waveDirection ?? 0, settings.waveSpread ?? Math.PI / 4);
+   else waves.update(settings.waveHeight ?? R.waveHeight, settings.wavelength ?? R.wavelength, settings.waveDirection ?? R.waveDirection, settings.waveSpread ?? R.waveSpread);
    const previous = renderer.getRenderTarget();
    const face = renderer.getActiveCubeFace(), level = renderer.getActiveMipmapLevel();
    const scissorTest = renderer.getScissorTest();
@@ -632,8 +649,8 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    surface.visible = false;
    try {
     renderer.setScissorTest(false);
-    if (sun.y > .025) shadow?.render(ripples.bounds, uniforms.pondLightLevel.value, uniforms.pondRefractedSun.value, settings);
-    if ((uniforms.caustics.value > 0 || uniforms.godRays.value > 0) && sun.y > .025) {
+    if (sun.y > MIN_SUN_HEIGHT) shadow?.render(ripples.bounds, uniforms.pondLightLevel.value, uniforms.pondRefractedSun.value, settings);
+    if ((uniforms.caustics.value > 0 || uniforms.godRays.value > 0) && sun.y > MIN_SUN_HEIGHT) {
      renderer.setRenderTarget(causticTarget);
      renderer.render(causticScene, causticCamera);
      uniforms.uCausticOn.value = 1;

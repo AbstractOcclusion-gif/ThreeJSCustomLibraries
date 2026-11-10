@@ -34,11 +34,23 @@ export const OCEAN_PRESETS = Object.freeze({
   rough: {swell: 1.4, swellLength: 82, chop: 2, choppiness: .85, whitecaps: 1},
 });
 
+// Look and behaviour constants outside OCEAN_DEFAULTS (not in the panels or presets).
+const DEFAULT_WATER_TYPE = 'Open ocean II';   // Jerlov type when captureScene is not told one
+const WAKE_RESOLUTION = 256;                  // texels across the moving ripple window, unless wake.resolution says
+const FOAM_TILES = Object.freeze({foam: 8, wake: 4, streakStretch: 2});   // m per foam tile at foamScale 1; streak length x width
+// Subsurface scatter through the crests (uScatter*, uSss*): colour before captureScene sets it from the Jerlov body colour.
+const SCATTER = Object.freeze({color: '#0d3852', ambient: [.3, .3, .3], intensity: 2, anisotropy: .5,
+  crestFalloff: 2, pinch: [.1, .6], pinchFalloff: 1.5});
+const PLANAR_MIN_EYE_HEIGHT = .05;            // m: at or below the surface the mirror pass is skipped
+const WIND_CHOP = Object.freeze({base: .75, perMetrePerSecond: .045});   // chop x (base + gain x wind speed) when a wind is given
+const MIN_SEA_WIND = .1;                      // m/s: floor of the sea state's own wind when scaling by the weather wind
+const GEOMETRY_FALLOFF = 6;                   // rim spacing grows with |x|^this
+
 // Vertices concentrated near the origin, spacing widening offshore (extent ~ near + far metres at the rim).
 export function createOceanGeometry({segments = 224, near = 150, far = 7100} = {}) {
   const geometry = new THREE.PlaneGeometry(2, 2, segments, segments).rotateX(-Math.PI / 2);
   const positions = geometry.attributes.position;
-  const spread = x => Math.sign(x) * (near * Math.abs(x) + far * Math.abs(x) ** 6);
+  const spread = x => Math.sign(x) * (near * Math.abs(x) + far * Math.abs(x) ** GEOMETRY_FALLOFF);
   for (let i = 0; i < positions.count; i++) positions.setXYZ(i, spread(positions.getX(i)), 0, spread(positions.getZ(i)));
   geometry.computeBoundingSphere();
   return geometry;
@@ -48,7 +60,7 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
   clipmap: clipmapSettings, caustics: causticSettings = false, wake: wakeSettings = false, exclusion: exclude = false} = {}) {
   const fft = renderer && fftOptions !== false ? new OceanFft(renderer, fftOptions) : null;
   const windDetail = fft ? createWaveBank() : null;
-  const obstacles = fft && wakeSettings ? new ObstacleFootprint(renderer, wakeSettings.resolution ?? 256) : null;
+  const obstacles = fft && wakeSettings ? new ObstacleFootprint(renderer, wakeSettings.resolution ?? WAKE_RESOLUTION) : null;
   const wake = obstacles ? new SimWindow(renderer, wakeSettings, obstacles.uniforms) : null;
   const caustics = fft && causticSettings ? createOceanCaustics(fft, sky.uniforms.uSkySun, causticSettings, wake) : null;
   const capture = renderer ? new THREE.WebGLRenderTarget(1, 1, {
@@ -67,6 +79,7 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
   const ownsGeometry = !geometry && !useClipmap, ownsLace = !laceTexture;
   if (ownsGeometry) geometry = createOceanGeometry();
   const lace = laceTexture ?? createLaceTexture();
+  const D = OCEAN_DEFAULTS;
   lace.wrapS = lace.wrapT = THREE.RepeatWrapping;
   const uniforms = {
     ...sky.uniforms,
@@ -74,33 +87,34 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
     ...windDetail?.uniforms,
     ...wake?.uniforms,
     ...(useClipmap ? {uMorphStart: {value: 0}, uMorphScale: {value: 1}} : {}),
-    clock: {value: 0}, heading: {value: 0}, swell: {value: .65},
-    swellLength: {value: 65}, chop: {value: .8}, choppiness: {value: .65},
-    whitecaps: {value: .75}, lace: {value: lace},
+    // Starting values; apply() below sets every OCEAN_DEFAULTS-driven one from the settings.
+    clock: {value: 0}, heading: {value: 0}, swell: {value: D.swell},
+    swellLength: {value: D.swellLength}, chop: {value: D.chop}, choppiness: {value: D.choppiness},
+    whitecaps: {value: D.whitecaps}, lace: {value: lace},
     waterTint: {value: new THREE.Color()}, foamTint: {value: new THREE.Color()},
-    reflection: {value: 1}, fresnelPower: {value: 5}, glint: {value: 1}, fineRipples: {value: 1},
-    foamOpacity: {value: .82}, foamFeather: {value: .25}, foamScale: {value: 1},
+    reflection: {value: D.reflection}, fresnelPower: {value: D.fresnelPower}, glint: {value: D.glint}, fineRipples: {value: D.fineRipples},
+    foamOpacity: {value: D.foamOpacity}, foamFeather: {value: D.foamFeather}, foamScale: {value: D.foamScale},
     ...(fft ? {
       tWhitecap: {value: lace}, tWakeFoam: {value: lace},
-      uWindDirXZ: {value: new THREE.Vector2(1, 0)}, uFoamTileSize: {value: 8},
-      uFoamFeather: {value: .25}, uFoamStreakStretch: {value: 2}, uFoamTextureInfluence: {value: 1},
+      uWindDirXZ: {value: new THREE.Vector2(1, 0)}, uFoamTileSize: {value: FOAM_TILES.foam},
+      uFoamFeather: {value: D.foamFeather}, uFoamStreakStretch: {value: FOAM_TILES.streakStretch}, uFoamTextureInfluence: {value: 1},
       uFoamTime: {value: 0}, uFoamPatternDrift: {value: 0}, uSurfaceDetailLod: {value: 1},
-      uWakeFoamTileSize: {value: 4}, uWakeFoamFeather: {value: .25}, uWakeFoamTextureInfluence: {value: 1},
+      uWakeFoamTileSize: {value: FOAM_TILES.wake}, uWakeFoamFeather: {value: D.foamFeather}, uWakeFoamTextureInfluence: {value: 1},
     } : {}),
     ...(capture ? {
       tOceanScene: {value: capture.texture}, tOceanSceneDepth: {value: capture.depthTexture},
       uOceanInvVP: {value: new THREE.Matrix4()}, uOceanVP: {value: new THREE.Matrix4()}, uOceanSceneReady: {value: false},
       uOceanWaterLayer: {value: false},
-      uOceanExtinction: {value: new THREE.Vector3(...JERLOV['Open ocean II'].extinction)},
-      uOceanRefraction: {value: .6}, uOceanClarity: {value: 1}, uOceanTir: {value: .4},
-      uReflectionMode: {value: 0}, uReflectionMix: {value: .65}, uReflectionSteps: {value: 16},
+      uOceanExtinction: {value: new THREE.Vector3(...JERLOV[DEFAULT_WATER_TYPE].extinction)},
+      uOceanRefraction: {value: D.refractionStrength}, uOceanClarity: {value: D.clarity}, uOceanTir: {value: D.tirStrength},
+      uReflectionMode: {value: 0}, uReflectionMix: {value: D.reflectionMix}, uReflectionSteps: {value: D.reflectionSteps},
       tPlanarReflection: {value: null}, uPlanarMatrix: {value: planar.matrix},
-      uScatterColor: {value: new THREE.Color('#0d3852')},
-      uScatterAmbient: sky.uniforms.uAmb ?? {value: new THREE.Color(.3, .3, .3)},
-      uScatterIntensity: {value: 2}, uScatterAnisotropy: {value: .5},
+      uScatterColor: {value: new THREE.Color(SCATTER.color)},
+      uScatterAmbient: sky.uniforms.uAmb ?? {value: new THREE.Color(...SCATTER.ambient)},
+      uScatterIntensity: {value: SCATTER.intensity}, uScatterAnisotropy: {value: SCATTER.anisotropy},
       uScatterAmbientTerm: {value: 1}, uScatterSunTerm: {value: 1},
-      uSssIntensity: {value: 3}, uSssSunFalloff: {value: 2}, uSssPinchMin: {value: .1},
-      uSssPinchMax: {value: .6}, uSssPinchFalloff: {value: 1.5},
+      uSssIntensity: {value: D.crestGlow}, uSssSunFalloff: {value: SCATTER.crestFalloff}, uSssPinchMin: {value: SCATTER.pinch[0]},
+      uSssPinchMax: {value: SCATTER.pinch[1]}, uSssPinchFalloff: {value: SCATTER.pinchFalloff},
     } : {}),
   };
   const material = new THREE.ShaderMaterial({
@@ -432,8 +446,8 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
     uniforms.foamFeather.value = state.foamFeather; uniforms.foamScale.value = state.foamScale;
     if (fft) {
       uniforms.uFoamFeather.value = state.foamFeather;
-      uniforms.uFoamTileSize.value = 8 * state.foamScale;
-      uniforms.uWakeFoamTileSize.value = 4 * state.foamScale;
+      uniforms.uFoamTileSize.value = FOAM_TILES.foam * state.foamScale;
+      uniforms.uWakeFoamTileSize.value = FOAM_TILES.wake * state.foamScale;
     }
     if (capture) {
       uniforms.uOceanRefraction.value = state.refractionStrength;
@@ -468,9 +482,9 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
           return height;
         }`,
     } : null,
-    captureScene(scene, camera, {waterType = 'Open ocean II', bodyGain = .45, excludeHulls = true} = {}) {
+    captureScene(scene, camera, {waterType = DEFAULT_WATER_TYPE, bodyGain = .45, excludeHulls = true} = {}) {
       if (!capture) throw new Error('Ocean scene capture requires a renderer');
-      const water = Object.hasOwn(JERLOV, waterType) ? JERLOV[waterType] : JERLOV['Open ocean II'];
+      const water = Object.hasOwn(JERLOV, waterType) ? JERLOV[waterType] : JERLOV[DEFAULT_WATER_TYPE];
       uniforms.uOceanExtinction.value.fromArray(water.extinction);
       uniforms.uScatterColor.value.setRGB(...water.body, THREE.SRGBColorSpace).multiplyScalar(bodyGain);
       const previous = renderer.getRenderTarget();
@@ -484,7 +498,7 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
       try {
         if (exclusion) exclusion.uniforms.uExclusionOn.value = 0;
         uniforms.uReflectionMode.value = 0;
-        if (state.reflectionMix > 0 && state.reflectionSource === 'planar' && camera.getWorldPosition(eye).y > .05) {
+        if (state.reflectionMix > 0 && state.reflectionSource === 'planar' && camera.getWorldPosition(eye).y > PLANAR_MIN_EYE_HEIGHT) {
           planar.render(scene, camera, {resolution: state.planarResolution, hz: state.planarHz});
           uniforms.tPlanarReflection.value = planar.texture;
           uniforms.uReflectionMode.value = 1;
@@ -562,7 +576,7 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
       windHeading ??= state.heading;
       uniforms.clock.value += dt * state.waveSpeed;
       if (capture) uniforms.uOceanSceneReady.value = false;
-      uniforms.chop.value = state.chop * (windSpeed ? .75 + .045 * windSpeed : 1);
+      uniforms.chop.value = state.chop * (windSpeed ? WIND_CHOP.base + WIND_CHOP.perMetrePerSecond * windSpeed : 1);
       uniforms.heading.value = THREE.MathUtils.degToRad(windHeading);
       if (cameraPosition) clipmap?.update(cameraPosition);
       if (fft) {
@@ -572,7 +586,7 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
         uniforms.uWindDirXZ.value.set(Math.cos(uniforms.heading.value), Math.sin(uniforms.heading.value));
         uniforms.uFoamPatternDrift.value = wind * fft.foam.drift;
         uniforms.uFoamTime.value = uniforms.clock.value;
-        fft.setWeatherWind(wind, fft.sea.windDrivesSeaState ? wind / Math.max(.1, fft.sea.windSpeed) : 1, windHeading);
+        fft.setWeatherWind(wind, fft.sea.windDrivesSeaState ? wind / Math.max(MIN_SEA_WIND, fft.sea.windSpeed) : 1, windHeading);
         fftTime += dt * state.waveSpeed;
         syncSurf(windHeading);
         if (surfSettings) setSurfTime(fft.surf, fftTime, surfSettings.period);

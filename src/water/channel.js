@@ -1,6 +1,7 @@
 import {BufferGeometry, CatmullRomCurve3, Float32BufferAttribute, Vector3} from 'three';
 
 // A winding downhill channel: control sections [x, z, width, depth, speed] along +X, Catmull-Rom between them.
+// Metres and m/s; profiles below are shares of the half width (|across| > 1 is bank).
 export const DEFAULT_SECTIONS = [
  [-34, -7, 2.5, .55, 2.1],
  [-23, -10, 2.8, .7, 1.8],
@@ -10,13 +11,22 @@ export const DEFAULT_SECTIONS = [
  [24, 1, 8.2, 1.8, .48],
  [37, -2, 8.5, 1.9, .42],
 ];
+const SECTION = Object.freeze({width: 2, depth: 3, speed: 4});   // column of each value in a section row
+const ROWS = 120;                    // cross sections sampled along the curve
+const DROP_CURVE = 1.65;             // height = drop x (1 - t)^this: steep upstream, flattening toward the outlet
+const RIVER = Object.freeze({speed: .72, width: 1.45, depth: 1.35});   // the river preset scales the stream sections
+const BED_POWER = 4;                 // depth x (1 - |across|^this): a flat-bottomed U across the wet width
+const BANK = Object.freeze({slope: 2.5, maxHeight: 3, belowWater: .012});   // m per unit beyond the edge; m; m (no z-fight at the edge)
+// Vertex colours: dry bank grass beyond grassFrom (share of the half width), wet bed inside, with a faint stripe pattern.
+const COLORS = Object.freeze({grass: [.105, .145, .077], bed: [.235, .198, .139], grassFrom: 1.1,
+  stripe: {base: .94, amount: .06, along: 2.3, across: 12}});
 const lerp = (a, b, t) => a + (b - a) * t;
 const wetProfile = [-1, -.85, -.6, 0, .6, .85, 1];
 const bankProfile = [-2.4, -1.35, ...wetProfile, 1.35, 2.4];
 
 export function createChannel({width = 1, depth = 1, drop = 3, river = false, sections = DEFAULT_SECTIONS} = {}) {
  const curve = new CatmullRomCurve3(sections.map(([x, z]) => new Vector3(x, 0, z)));
- const count = 120;
+ const count = ROWS;
  const rows = [];
  let distance = 0;
  let travel = 0;
@@ -26,7 +36,7 @@ export function createChannel({width = 1, depth = 1, drop = 3, river = false, se
   const segment = Math.min(sections.length - 2, Math.floor(t * (sections.length - 1)));
   const fraction = t * (sections.length - 1) - segment;
   const sectionValue = index => lerp(sections[segment][index], sections[segment + 1][index], fraction);
-  const speed = sectionValue(4) * (river ? .72 : 1);
+  const speed = sectionValue(SECTION.speed) * (river ? RIVER.speed : 1);
   if (i > 0) {
    const previous = rows[i - 1];
    const length = centre.distanceTo(previous.centre);
@@ -35,9 +45,9 @@ export function createChannel({width = 1, depth = 1, drop = 3, river = false, se
   }
   rows.push({
    centre, distance, travel, speed,
-   height: drop * Math.pow(1 - t, 1.65),
-   width: sectionValue(2) * width * (river ? 1.45 : 1),
-   depth: sectionValue(3) * depth * (river ? 1.35 : 1),
+   height: drop * Math.pow(1 - t, DROP_CURVE),
+   width: sectionValue(SECTION.width) * width * (river ? RIVER.width : 1),
+   depth: sectionValue(SECTION.depth) * depth * (river ? RIVER.depth : 1),
   });
  }
 
@@ -47,15 +57,15 @@ export function createChannel({width = 1, depth = 1, drop = 3, river = false, se
   for (const row of rows) {
    for (const across of profile) {
     const edge = Math.abs(across);
-    const bed = -row.depth * Math.max(0, 1 - edge ** 4);
-    const bank = edge > 1 ? Math.min(3, (edge - 1) * 2.5) : 0;
+    const bed = -row.depth * Math.max(0, 1 - edge ** BED_POWER);
+    const bank = edge > 1 ? Math.min(BANK.maxHeight, (edge - 1) * BANK.slope) : 0;
     // Cross sections keep a shared X so wide banks cannot fold over tight bends.
     positions.push(row.centre.x,
-      row.height + (water ? 0 : bed + bank - .012),
+      row.height + (water ? 0 : bed + bank - BANK.belowWater),
       row.centre.z + row.width * across);
     flow.push(row.travel, across, row.distance);
-    const variation = .94 + .06 * Math.cos(row.distance * 2.3 + across * 12);
-    const ground = edge > 1.1 ? [.105, .145, .077] : [.235, .198, .139];
+    const {stripe} = COLORS, variation = stripe.base + stripe.amount * Math.cos(row.distance * stripe.along + across * stripe.across);
+    const ground = edge > COLORS.grassFrom ? COLORS.grass : COLORS.bed;
     colors.push(...ground.map(component => component * variation));
    }
   }
