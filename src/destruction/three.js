@@ -26,3 +26,14 @@ export function createThreeStructureView({system,scene}){
  update();
  return{members:roots,update,dispose(){if(disposed)return;disposed=true;for(const root of [...roots,...debris])scene.remove(root);for(const m of materials)m.dispose();geometry.dispose();}};
 }
+
+export {createThreeBendableView} from './three/bendable.js';
+export {createThreeBendableStructureView} from './three/assemblies.js';
+export {loadPartLibrary} from './three/part-library.js';
+export {createThreeFracturedChunkView} from './three/chunks.js';
+export {createThreeMasonryView,extractMasonryUnits,extractFacadePatches} from './three/masonry.js';
+export {createRoofTilesView} from './three/roof-tiles.js';
+export {createStructureDebrisBindings} from './three/debris.js';
+export {createThreeCableView} from './three/cable.js';
+export {createThreeCableRigView} from './three/cable-rigs.js';
+export {createDebrisFX} from './three/debris-fx.js';

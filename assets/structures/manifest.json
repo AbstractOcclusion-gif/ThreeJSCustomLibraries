@@ -1,0 +1,1773 @@
+{
+  "schema": "glider.structures.catalogue",
+  "version": 1,
+  "profiles": {
+    "url": "material-profiles.json",
+    "sha256": "6b3a7f7fae475be8422095d002725c0e84e9fc98cdd56da06c20423b9ab881e6"
+  },
+  "atlas": {
+    "url": "atlas.png"
+  },
+  "assets": [
+    {
+      "id": "balcony_rail_oak_1000x900x60_v00",
+      "type": "balcony.rail",
+      "materialId": "oak",
+      "sizeMm": [
+        1000,
+        900,
+        60
+      ],
+      "variant": 0,
+      "definition": "farmhouse/balcony_rail_oak_1000x900x60_v00.destructible.json",
+      "model": "farmhouse/balcony_rail_oak_1000x900x60_v00.glb",
+      "sha256": {
+        "definition": "acc96ce2b13c79f2134b1258d1ac1762e15f983dbfdddb074fad3b169a268f6d",
+        "model": "a23ab3a3b8663fc710dbe1e5b204792b511dbc2f29d31836470e5f6b1382f679"
+      },
+      "physicalChunks": 4,
+      "collisionHulls": 4,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "balcony_rail_oak_2000x900x60_v00",
+      "type": "balcony.rail",
+      "materialId": "oak",
+      "sizeMm": [
+        2000,
+        900,
+        60
+      ],
+      "variant": 0,
+      "definition": "farmhouse/balcony_rail_oak_2000x900x60_v00.destructible.json",
+      "model": "farmhouse/balcony_rail_oak_2000x900x60_v00.glb",
+      "sha256": {
+        "definition": "ac9f87cf04e40aa8298484c671aa3b7606d539aae4ca216658f8baa2277d863f",
+        "model": "19319c410d9b11e438cfb634ac4304174783e095ff7c172904e13c9b4079b5f5"
+      },
+      "physicalChunks": 4,
+      "collisionHulls": 4,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "bonded_house_brick_end_door_v00",
+      "type": "test.house.bonded.end.door",
+      "materialId": "brick",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/bonded_house_brick_end_door_v00.destructible.json",
+      "model": "masonry-house/bonded_house_brick_end_door_v00.glb",
+      "sha256": {
+        "definition": "3c670da2448564316a4b4019a9580b099136748a8ff3913129f54ce5fb786805",
+        "model": "577a4babeb532527056b49ab1c929c2df2eb95db4b7f458554971295a37f7822"
+      },
+      "physicalChunks": 428,
+      "collisionHulls": 428,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "bonded_house_brick_end_window_v00",
+      "type": "test.house.bonded.end.window",
+      "materialId": "brick",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/bonded_house_brick_end_window_v00.destructible.json",
+      "model": "masonry-house/bonded_house_brick_end_window_v00.glb",
+      "sha256": {
+        "definition": "3e9ebdee711098f0326b91e374263a96c3c554ce6435091ab2670a24cb233fa1",
+        "model": "a49cb18fe7cfb39ad963965f6e2d7fd5e1ab63424a56b604030a4dc6d54d93dd"
+      },
+      "physicalChunks": 452,
+      "collisionHulls": 452,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "bonded_house_brick_side_window_v00",
+      "type": "test.house.bonded.side.window",
+      "materialId": "brick",
+      "sizeMm": [
+        4480,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/bonded_house_brick_side_window_v00.destructible.json",
+      "model": "masonry-house/bonded_house_brick_side_window_v00.glb",
+      "sha256": {
+        "definition": "32cbe24c04462fa01fbf55e4c7df43c897c06a39c649f465d804d1c7237c49d7",
+        "model": "85483fd14c24a9fbdf4beb1b0106636f48f6c40b349e120f67410730927dbce8"
+      },
+      "physicalChunks": 494,
+      "collisionHulls": 494,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "bonded_house_stone_dressed_end_door_v00",
+      "type": "test.house.bonded.end.door",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/bonded_house_stone_dressed_end_door_v00.destructible.json",
+      "model": "masonry-house/bonded_house_stone_dressed_end_door_v00.glb",
+      "sha256": {
+        "definition": "8e1c54c99d584090669629dfb89df7b6b25e57d31f28ddec184877093c4b1ddb",
+        "model": "50d36982670732d8f3a3d99e6062c7b2632404bebf86b097e2a0dee4e159bcac"
+      },
+      "physicalChunks": 118,
+      "collisionHulls": 118,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "bonded_house_stone_dressed_end_window_v00",
+      "type": "test.house.bonded.end.window",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/bonded_house_stone_dressed_end_window_v00.destructible.json",
+      "model": "masonry-house/bonded_house_stone_dressed_end_window_v00.glb",
+      "sha256": {
+        "definition": "01872b1d1daefbfccf298ccc197e2d290eca2baa02b4cb67d66f63bd3067b7b3",
+        "model": "11665561d51eb1b6f33da92572defc6f0e9467aaebd6ef48372583bd67e0ae0c"
+      },
+      "physicalChunks": 125,
+      "collisionHulls": 125,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "bonded_house_stone_dressed_side_window_v00",
+      "type": "test.house.bonded.side.window",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        6480,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/bonded_house_stone_dressed_side_window_v00.destructible.json",
+      "model": "masonry-house/bonded_house_stone_dressed_side_window_v00.glb",
+      "sha256": {
+        "definition": "07b8fd2e7e99519c1c5d3c229407e13d68a71eeb32ad98f1d3cfd547b11436b9",
+        "model": "2a17e6f5dc97def71ffc0999b56df82a7e5dc6b96da865f8a8ab483af346189e"
+      },
+      "physicalChunks": 218,
+      "collisionHulls": 218,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "floor_boards_oak_1000x35x2000_v00",
+      "type": "floor.boards",
+      "materialId": "oak",
+      "sizeMm": [
+        1000,
+        35,
+        2000
+      ],
+      "variant": 0,
+      "definition": "farmhouse/floor_boards_oak_1000x35x2000_v00.destructible.json",
+      "model": "farmhouse/floor_boards_oak_1000x35x2000_v00.glb",
+      "sha256": {
+        "definition": "0329232ca85fd82d355ac918e264711d50ab0e3a8320531316d78390458d7afa",
+        "model": "457fcc393de96aa322a03d70009d168f8a37fb930a2b94d3f9515c8dde0f7513"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "floor_boards_oak_830x35x2000_v00",
+      "type": "floor.boards",
+      "materialId": "oak",
+      "sizeMm": [
+        830,
+        35,
+        2000
+      ],
+      "variant": 0,
+      "definition": "farmhouse/floor_boards_oak_830x35x2000_v00.destructible.json",
+      "model": "farmhouse/floor_boards_oak_830x35x2000_v00.glb",
+      "sha256": {
+        "definition": "1ed576dec8f7fbc3f5ae54aeb3db3db082adf4eb30c8398afc9829072c923f78",
+        "model": "269e6b8af10b7e4a207788e0e6f504dd0640294fbfed0248a11fdf78948ca518"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "floor_joist_oak_3000x200x80_v00",
+      "type": "floor.joist",
+      "materialId": "oak",
+      "sizeMm": [
+        3000,
+        200,
+        80
+      ],
+      "variant": 0,
+      "definition": "farmhouse/floor_joist_oak_3000x200x80_v00.destructible.json",
+      "model": "farmhouse/floor_joist_oak_3000x200x80_v00.glb",
+      "sha256": {
+        "definition": "34da17de50da61daa01ccca99d28916b77dbadc8c75f8532eb7d4682c4f985b0",
+        "model": "f47f3b1bfb2b74c9731896fd583cc626277b6c2aa8c82257815e3aabf3af6156"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "floor_joist_oak_4000x200x80_v00",
+      "type": "floor.joist",
+      "materialId": "oak",
+      "sizeMm": [
+        4000,
+        200,
+        80
+      ],
+      "variant": 0,
+      "definition": "farmhouse/floor_joist_oak_4000x200x80_v00.destructible.json",
+      "model": "farmhouse/floor_joist_oak_4000x200x80_v00.glb",
+      "sha256": {
+        "definition": "493d08286e4a9c3099a5a6b51f285ad8cb3afd61be566abd5ba198ec61e9f51e",
+        "model": "eff56cc1c4cc6432eacff11221d2aef8436a86472761346989908d83e15540e8"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "floor_master_beam_oak_5000x350x250_v00",
+      "type": "floor.master_beam",
+      "materialId": "oak",
+      "sizeMm": [
+        5000,
+        350,
+        250
+      ],
+      "variant": 0,
+      "definition": "farmhouse/floor_master_beam_oak_5000x350x250_v00.destructible.json",
+      "model": "farmhouse/floor_master_beam_oak_5000x350x250_v00.glb",
+      "sha256": {
+        "definition": "5b9335b7d901bdffae5d1b0725c1b906e5e6d7bab318ab4a8da27bc7a921f9a9",
+        "model": "70c7720d4f7fad78bb320e9f57cbdbe2312f20f1873a4a93b009e46a0ebd18f8"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "frame_beam_oak_3000x250x200_v00",
+      "type": "frame.beam",
+      "materialId": "oak",
+      "sizeMm": [
+        3000,
+        250,
+        200
+      ],
+      "variant": 0,
+      "definition": "farmhouse/frame_beam_oak_3000x250x200_v00.destructible.json",
+      "model": "farmhouse/frame_beam_oak_3000x250x200_v00.glb",
+      "sha256": {
+        "definition": "ffa843994d5d76f440b2e16286480063fd2f9e95405519dca79b1d6fc2a2f371",
+        "model": "c573792675b114e2443d7861cb5584d49f4e1ab9fc4b910956908f4af342acac"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "frame_brace_oak_1500x150x150_v00",
+      "type": "frame.brace",
+      "materialId": "oak",
+      "sizeMm": [
+        1500,
+        150,
+        150
+      ],
+      "variant": 0,
+      "definition": "farmhouse/frame_brace_oak_1500x150x150_v00.destructible.json",
+      "model": "farmhouse/frame_brace_oak_1500x150x150_v00.glb",
+      "sha256": {
+        "definition": "2f7e0d98f88319f968cf8df9468f6f7ff77dd781533d8cbb7af528998b89c4ab",
+        "model": "6e52698b6b65230140ad4bbc9b33a7f83b9019eb157a5f76bff6f0ab30aa3b38"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "frame_post_oak_200x2200x200_v00",
+      "type": "frame.post",
+      "materialId": "oak",
+      "sizeMm": [
+        200,
+        2200,
+        200
+      ],
+      "variant": 0,
+      "definition": "farmhouse/frame_post_oak_200x2200x200_v00.destructible.json",
+      "model": "farmhouse/frame_post_oak_200x2200x200_v00.glb",
+      "sha256": {
+        "definition": "cfb0bae550aa0db00ec51f0176c4bde4b6807ebdab56926d752c839da9abc901",
+        "model": "107222fea55f4c26d3e7130437f80e9342ae3ea017016a48461785bd5f127f54"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "frame_post_oak_200x3000x200_v00",
+      "type": "frame.post",
+      "materialId": "oak",
+      "sizeMm": [
+        200,
+        3000,
+        200
+      ],
+      "variant": 0,
+      "definition": "farmhouse/frame_post_oak_200x3000x200_v00.destructible.json",
+      "model": "farmhouse/frame_post_oak_200x3000x200_v00.glb",
+      "sha256": {
+        "definition": "e6aaefb3993fec7afcae7ea0dcf567b8cbff432054017aa135804b33ca273119",
+        "model": "fc194e4dc34115f4bf23cffa010de0965e654a38c3c2b5fd41431c805bed8956"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "house_stone_rubble_partition_door_v00",
+      "type": "house.partition.door",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        3520,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/house_stone_rubble_partition_door_v00.destructible.json",
+      "model": "masonry-house/house_stone_rubble_partition_door_v00.glb",
+      "sha256": {
+        "definition": "7425cf370548056a84faf9cf74dfbd8c0f0a7744cea1afe776d67edf98255fa2",
+        "model": "d970c2324a033e7981f1c8ad6cf543c4d889f3ef89c2668daf3d9a3aff788963"
+      },
+      "physicalChunks": 147,
+      "collisionHulls": 147,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "house_stone_rubble_side_8m_windows_v00",
+      "type": "house.wall.side_windows",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        8000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/house_stone_rubble_side_8m_windows_v00.destructible.json",
+      "model": "masonry-house/house_stone_rubble_side_8m_windows_v00.glb",
+      "sha256": {
+        "definition": "1205d1ffac587775d82f6050beb48e239c0292733ce150a7e4cfbae5fbfe250f",
+        "model": "96550fa6a6856acc04408a3eb56ff376b3e430dbba0c47bf1fef99f70f778294"
+      },
+      "physicalChunks": 360,
+      "collisionHulls": 360,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "house_stone_rubble_tall_door_window_v00",
+      "type": "house.wall.tall_door_window",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        5000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/house_stone_rubble_tall_door_window_v00.destructible.json",
+      "model": "masonry-house/house_stone_rubble_tall_door_window_v00.glb",
+      "sha256": {
+        "definition": "b5978a120a69a098d862f93a0474d534ff9e3e338ad93ae6b85b100a6b22c4f7",
+        "model": "8c685165d659d9705f42c55b12cbefa1d1241ccf57489b2527f48b7e356d5f15"
+      },
+      "physicalChunks": 278,
+      "collisionHulls": 278,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "house_stone_rubble_tall_doors_v00",
+      "type": "house.wall.tall_doors",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        5000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/house_stone_rubble_tall_doors_v00.destructible.json",
+      "model": "masonry-house/house_stone_rubble_tall_doors_v00.glb",
+      "sha256": {
+        "definition": "6f828058f53a4d8e9cc4b6bd5a22895813a12adcb58a0aa09160352677a5239c",
+        "model": "c4b668cd466c0ce9874d9d5d8cf07e33b036e566bf258c81270001d8ac580ba2"
+      },
+      "physicalChunks": 265,
+      "collisionHulls": 265,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "house_stone_rubble_tall_windows_v00",
+      "type": "house.wall.tall_windows",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        5000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/house_stone_rubble_tall_windows_v00.destructible.json",
+      "model": "masonry-house/house_stone_rubble_tall_windows_v00.glb",
+      "sha256": {
+        "definition": "25c94b29cfe4ff5011f0bceee7e6ffad5952e4624fa1f84ffddca93f5e949f6b",
+        "model": "7eca45aede3a53e0f1a4c44f92250ab58760fa09765a88b7c5fa787745d8c346"
+      },
+      "physicalChunks": 293,
+      "collisionHulls": 293,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_brick_solid_v00",
+      "type": "test.masonry.solid",
+      "materialId": "brick",
+      "sizeMm": [
+        1000,
+        3000,
+        110
+      ],
+      "variant": 0,
+      "definition": "masonry/masonry_brick_solid_v00.destructible.json",
+      "model": "masonry/masonry_brick_solid_v00.glb",
+      "sha256": {
+        "definition": "a1154ee8bbaecf1f908d9c7cdd65d508142812e39af2fc694f21600e775a9b0b",
+        "model": "28759f86a1cb54fd102127e67097eea78288c0b25f4de1a684dd544087c34d15"
+      },
+      "physicalChunks": 182,
+      "collisionHulls": 182,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_brick_solid_v01",
+      "type": "test.masonry.solid",
+      "materialId": "brick",
+      "sizeMm": [
+        1000,
+        3000,
+        110
+      ],
+      "variant": 1,
+      "definition": "masonry/masonry_brick_solid_v01.destructible.json",
+      "model": "masonry/masonry_brick_solid_v01.glb",
+      "sha256": {
+        "definition": "74499e08514aa9b4d41857e9790b57de039c21f060791bb2da2de07969d8b4ab",
+        "model": "df4e60552ab1252d03b542a60307348f09c141c5466fc12f23bf710dcc96d906"
+      },
+      "physicalChunks": 182,
+      "collisionHulls": 182,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_brick_solid_v02",
+      "type": "test.masonry.solid",
+      "materialId": "brick",
+      "sizeMm": [
+        1000,
+        3000,
+        110
+      ],
+      "variant": 2,
+      "definition": "masonry/masonry_brick_solid_v02.destructible.json",
+      "model": "masonry/masonry_brick_solid_v02.glb",
+      "sha256": {
+        "definition": "cb0779c593fc5f4ded74d0eb3f9225db88bd3f52f26fa9353a6bdbc006e894ce",
+        "model": "643363377a848c491abfd932b3243ab6504d093b0097af8dd7dab15c44fc13ee"
+      },
+      "physicalChunks": 182,
+      "collisionHulls": 182,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_brick_window_v00",
+      "type": "test.masonry.window",
+      "materialId": "brick",
+      "sizeMm": [
+        1000,
+        3000,
+        110
+      ],
+      "variant": 0,
+      "definition": "masonry/masonry_brick_window_v00.destructible.json",
+      "model": "masonry/masonry_brick_window_v00.glb",
+      "sha256": {
+        "definition": "eb667c59e047ec4ffef1f279c14c0a3bf1f5c27fdf09f0d911cf97dbc8c33f1e",
+        "model": "e9a6ab146428cd1ad9a7a5fceaca87386f6c54a34f90cc907c9313f1f5cc2c6a"
+      },
+      "physicalChunks": 156,
+      "collisionHulls": 156,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_brick_window_v01",
+      "type": "test.masonry.window",
+      "materialId": "brick",
+      "sizeMm": [
+        1000,
+        3000,
+        110
+      ],
+      "variant": 1,
+      "definition": "masonry/masonry_brick_window_v01.destructible.json",
+      "model": "masonry/masonry_brick_window_v01.glb",
+      "sha256": {
+        "definition": "7e0d8cd47fa2b30828d33e3eaaf469bd1f02432ab1e3089145ee75af2d2dcc3a",
+        "model": "9e8999fa964b2d8cd60c356b4d8a4047f76b4bb2a631036e4e67286c3cd702dc"
+      },
+      "physicalChunks": 156,
+      "collisionHulls": 156,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_brick_window_v02",
+      "type": "test.masonry.window",
+      "materialId": "brick",
+      "sizeMm": [
+        1000,
+        3000,
+        110
+      ],
+      "variant": 2,
+      "definition": "masonry/masonry_brick_window_v02.destructible.json",
+      "model": "masonry/masonry_brick_window_v02.glb",
+      "sha256": {
+        "definition": "42165cfcc3cfcbedba29b2b8742983f69912ffad1881b974a9d9be0104da9a09",
+        "model": "2380b328d21bb2574c14af4d51b2817d3f01ac12ba4de106ccd124acff164e9a"
+      },
+      "physicalChunks": 156,
+      "collisionHulls": 156,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_rounded_solid_v00",
+      "type": "test.masonry.rounded.solid",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 0,
+      "definition": "masonry/masonry_rounded_solid_v00.destructible.json",
+      "model": "masonry/masonry_rounded_solid_v00.glb",
+      "sha256": {
+        "definition": "f0b9ae826bed4689ac92785b9adebb54664b10e504cf16eadab029d695c2ead7",
+        "model": "8d40ded7336d81116cbb1b04c864e1e5c159f0434e238e40b41fa814594623ec"
+      },
+      "physicalChunks": 45,
+      "collisionHulls": 45,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_rounded_solid_v02",
+      "type": "test.masonry.rounded.solid",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 2,
+      "definition": "masonry/masonry_rounded_solid_v02.destructible.json",
+      "model": "masonry/masonry_rounded_solid_v02.glb",
+      "sha256": {
+        "definition": "cea41349b604381f2bb930adc8987e2678445458e58acd61b69b69a96dab37b7",
+        "model": "cc11137fef50e192a9a705277fda54702c88cb2cb4cf7184dfb24d141ee498be"
+      },
+      "physicalChunks": 45,
+      "collisionHulls": 45,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_rounded_window_v00",
+      "type": "test.masonry.rounded.window",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 0,
+      "definition": "masonry/masonry_rounded_window_v00.destructible.json",
+      "model": "masonry/masonry_rounded_window_v00.glb",
+      "sha256": {
+        "definition": "6920779793cc1494583fc2bb890e132b53e8299e839f55932a323cb001b1d117",
+        "model": "e1c617d07026f8b352f9e1ea57092f8a1d95f5832c9af83482a12d6efe36eeaf"
+      },
+      "physicalChunks": 53,
+      "collisionHulls": 53,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_rounded_window_v02",
+      "type": "test.masonry.rounded.window",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 2,
+      "definition": "masonry/masonry_rounded_window_v02.destructible.json",
+      "model": "masonry/masonry_rounded_window_v02.glb",
+      "sha256": {
+        "definition": "7504b0c0918bc38d9de8009961a3535a501aeda74ab0f202dce2b7248e103add",
+        "model": "1b54186474ffb3dbbb5b812a5085c2194f7055d2beca9ca0f0c613b52795f771"
+      },
+      "physicalChunks": 53,
+      "collisionHulls": 53,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_stone_solid_v00",
+      "type": "test.masonry.stone.solid",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 0,
+      "definition": "masonry/masonry_stone_solid_v00.destructible.json",
+      "model": "masonry/masonry_stone_solid_v00.glb",
+      "sha256": {
+        "definition": "e04a689e68dda20df867588ec36ad233d802aca175c041157d33ea1e3752abf4",
+        "model": "d74f208530472612272990d257fe3fc6e7ad51437c922819bb8ee174ab4deff4"
+      },
+      "physicalChunks": 67,
+      "collisionHulls": 67,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_stone_solid_v01",
+      "type": "test.masonry.stone.solid",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 1,
+      "definition": "masonry/masonry_stone_solid_v01.destructible.json",
+      "model": "masonry/masonry_stone_solid_v01.glb",
+      "sha256": {
+        "definition": "5c9332e6b74e3228455a948f077ddf6c19281a0632822fbde4cafbb6f615a5fd",
+        "model": "15db9bf606304a38362f21b74584f1c1b346b3a133e9bd1524331a4ef0db92b9"
+      },
+      "physicalChunks": 67,
+      "collisionHulls": 67,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_stone_solid_v02",
+      "type": "test.masonry.stone.solid",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 2,
+      "definition": "masonry/masonry_stone_solid_v02.destructible.json",
+      "model": "masonry/masonry_stone_solid_v02.glb",
+      "sha256": {
+        "definition": "6bf1e47259883aeed46dfb7e7950bcebc36c9ee8eefbf502d3fad7557b3e40a2",
+        "model": "f974405a322afcfe8beac65476ff1ff8247c2b6805357e5d7faeb9a0f4dc012c"
+      },
+      "physicalChunks": 67,
+      "collisionHulls": 67,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_stone_window_v00",
+      "type": "test.masonry.stone.window",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 0,
+      "definition": "masonry/masonry_stone_window_v00.destructible.json",
+      "model": "masonry/masonry_stone_window_v00.glb",
+      "sha256": {
+        "definition": "9d59025e1ccd3f1fb159a50f105e10854bf00925fa1b3111ba6f8fea07f0e748",
+        "model": "5d1447d5fe55a4ad03b3e48ef165eca914328fa6c9fa2932cece9321ceed2434"
+      },
+      "physicalChunks": 60,
+      "collisionHulls": 60,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_stone_window_v01",
+      "type": "test.masonry.stone.window",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 1,
+      "definition": "masonry/masonry_stone_window_v01.destructible.json",
+      "model": "masonry/masonry_stone_window_v01.glb",
+      "sha256": {
+        "definition": "688bb5d95b41746a9f7f457b87013ed493bc4ba4c61beeb40fe1e1784b02dd1b",
+        "model": "0cdbcf79c42f690db61611665acd9e3d1bb26695bb43a07fd727321db968520b"
+      },
+      "physicalChunks": 60,
+      "collisionHulls": 60,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "masonry_stone_window_v02",
+      "type": "test.masonry.stone.window",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        2000,
+        3000,
+        300
+      ],
+      "variant": 2,
+      "definition": "masonry/masonry_stone_window_v02.destructible.json",
+      "model": "masonry/masonry_stone_window_v02.glb",
+      "sha256": {
+        "definition": "3dfc16646d1428950791f5ec78180fb210ffc929be820b39c36fbc69d33ed058",
+        "model": "6bc8cfd9b8e98de83007ea9d93f593097ccae6c100741d4289f78b33230d1391"
+      },
+      "physicalChunks": 60,
+      "collisionHulls": 60,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "opening_door_oak_900x2050x45_v00",
+      "type": "opening.door",
+      "materialId": "oak",
+      "sizeMm": [
+        900,
+        2050,
+        45
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_door_oak_900x2050x45_v00.destructible.json",
+      "model": "farmhouse/opening_door_oak_900x2050x45_v00.glb",
+      "sha256": {
+        "definition": "05c7cc4e0653e775bc04748e46f1c84cdffe4e3f8749841f9ca5122f16ea8bc4",
+        "model": "072c10b4db3ebf396488893764fd7eab6e9dcb91f9c0eff19302df4046da754d"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "opening_frame_oak_1160x1360x100_v00",
+      "type": "opening.frame",
+      "materialId": "oak",
+      "sizeMm": [
+        1160,
+        1360,
+        100
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_frame_oak_1160x1360x100_v00.destructible.json",
+      "model": "farmhouse/opening_frame_oak_1160x1360x100_v00.glb",
+      "sha256": {
+        "definition": "e9de86c90e9d0c4c60a29986c78e0d0074f02688cccd438a15dc83effc522dfd",
+        "model": "e8c9981f42d30f14e0f5459a686ef93ce37bcaec1d323832b8f6b8c8c663d34a"
+      },
+      "physicalChunks": 4,
+      "collisionHulls": 4,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "opening_frame_oak_900x1200x100_v00",
+      "type": "opening.frame",
+      "materialId": "oak",
+      "sizeMm": [
+        900,
+        1200,
+        100
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_frame_oak_900x1200x100_v00.destructible.json",
+      "model": "farmhouse/opening_frame_oak_900x1200x100_v00.glb",
+      "sha256": {
+        "definition": "f220ec3fe531128ee30305800712fd4bd4a9d8109c40c47b8b6d45775301378a",
+        "model": "5bca14ac772cdb76d71434b567de9910694e02d7490b75beafc067a77378e7ad"
+      },
+      "physicalChunks": 4,
+      "collisionHulls": 4,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "opening_glass_glass_1000x1200x6_v00",
+      "type": "opening.glass",
+      "materialId": "glass",
+      "sizeMm": [
+        1000,
+        1200,
+        6
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_glass_glass_1000x1200x6_v00.destructible.json",
+      "model": "farmhouse/opening_glass_glass_1000x1200x6_v00.glb",
+      "sha256": {
+        "definition": "f02b78798e5a07b25dab604cd31aa0277bdac47eaf70d7489359898b4530c695",
+        "model": "c69da5c94331a5de578449144e00ec982e379b784bf4811ab9ed6248bcf4b807"
+      },
+      "physicalChunks": 12,
+      "collisionHulls": 12,
+      "renderClass": "glass"
+    },
+    {
+      "id": "opening_glass_glass_740x1040x6_v00",
+      "type": "opening.glass",
+      "materialId": "glass",
+      "sizeMm": [
+        740,
+        1040,
+        6
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_glass_glass_740x1040x6_v00.destructible.json",
+      "model": "farmhouse/opening_glass_glass_740x1040x6_v00.glb",
+      "sha256": {
+        "definition": "a4edd28cda7c0de8b4000b18351ec9c2a90490c2f83797f900c867d260544153",
+        "model": "c2d9f7a5a2d656784eae9071da896e60b6be4ab7d9ca4858e7415b64fc6d4169"
+      },
+      "physicalChunks": 12,
+      "collisionHulls": 12,
+      "renderClass": "glass"
+    },
+    {
+      "id": "opening_lintel_oak_1500x250x250_v00",
+      "type": "opening.lintel",
+      "materialId": "oak",
+      "sizeMm": [
+        1500,
+        250,
+        250
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_lintel_oak_1500x250x250_v00.destructible.json",
+      "model": "farmhouse/opening_lintel_oak_1500x250x250_v00.glb",
+      "sha256": {
+        "definition": "921d91216a2f74066de53a71a2f03ee91d05db459b3a64e53e09dcf957969917",
+        "model": "376b9e4080d6d912a9c5316a802e17fe242451b80517c7f203237b1769a2eb0b"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "opening_lintel_stone_dressed_1500x300x400_v00",
+      "type": "opening.lintel",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        1500,
+        300,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_lintel_stone_dressed_1500x300x400_v00.destructible.json",
+      "model": "farmhouse/opening_lintel_stone_dressed_1500x300x400_v00.glb",
+      "sha256": {
+        "definition": "31794f711606bc75a8e7f4e60c19c21fbe61da95fcf5e63641a93e5675995b7a",
+        "model": "78e566dabfd4d3098c4161e93d1183b0e96f2eeb53224f98afe8d7b93945b80d"
+      },
+      "physicalChunks": 3,
+      "collisionHulls": 3,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "opening_shutter_oak_500x1200x35_v00",
+      "type": "opening.shutter",
+      "materialId": "oak",
+      "sizeMm": [
+        500,
+        1200,
+        35
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_shutter_oak_500x1200x35_v00.destructible.json",
+      "model": "farmhouse/opening_shutter_oak_500x1200x35_v00.glb",
+      "sha256": {
+        "definition": "14713bce6ed54104c9ad3d5e2819ade8a7557b2658bbbbb20f12d13d04865ccc",
+        "model": "57b15d5ddc914ee0732f00e3121957a7409f723858116ac9ddff9d258c6d7501"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "opening_wedge_stone_dressed_1500x500x400_v00",
+      "type": "opening.wedge",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        1500,
+        500,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/opening_wedge_stone_dressed_1500x500x400_v00.destructible.json",
+      "model": "farmhouse/opening_wedge_stone_dressed_1500x500x400_v00.glb",
+      "sha256": {
+        "definition": "ce02c60d687be6549d632738963741f8d2e108bb647264ded6b321bd35d3ef98",
+        "model": "463ad225c1ff72cb83d5c9e4bda8fd900d7045642b239663d724b327744d1f51"
+      },
+      "physicalChunks": 3,
+      "collisionHulls": 3,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "roof_chimney_stone_dressed_800x1500x800_v00",
+      "type": "roof.chimney",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        800,
+        1500,
+        800
+      ],
+      "variant": 0,
+      "definition": "farmhouse/roof_chimney_stone_dressed_800x1500x800_v00.destructible.json",
+      "model": "farmhouse/roof_chimney_stone_dressed_800x1500x800_v00.glb",
+      "sha256": {
+        "definition": "2c3ec554023331e69c67911826f0a086728d7dc9c9a2573db7d3314a8b39dc8e",
+        "model": "07fdb7897594ee8117e1215bd875cdf5a1115b50fd517380b09b22d8854d964f"
+      },
+      "physicalChunks": 4,
+      "collisionHulls": 4,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "roof_purlin_oak_3000x250x200_v00",
+      "type": "roof.purlin",
+      "materialId": "oak",
+      "sizeMm": [
+        3000,
+        250,
+        200
+      ],
+      "variant": 0,
+      "definition": "farmhouse/roof_purlin_oak_3000x250x200_v00.destructible.json",
+      "model": "farmhouse/roof_purlin_oak_3000x250x200_v00.glb",
+      "sha256": {
+        "definition": "a875c2a701f7f19caa53724d80e74e1eb02a89cab8bf3a966cdf5d87e3dfd1c1",
+        "model": "233bb762f7e55dd7eb8084764cd7099a7e55dc55fa01f873188b8562218b5a95"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "roof_rafter_oak_2200x150x80_v00",
+      "type": "roof.rafter",
+      "materialId": "oak",
+      "sizeMm": [
+        2200,
+        150,
+        80
+      ],
+      "variant": 0,
+      "definition": "farmhouse/roof_rafter_oak_2200x150x80_v00.destructible.json",
+      "model": "farmhouse/roof_rafter_oak_2200x150x80_v00.glb",
+      "sha256": {
+        "definition": "bea7178e7c78a2d6fef7b59ce8530b39a842ebc4f62d149633e49e500b4d8035",
+        "model": "1bd69bb2e702f776decb3a7b346673a3f00702052d295e259ea56e4491487991"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "roof_rafter_oak_3000x150x80_v00",
+      "type": "roof.rafter",
+      "materialId": "oak",
+      "sizeMm": [
+        3000,
+        150,
+        80
+      ],
+      "variant": 0,
+      "definition": "farmhouse/roof_rafter_oak_3000x150x80_v00.destructible.json",
+      "model": "farmhouse/roof_rafter_oak_3000x150x80_v00.glb",
+      "sha256": {
+        "definition": "1da1af8b9568288e5eab4f23c9a21b0a5778b53eb584f03b410ac665b6c97b60",
+        "model": "169c4aa93894f6de4cb97a78ad82e0f56171e747ca223df70765473ab1c9db47"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "roof_ridge_oak_2000x300x200_v00",
+      "type": "roof.ridge",
+      "materialId": "oak",
+      "sizeMm": [
+        2000,
+        300,
+        200
+      ],
+      "variant": 0,
+      "definition": "farmhouse/roof_ridge_oak_2000x300x200_v00.destructible.json",
+      "model": "farmhouse/roof_ridge_oak_2000x300x200_v00.glb",
+      "sha256": {
+        "definition": "c8633ed180c0018b0faebd78dbf806fa63e7423f147b4b35c9aa7d12e885697c",
+        "model": "d4fb1dc1f826e87b818a47500f6c7fe86ada5b734ba76452723ee32619d128ea"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "roof_ridge_oak_3000x300x200_v00",
+      "type": "roof.ridge",
+      "materialId": "oak",
+      "sizeMm": [
+        3000,
+        300,
+        200
+      ],
+      "variant": 0,
+      "definition": "farmhouse/roof_ridge_oak_3000x300x200_v00.destructible.json",
+      "model": "farmhouse/roof_ridge_oak_3000x300x200_v00.glb",
+      "sha256": {
+        "definition": "a8073ba98d9e8044caa13ed284b8300ef2fe6cedcb85719e8ae6c282ed3f7fb4",
+        "model": "b70c3e2d0c1a1dccefb054eb5ea8a29dd4190b0aaf99979502913c6fad219354"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "roof_tile_patch_clay_tile_1000x18x1000_v00",
+      "type": "roof.tile_patch",
+      "materialId": "clay_tile",
+      "sizeMm": [
+        1000,
+        18,
+        1000
+      ],
+      "variant": 0,
+      "definition": "farmhouse/roof_tile_patch_clay_tile_1000x18x1000_v00.destructible.json",
+      "model": "farmhouse/roof_tile_patch_clay_tile_1000x18x1000_v00.glb",
+      "sha256": {
+        "definition": "b4fa62a0f23065fa12bea2e1601b3a3466a9ccc62eee011b21c60ffbf6a1eb36",
+        "model": "a1a5e033c3f27d1302416ce3f33582e6935700e9adebee4aad1fc9b7fb79af96"
+      },
+      "physicalChunks": 16,
+      "collisionHulls": 16,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "roof_truss_oak_5000x1658x150_v00",
+      "type": "roof.truss",
+      "materialId": "oak",
+      "sizeMm": [
+        5000,
+        1658,
+        150
+      ],
+      "variant": 0,
+      "definition": "farmhouse/roof_truss_oak_5000x1658x150_v00.destructible.json",
+      "model": "farmhouse/roof_truss_oak_5000x1658x150_v00.glb",
+      "sha256": {
+        "definition": "5013a0c813c2b862710a842398d9f0f1f9cef3e639043a36da88cbcef49984c9",
+        "model": "a6a93627ddcd12e3e1e59ac3eb0f795e12cfb9bf37aefb49785171c260a892a2"
+      },
+      "physicalChunks": 3,
+      "collisionHulls": 3,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "stairs_stringer_oak_3000x250x60_v00",
+      "type": "stairs.stringer",
+      "materialId": "oak",
+      "sizeMm": [
+        3000,
+        250,
+        60
+      ],
+      "variant": 0,
+      "definition": "farmhouse/stairs_stringer_oak_3000x250x60_v00.destructible.json",
+      "model": "farmhouse/stairs_stringer_oak_3000x250x60_v00.glb",
+      "sha256": {
+        "definition": "165851b812fe56aeaa683055b3017c057a7fd5e9853e5b14400c5aef15327fea",
+        "model": "81e40be26f55c00276bdfe628ead8540e5a81ae2be9f00d40ecd2f33a5f1d24f"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "stairs_stringer_oak_4000x250x60_v00",
+      "type": "stairs.stringer",
+      "materialId": "oak",
+      "sizeMm": [
+        4000,
+        250,
+        60
+      ],
+      "variant": 0,
+      "definition": "farmhouse/stairs_stringer_oak_4000x250x60_v00.destructible.json",
+      "model": "farmhouse/stairs_stringer_oak_4000x250x60_v00.glb",
+      "sha256": {
+        "definition": "b86811de9478ea7199d9b54f1f5b31bbc45f242c0552ab98aca88750b599dc84",
+        "model": "debd8eab1b038556ab87742af1ab541655e33f29a2f60c19c6b2111e1b445623"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "stairs_tread_oak_1000x40x280_v00",
+      "type": "stairs.tread",
+      "materialId": "oak",
+      "sizeMm": [
+        1000,
+        40,
+        280
+      ],
+      "variant": 0,
+      "definition": "farmhouse/stairs_tread_oak_1000x40x280_v00.destructible.json",
+      "model": "farmhouse/stairs_tread_oak_1000x40x280_v00.glb",
+      "sha256": {
+        "definition": "9d5a638e3b5d9716e4a40c7b011b9741fa735ab242aefecc683e2323032fc529",
+        "model": "76def150ce096c60a12c06c6ecad5451f3bae408b1de82ae3a63afa29d65f37e"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "unit_house_brick_door_v00",
+      "type": "test.house.masonry.door",
+      "materialId": "brick",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/unit_house_brick_door_v00.destructible.json",
+      "model": "masonry-house/unit_house_brick_door_v00.glb",
+      "sha256": {
+        "definition": "16b26b4d23e2be701eb545887e4a25022e725e0f86c5d65bfde6ef3d122f0a07",
+        "model": "8764c95297572965a776b9441cdb5bfcb1cea432907f20722296dfa56e16e5e0"
+      },
+      "physicalChunks": 415,
+      "collisionHulls": 415,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "unit_house_brick_window_v00",
+      "type": "test.house.masonry.window",
+      "materialId": "brick",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/unit_house_brick_window_v00.destructible.json",
+      "model": "masonry-house/unit_house_brick_window_v00.glb",
+      "sha256": {
+        "definition": "289d35531a690195ee8ad5c7cfac7798c6d108dc96d06d262d3a2a2267871430",
+        "model": "e6bc72a6483400d16149e327c01aa452042427c7e595c071745b4f07648bec69"
+      },
+      "physicalChunks": 442,
+      "collisionHulls": 442,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "unit_house_stone_dressed_door_v00",
+      "type": "test.house.masonry.door",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/unit_house_stone_dressed_door_v00.destructible.json",
+      "model": "masonry-house/unit_house_stone_dressed_door_v00.glb",
+      "sha256": {
+        "definition": "5213413575081764f559a0b0adcb0557443cd16497688f46a7fde874ac62ed9e",
+        "model": "081834a789d54fe6c1cc0016e268435c96460405d41a9724b6a5fe321d310a5e"
+      },
+      "physicalChunks": 116,
+      "collisionHulls": 116,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "unit_house_stone_dressed_window_6m_v00",
+      "type": "test.house.masonry.window",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        6000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/unit_house_stone_dressed_window_6m_v00.destructible.json",
+      "model": "masonry-house/unit_house_stone_dressed_window_6m_v00.glb",
+      "sha256": {
+        "definition": "190cb93be613055dad5c86388b4df24874a00a33f2da6392fdd1220ac2d2f4c4",
+        "model": "40e8ad2f30e1dc59af6baa77c15bf8518e7677fdcb4bc589281803d7fe210aa6"
+      },
+      "physicalChunks": 178,
+      "collisionHulls": 178,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "unit_house_stone_dressed_window_v00",
+      "type": "test.house.masonry.window",
+      "materialId": "stone_dressed",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/unit_house_stone_dressed_window_v00.destructible.json",
+      "model": "masonry-house/unit_house_stone_dressed_window_v00.glb",
+      "sha256": {
+        "definition": "ac6ee359a9c666184390db322f411051f11da4051ca5ca2b653f270d14de5a2e",
+        "model": "990a4f836ffc7df3c1c406f0529e0e47da4e2f41a6f731dbb7c9d9fb7c593baf"
+      },
+      "physicalChunks": 118,
+      "collisionHulls": 118,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "unit_house_stone_rubble_door_v00",
+      "type": "test.house.masonry.door",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/unit_house_stone_rubble_door_v00.destructible.json",
+      "model": "masonry-house/unit_house_stone_rubble_door_v00.glb",
+      "sha256": {
+        "definition": "d1b9b4960b237ab4e2aefa54aec96b8c848e77b06bf909724c65c8464ec17c2b",
+        "model": "7b864e805a0c27de2f7289d2414596075a6a8bf0a393c692a469a3d9b0a466d3"
+      },
+      "physicalChunks": 152,
+      "collisionHulls": 152,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "unit_house_stone_rubble_window_v00",
+      "type": "test.house.masonry.window",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        3000,
+        240
+      ],
+      "variant": 0,
+      "definition": "masonry-house/unit_house_stone_rubble_window_v00.destructible.json",
+      "model": "masonry-house/unit_house_stone_rubble_window_v00.glb",
+      "sha256": {
+        "definition": "751fa1ba5055ee70e6a868c973d8a45758a502c3c84dbd2f97242b8f8050be10",
+        "model": "b4f121e825eefb3f7a559573c92a6ac6fe0f895eaec86d0cc5a4a2655a1c0871"
+      },
+      "physicalChunks": 141,
+      "collisionHulls": 141,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_attic_stone_rubble_1500x1500x400_v00",
+      "type": "wall.attic",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        1500,
+        1500,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_attic_stone_rubble_1500x1500x400_v00.destructible.json",
+      "model": "farmhouse/wall_attic_stone_rubble_1500x1500x400_v00.glb",
+      "sha256": {
+        "definition": "d646bea499ea7729ad86b65d017cde22b27e01fe85262e7e5239d62d2be2d4a0",
+        "model": "0ffc33fe2126504adb3fdf29dedbc6657e0d759e9eb397b86bc8209b727c83f2"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_corner_stone_rubble_1000x3000x1000_v00",
+      "type": "wall.corner",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        1000,
+        3000,
+        1000
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_corner_stone_rubble_1000x3000x1000_v00.destructible.json",
+      "model": "farmhouse/wall_corner_stone_rubble_1000x3000x1000_v00.glb",
+      "sha256": {
+        "definition": "b0c99491af5e6eb15c5c9c0fafd267e8e2578cf3ecb2ac420bb366e32d3909ce",
+        "model": "0afa14c921e3618be477336f718bbb2e0d2985bb79dc78695b2f1b2320b7cc1d"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_door_stone_rubble_2000x3000x400_v00",
+      "type": "wall.door",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_door_stone_rubble_2000x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_door_stone_rubble_2000x3000x400_v00.glb",
+      "sha256": {
+        "definition": "0cbd4c9008293a525c27d2d6661921b9f00e65b2c244d7831b04ed6f37a2a440",
+        "model": "9d2659b6847e8630c222d7861e5f9f0ad967ddaa90f437dacf0974d769f66d04"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_facade_detail_stone_rubble_4000x3000x400_v00",
+      "type": "wall.facade_detail",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_facade_detail_stone_rubble_4000x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_facade_detail_stone_rubble_4000x3000x400_v00.glb",
+      "sha256": {
+        "definition": "83c2db0c738d385cb9a264d8058fa724626679191de9111f3238b8ec68be810d",
+        "model": "523cc96705bb9eba8eeaac6395e5773cecbe0ba045d8365018de165a9fe2dcd5"
+      },
+      "physicalChunks": 94,
+      "collisionHulls": 94,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_facade_stone_rubble_4000x3000x400_v00",
+      "type": "wall.facade",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_facade_stone_rubble_4000x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_facade_stone_rubble_4000x3000x400_v00.glb",
+      "sha256": {
+        "definition": "9782f35c99fed3e5cad8d1929cc4e555a8284d22acf2c08ed591ab6f812854c7",
+        "model": "3753c9b123e25154a01196c8df802eed929be0ff39a06721ef32929d148df475"
+      },
+      "physicalChunks": 32,
+      "collisionHulls": 32,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_gable_stone_rubble_2000x1500x400_v00",
+      "type": "wall.gable",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        1500,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_gable_stone_rubble_2000x1500x400_v00.destructible.json",
+      "model": "farmhouse/wall_gable_stone_rubble_2000x1500x400_v00.glb",
+      "sha256": {
+        "definition": "f2e04b4ff73c8c6cfd5f6b91653ac78c7e7ee9b3c0567f908403c0282b827b2c",
+        "model": "d511cd317128baacbd4d5edd842ff9ca9fa8fe188fcfb4d86828c1975030ec9e"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_gable_stone_rubble_2000x1500x400_v01",
+      "type": "wall.gable",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        1500,
+        400
+      ],
+      "variant": 1,
+      "definition": "farmhouse/wall_gable_stone_rubble_2000x1500x400_v01.destructible.json",
+      "model": "farmhouse/wall_gable_stone_rubble_2000x1500x400_v01.glb",
+      "sha256": {
+        "definition": "1a214fcc761f206157e7f17924b0a3751013a1ea7b07d3ead0f295ccaa36654a",
+        "model": "869757a157cb952cb1d44c13e4e071c7e1a95a1d2eb752c6ffd260b76e250d7c"
+      },
+      "physicalChunks": 7,
+      "collisionHulls": 7,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_gable_stone_rubble_4000x1500x400_v00",
+      "type": "wall.gable",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        1500,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_gable_stone_rubble_4000x1500x400_v00.destructible.json",
+      "model": "farmhouse/wall_gable_stone_rubble_4000x1500x400_v00.glb",
+      "sha256": {
+        "definition": "304b33dc5334abf4704fed8c9a04b0a5a55df4db68347e2598dc9dd62a6481ea",
+        "model": "424ea13553901bfaf09130e21aa5284403872be1f31856600b1a35d9bc472382"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_log_facade_oak_4000x3000x280_v00",
+      "type": "wall.log_facade",
+      "materialId": "oak",
+      "sizeMm": [
+        4000,
+        3000,
+        280
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_log_facade_oak_4000x3000x280_v00.destructible.json",
+      "model": "farmhouse/wall_log_facade_oak_4000x3000x280_v00.glb",
+      "sha256": {
+        "definition": "30f434f1d89b4f59c6b19e8fa419dbbe17105f3d9f7d6ed1387eefb85f826a2b",
+        "model": "01be9bef6f34930a3801ab9a58e952ef677d236947a95544343a1c3aa1e6d6a7"
+      },
+      "physicalChunks": 58,
+      "collisionHulls": 58,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_log_windows_oak_4000x3000x280_v00",
+      "type": "wall.log_windows",
+      "materialId": "oak",
+      "sizeMm": [
+        4000,
+        3000,
+        280
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_log_windows_oak_4000x3000x280_v00.destructible.json",
+      "model": "farmhouse/wall_log_windows_oak_4000x3000x280_v00.glb",
+      "sha256": {
+        "definition": "88b17d912acc083b05ed272e4db8871234de417cb38a091d2f3bac393b1d1db2",
+        "model": "fe16076ecc6c2069c5c8452b9dd7908830515da3ede2a61e232c3b1578e908b3"
+      },
+      "physicalChunks": 48,
+      "collisionHulls": 48,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_parapet_stone_rubble_1000x1000x400_v00",
+      "type": "wall.parapet",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        1000,
+        1000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_parapet_stone_rubble_1000x1000x400_v00.destructible.json",
+      "model": "farmhouse/wall_parapet_stone_rubble_1000x1000x400_v00.glb",
+      "sha256": {
+        "definition": "131b645c9dd1ee4f1fde9995ee705b7a369e0d124eb9e7be2961064a2c1f6aee",
+        "model": "a096ff1185fbdb1242c26a04518b5bd34068059ceb825a2e920cb38aca89f150"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_party_stone_rubble_1000x3000x500_v00",
+      "type": "wall.party",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        1000,
+        3000,
+        500
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_party_stone_rubble_1000x3000x500_v00.destructible.json",
+      "model": "farmhouse/wall_party_stone_rubble_1000x3000x500_v00.glb",
+      "sha256": {
+        "definition": "020f180e318042d11004591dc12a54bb6d5b0ad9a6221dfbada068ae0224b8a3",
+        "model": "190ac37fc28cd587550870e3807eb093480b3a4ef6390abaea5a3e4ecd29b2a5"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_plank_facade_oak_4000x3000x80_v00",
+      "type": "wall.plank_facade",
+      "materialId": "oak",
+      "sizeMm": [
+        4000,
+        3000,
+        80
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_plank_facade_oak_4000x3000x80_v00.destructible.json",
+      "model": "farmhouse/wall_plank_facade_oak_4000x3000x80_v00.glb",
+      "sha256": {
+        "definition": "5f61aaefbb361189e97132f829f90dd3b7e65635721460eef6ba442a478f0ac0",
+        "model": "f4e79ef9ffafca9b9cf1ba5fcfdf4aa79c43e91f2ccc628f030bf097098a234f"
+      },
+      "physicalChunks": 48,
+      "collisionHulls": 48,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_plank_windows_oak_4000x3000x80_v00",
+      "type": "wall.plank_windows",
+      "materialId": "oak",
+      "sizeMm": [
+        4000,
+        3000,
+        80
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_plank_windows_oak_4000x3000x80_v00.destructible.json",
+      "model": "farmhouse/wall_plank_windows_oak_4000x3000x80_v00.glb",
+      "sha256": {
+        "definition": "2498861d589642e00b102cc14104f48685b169afe19229c35cd38e5c11c40e8a",
+        "model": "8141305ef73d823a67da33b6220f2c958c9004261fee0d2435db91ce5d7e03d4"
+      },
+      "physicalChunks": 64,
+      "collisionHulls": 64,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_straight_stone_rubble_1000x3000x400_v00",
+      "type": "wall.straight",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        1000,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_straight_stone_rubble_1000x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_straight_stone_rubble_1000x3000x400_v00.glb",
+      "sha256": {
+        "definition": "8e2593f054f3d90ef88d82361337401366e1c603e7d1800631fe1c54c9a4c9fe",
+        "model": "020d411ac9df62e1fa2d275cce8f94ef43067e61c20956bb6e583c290e098632"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_straight_stone_rubble_1000x3000x400_v01",
+      "type": "wall.straight",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        1000,
+        3000,
+        400
+      ],
+      "variant": 1,
+      "definition": "farmhouse/wall_straight_stone_rubble_1000x3000x400_v01.destructible.json",
+      "model": "farmhouse/wall_straight_stone_rubble_1000x3000x400_v01.glb",
+      "sha256": {
+        "definition": "c4eba61506fb6cdc88cca72e3507d33200853bc7df359838f47a161daebece50",
+        "model": "9193bc976f97639c9898a65fcffcbeec494406650da43feb4f793dfd6c4ae26f"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_straight_stone_rubble_500x3000x400_v00",
+      "type": "wall.straight",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        500,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_straight_stone_rubble_500x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_straight_stone_rubble_500x3000x400_v00.glb",
+      "sha256": {
+        "definition": "47dc73da2cef49d378aa3f9fbe3c2f7146854c60b5a4cf025b0af3bc5cbbb086",
+        "model": "8d51977cc92597e15d13f7a3c4469b06c79b6e47a4ff3d3bed003b61f581f67b"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_timber_gable_oak_4000x1500x80_v00",
+      "type": "wall.timber_gable",
+      "materialId": "oak",
+      "sizeMm": [
+        4000,
+        1500,
+        80
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_timber_gable_oak_4000x1500x80_v00.destructible.json",
+      "model": "farmhouse/wall_timber_gable_oak_4000x1500x80_v00.glb",
+      "sha256": {
+        "definition": "a44f91cc099ddf0fb6f95e3306f6c8e7e4dcb6dc334a183c1ffab8f9306bc9f2",
+        "model": "e1676d98751d880720785abd5b9d5d8034c4cd8683b0129b52c2b0afd30eab61"
+      },
+      "physicalChunks": 6,
+      "collisionHulls": 6,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_whole_windows_stone_rubble_4000x3000x400_v00",
+      "type": "wall.whole_windows",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        4000,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_whole_windows_stone_rubble_4000x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_whole_windows_stone_rubble_4000x3000x400_v00.glb",
+      "sha256": {
+        "definition": "a63169bf2f931b923d7e7ee794e1803a69ed02f88440eba8d1943dfd2322ee02",
+        "model": "1bfc6cad2101765979a6c02376ccd370710395c74964c50041a8a6124935f3a7"
+      },
+      "physicalChunks": 26,
+      "collisionHulls": 26,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_whole_windows_stone_rubble_6000x3000x400_v00",
+      "type": "wall.whole_windows",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        6000,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_whole_windows_stone_rubble_6000x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_whole_windows_stone_rubble_6000x3000x400_v00.glb",
+      "sha256": {
+        "definition": "44883adf0e969b07b333e4679227b6044361d59957e11d8adad08883696729da",
+        "model": "abad9dc85e71a0201a15835268124882ff15de7de8f25641c29653a827a44ff4"
+      },
+      "physicalChunks": 36,
+      "collisionHulls": 36,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_whole_windows_stone_rubble_8000x3000x400_v00",
+      "type": "wall.whole_windows",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        8000,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_whole_windows_stone_rubble_8000x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_whole_windows_stone_rubble_8000x3000x400_v00.glb",
+      "sha256": {
+        "definition": "0a067735241f722b56f3993ce9199ed46251e5b815cd84359292f3f4f8805662",
+        "model": "4c01a816879ae3d810a2fdc4f509c6043e4196a843399b5b1456d6d9114d3cde"
+      },
+      "physicalChunks": 46,
+      "collisionHulls": 46,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_window_stone_rubble_2000x3000x400_v00",
+      "type": "wall.window",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        3000,
+        400
+      ],
+      "variant": 0,
+      "definition": "farmhouse/wall_window_stone_rubble_2000x3000x400_v00.destructible.json",
+      "model": "farmhouse/wall_window_stone_rubble_2000x3000x400_v00.glb",
+      "sha256": {
+        "definition": "c911e786660902cbd6f576a66921602b6334804bb031d6c4f00332a65db11de9",
+        "model": "037628727c66234d25428fc45bda26a12b563d068ed79b5306cafe43aed3db64"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    },
+    {
+      "id": "wall_window_stone_rubble_2000x3000x400_v01",
+      "type": "wall.window",
+      "materialId": "stone_rubble",
+      "sizeMm": [
+        2000,
+        3000,
+        400
+      ],
+      "variant": 1,
+      "definition": "farmhouse/wall_window_stone_rubble_2000x3000x400_v01.destructible.json",
+      "model": "farmhouse/wall_window_stone_rubble_2000x3000x400_v01.glb",
+      "sha256": {
+        "definition": "15e6a05afe851a2143bcbd82c6fcd8d5a1f0601e451d434b6d59725975813456",
+        "model": "018a61b19b670a68777e9c8f090d3d8610ae66f216e21090ad2da154c213288f"
+      },
+      "physicalChunks": 8,
+      "collisionHulls": 8,
+      "renderClass": "opaque"
+    }
+  ]
+}

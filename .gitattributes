@@ -1,0 +1,2 @@
+assets/structures/**/*.json -text
+src/destruction/material-profiles.json -text

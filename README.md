@@ -88,7 +88,7 @@ everything in the last column is optional and has a calm, clear-noon default.
 | `trees` | — | three | `lighting` hook, `environment` (`setEnvironment`) |
 | `boundaries` | `trees` (hedges) | three | `lighting` hook, `environment` (`setEnvironment`), `assets` |
 | `cable` | — | three, cannon-es | `environment` (`setEnvironment`) |
-| `destruction`, `destruction/three` | — | cannon-es; three for the view | — |
+| `destruction`, `destruction/three` | cable physics and view for structural rigs; chips and puffs for views and debris | cannon-es; three for the view; optional caller-supplied Jolt | catalogue URL for authored assets |
 | `camera` | — | three | load `three-kit/camera/panel.css` when you use `createCameraPanel` |
 | `ui` | — | none | load `three-kit/ui/theme.css` |
 
@@ -206,11 +206,20 @@ Burned objects stay burned until `system.reset()`. The bench uses the shared fir
 
 ### Destruction
 
-The rigid destruction runtime and Pratt pony truss sample come from Glider 2's Structures lab.
-`createStructureSystem({world, definition, canDamage})` adds members to a caller-owned Cannon world. Step the world,
-call `system.update(dt)`, then update the optional `createThreeStructureView({system, scene})`. The system reports
-`member:fractured` and `member:detached` events. The bridge bench uses a generated sphere as its physical projectile
-and builds all its meshes from primitives. This port covers rigid members and excludes the authored masonry and Jolt labs.
+The destruction module includes the rigid Pratt bridge, bendable assemblies, pre-fractured masonry and timber, and
+structural cable rigs from Glider 2. For the rigid path, step your Cannon world, call `system.update(dt)`, then update
+`createThreeStructureView({system, scene})`. The rigid system emits `member:fractured` and `member:detached` events.
+`createAssemblySimulation(options)` owns its clock and world through `advance(seconds)`. It uses Cannon by default,
+or accepts a driver created with `createJoltDriver(J)` or `createJoltClusterDriver(J)` and a caller-initialized Jolt module.
+
+Serve the files in `assets/structures/` together and pass the manifest URL to `loadPartLibrary(url)` from
+`destruction/three`. The catalogue includes 88 authored parts, their GLBs and fracture definitions, and the shared
+atlases. The library owns loaded asset resources. Dispose views and debris bindings before the asset library.
+Run `npm run build:catalogue` to validate exports and regenerate the manifest after authoring changes.
+
+Open `/bench/destruction/parts.html?house=brick-cottage` for the catalogue, house, and staircase bench.
+The cottage defaults to clustered Jolt. Append `&backend=cannon` for the Cannon reference. Click to fire a physical
+impactor, toggle the facade, and use **Rebuild** to reset. The Blender extension lives in `tools/blender/`.
 
 ### Vegetation
 

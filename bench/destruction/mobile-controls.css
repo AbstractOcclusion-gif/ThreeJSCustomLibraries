@@ -1,0 +1,20 @@
+[hidden]{display:none!important}
+#toggle-controls{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));z-index:5}
+@media(max-width:700px),(max-height:500px){
+ body{overflow:hidden}
+ canvas{touch-action:none}
+ #toggle-controls{min-height:44px;font:14px system-ui;padding:10px 14px;background:#263d4c;color:#edf7fa;border:1px solid #70808a;border-radius:8px}
+ main#assembly-controls,main#part-controls,main#lab-controls{top:calc(max(12px,env(safe-area-inset-top)) + 54px);left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));width:auto;max-width:none;max-height:calc(100dvh - 90px - env(safe-area-inset-top) - env(safe-area-inset-bottom))!important;overflow-y:auto!important;overscroll-behavior:contain;touch-action:pan-y;pointer-events:auto;padding:14px;border-radius:12px;z-index:4}
+ main h1{font-size:21px;margin:4px 0 8px}
+ main button,main select,main input:not([type=checkbox]){min-height:44px;font-size:16px;max-width:100%}
+ main input[type=checkbox]{width:22px;height:22px;vertical-align:middle}
+ main label{min-height:36px}
+ main fieldset{min-width:0;max-width:100%;margin:8px 0;padding:8px}
+ main .actions{gap:8px}
+ main .actions>select{width:100%}
+ main .actions label{flex-wrap:wrap;max-width:100%}
+ main select{min-width:0}
+ main .stats{gap:12px}
+ footer{display:none}
+ #part-controls small{display:block;font-size:12px}
+}

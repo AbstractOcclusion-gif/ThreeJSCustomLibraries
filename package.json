@@ -58,10 +58,11 @@
     "test:camera": "node --test tests/camera/camera.test.js",
     "assets:weather": "node scripts/make-weather-assets.mjs",
     "test:fire": "node --test tests/fire/fire.test.js",
-    "test:destruction": "node --test tests/destruction/structures.test.js",
+    "test:destruction": "node --test --test-concurrency=1 tests/destruction",
     "test:terrain": "node --test tests/terrain/terrain.test.js",
     "test:surface": "node --test tests/surface/surface.test.js",
-    "test:flocking": "node --test tests/flocking/flocking.test.js"
+    "test:flocking": "node --test tests/flocking/flocking.test.js",
+    "build:catalogue": "node scripts/build-catalogue.mjs"
   },
   "peerDependencies": {
     "three": "^0.180.0",
@@ -71,7 +72,8 @@
     "lil-gui": "^0.20.0",
     "three": "^0.180.0",
     "vite": "^6.4.1",
-    "cannon-es": "^0.20.0"
+    "cannon-es": "^0.20.0",
+    "jolt-physics": "1.1.1"
   },
   "peerDependenciesMeta": {
     "cannon-es": {

@@ -15,6 +15,7 @@ const PEERS = /^(?:three(?:\/.*)?|cannon-es)$/;                           // the
 // Declared lower-module imports, as paths under src/. File-precise where a module may use only one file of the other.
 const LIBRARY_ALLOWED = {
   terrain: ['surface'],
+  destruction: ['cable/cable.js', 'cable/three.js', 'particles/chips.js', 'particles/puffs.js'],
   boundaries: ['trees'],
   weather: ['particles/water/precipitation.js'],   // rain and snow
   water: ['particles/water/spray-pump.js'],        // the boat spray pump
@@ -87,6 +88,7 @@ test('module pages import only their own modules, the ones they are built on, co
     const allowed = new Set([...modules, ...EVERY_PAGE]);
     // Walk the page's bench files (its own folder, bench/kit, shared panels); stop at src/, which the test above covers.
     const seen = new Set(), queue = [path.join(BENCH, page, 'main.js')];
+    if (page === 'destruction') queue.push(path.join(BENCH, page, 'parts.js'));
     while (queue.length) {
       const file = queue.pop();
       if (seen.has(file)) continue;

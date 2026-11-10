@@ -3,3 +3,6 @@ dist/
 private-assets/*
 !private-assets/README.md
 .vite/
+
+tools/blender/.build/
+__pycache__/

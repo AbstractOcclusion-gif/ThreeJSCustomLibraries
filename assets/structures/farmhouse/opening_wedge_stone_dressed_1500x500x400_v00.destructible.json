@@ -1,0 +1,557 @@
+{
+  "schema": "impact-club.destructible",
+  "version": 2,
+  "assetId": "opening_wedge_stone_dressed_1500x500x400_v00",
+  "model": "opening_wedge_stone_dressed_1500x500x400_v00.glb",
+  "units": "m",
+  "upAxis": "Y",
+  "material": "stone_dressed",
+  "anchoring": "loose",
+  "breakMode": "full",
+  "massKg": 360.0,
+  "breakEnergyJ": 426.66668701171875,
+  "friction": 0.6000000238418579,
+  "restitution": 0.029999999329447746,
+  "fxProfile": "stone",
+  "sourceNote": "gable",
+  "intact": {
+    "nodes": [
+      "opening_wedge_stone_dressed_1500x500x400_v00_intact_000"
+    ],
+    "colliders": [
+      {
+        "type": "convex",
+        "authorShape": "HULL",
+        "vertices": [
+          [
+            -0.75,
+            -0.16666666,
+            -0.2
+          ],
+          [
+            0.75,
+            -0.16666666,
+            -0.2
+          ],
+          [
+            0.0,
+            0.33333334,
+            -0.2
+          ],
+          [
+            -0.75,
+            -0.16666666,
+            0.2
+          ],
+          [
+            0.75,
+            -0.16666666,
+            0.2
+          ],
+          [
+            0.0,
+            0.33333334,
+            0.2
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            4
+          ],
+          [
+            0,
+            4,
+            3
+          ],
+          [
+            4,
+            5,
+            3
+          ],
+          [
+            5,
+            2,
+            0
+          ],
+          [
+            5,
+            0,
+            3
+          ],
+          [
+            2,
+            1,
+            0
+          ],
+          [
+            1,
+            2,
+            5
+          ],
+          [
+            1,
+            5,
+            4
+          ]
+        ],
+        "position": [
+          0.0,
+          -0.08333334,
+          -0.0
+        ]
+      }
+    ]
+  },
+  "pieces": [
+    {
+      "id": "opening_wedge_stone_dressed_1500x500x400_v00_p000",
+      "node": "opening_wedge_stone_dressed_1500x500x400_v00_piece_001",
+      "section": "body",
+      "mode": "dynamic",
+      "massKg": 80.00000158945718,
+      "position": [
+        -0.41666669,
+        -0.13888888,
+        0.0
+      ],
+      "collider": {
+        "type": "convex",
+        "authorShape": "HULL",
+        "vertices": [
+          [
+            -0.33333331,
+            -0.11111112,
+            -0.2
+          ],
+          [
+            -0.33333331,
+            -0.11111112,
+            0.2
+          ],
+          [
+            0.16666669,
+            0.22222222,
+            -0.2
+          ],
+          [
+            0.16666669,
+            -0.11111112,
+            -0.2
+          ],
+          [
+            0.16666669,
+            0.22222222,
+            0.2
+          ],
+          [
+            0.16666669,
+            -0.11111112,
+            0.2
+          ]
+        ],
+        "faces": [
+          [
+            3,
+            0,
+            2
+          ],
+          [
+            0,
+            1,
+            4
+          ],
+          [
+            0,
+            4,
+            2
+          ],
+          [
+            4,
+            5,
+            3
+          ],
+          [
+            4,
+            3,
+            2
+          ],
+          [
+            5,
+            1,
+            0
+          ],
+          [
+            5,
+            0,
+            3
+          ],
+          [
+            1,
+            5,
+            4
+          ]
+        ]
+      }
+    },
+    {
+      "id": "opening_wedge_stone_dressed_1500x500x400_v00_p001",
+      "node": "opening_wedge_stone_dressed_1500x500x400_v00_piece_002",
+      "section": "body",
+      "mode": "dynamic",
+      "massKg": 199.99999682108563,
+      "position": [
+        0.0,
+        -0.01666666,
+        -0.0
+      ],
+      "collider": {
+        "type": "convex",
+        "authorShape": "HULL",
+        "vertices": [
+          [
+            0.25,
+            0.10000001,
+            -0.2
+          ],
+          [
+            0.0,
+            0.26666665,
+            -0.2
+          ],
+          [
+            0.25,
+            -0.23333333,
+            -0.2
+          ],
+          [
+            0.0,
+            0.26666665,
+            0.2
+          ],
+          [
+            -0.25,
+            0.10000001,
+            -0.2
+          ],
+          [
+            -0.25,
+            -0.23333333,
+            -0.2
+          ],
+          [
+            -0.25,
+            0.10000001,
+            0.2
+          ],
+          [
+            -0.25,
+            -0.23333333,
+            0.2
+          ],
+          [
+            0.25,
+            -0.23333333,
+            0.2
+          ],
+          [
+            0.25,
+            0.10000001,
+            0.2
+          ]
+        ],
+        "faces": [
+          [
+            6,
+            4,
+            5
+          ],
+          [
+            6,
+            5,
+            7
+          ],
+          [
+            5,
+            2,
+            8
+          ],
+          [
+            5,
+            8,
+            7
+          ],
+          [
+            8,
+            9,
+            3
+          ],
+          [
+            8,
+            3,
+            6
+          ],
+          [
+            8,
+            6,
+            7
+          ],
+          [
+            3,
+            1,
+            4
+          ],
+          [
+            3,
+            4,
+            6
+          ],
+          [
+            4,
+            1,
+            0
+          ],
+          [
+            4,
+            0,
+            2
+          ],
+          [
+            4,
+            2,
+            5
+          ],
+          [
+            2,
+            0,
+            9
+          ],
+          [
+            2,
+            9,
+            8
+          ],
+          [
+            9,
+            0,
+            1
+          ],
+          [
+            9,
+            1,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "opening_wedge_stone_dressed_1500x500x400_v00_p002",
+      "node": "opening_wedge_stone_dressed_1500x500x400_v00_piece_003",
+      "section": "body",
+      "mode": "dynamic",
+      "massKg": 80.00000158945718,
+      "position": [
+        0.41666669,
+        -0.13888888,
+        0.0
+      ],
+      "collider": {
+        "type": "convex",
+        "authorShape": "HULL",
+        "vertices": [
+          [
+            0.33333331,
+            -0.11111112,
+            -0.2
+          ],
+          [
+            0.33333331,
+            -0.11111112,
+            0.2
+          ],
+          [
+            -0.16666669,
+            0.22222222,
+            -0.2
+          ],
+          [
+            -0.16666669,
+            -0.11111112,
+            -0.2
+          ],
+          [
+            -0.16666669,
+            -0.11111112,
+            0.2
+          ],
+          [
+            -0.16666669,
+            0.22222222,
+            0.2
+          ]
+        ],
+        "faces": [
+          [
+            2,
+            5,
+            1
+          ],
+          [
+            2,
+            1,
+            0
+          ],
+          [
+            1,
+            4,
+            3
+          ],
+          [
+            1,
+            3,
+            0
+          ],
+          [
+            3,
+            2,
+            0
+          ],
+          [
+            3,
+            4,
+            5
+          ],
+          [
+            3,
+            5,
+            2
+          ],
+          [
+            5,
+            4,
+            1
+          ]
+        ]
+      }
+    }
+  ],
+  "part": {
+    "type": "opening.wedge",
+    "materialId": "stone_dressed",
+    "variant": 0,
+    "seed": 100,
+    "grainAxis": null,
+    "sizeM": [
+      1.5,
+      0.5,
+      0.4
+    ]
+  },
+  "profileRevision": "6b3a7f7fae475be8422095d002725c0e84e9fc98cdd56da06c20423b9ab881e6",
+  "bonds": [
+    {
+      "id": "bond_000",
+      "a": "opening_wedge_stone_dressed_1500x500x400_v00_p000",
+      "b": "opening_wedge_stone_dressed_1500x500x400_v00_p001",
+      "position": [
+        -0.25,
+        -0.083333320915699,
+        -0.0
+      ],
+      "normal": [
+        1.0,
+        0.0,
+        -0.0
+      ],
+      "areaM2": 0.13333333929379787,
+      "kind": "cohesive"
+    },
+    {
+      "id": "bond_001",
+      "a": "opening_wedge_stone_dressed_1500x500x400_v00_p001",
+      "b": "opening_wedge_stone_dressed_1500x500x400_v00_p002",
+      "position": [
+        0.25,
+        -0.083333320915699,
+        -0.0
+      ],
+      "normal": [
+        1.0,
+        0.0,
+        -0.0
+      ],
+      "areaM2": 0.13333333929379787,
+      "kind": "cohesive"
+    }
+  ],
+  "joints": [],
+  "sockets": [
+    {
+      "id": "left",
+      "pieceId": "opening_wedge_stone_dressed_1500x500x400_v00_p000",
+      "position": [
+        -0.75,
+        -0.25,
+        -0.20000000298023224
+      ],
+      "axis": [
+        -1,
+        0,
+        0
+      ],
+      "connection": "bearing"
+    },
+    {
+      "id": "right",
+      "pieceId": "opening_wedge_stone_dressed_1500x500x400_v00_p002",
+      "position": [
+        0.75,
+        -0.25,
+        -0.20000000298023224
+      ],
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "connection": "bearing"
+    },
+    {
+      "id": "bottom",
+      "pieceId": "opening_wedge_stone_dressed_1500x500x400_v00_p000",
+      "position": [
+        -0.75,
+        -0.25,
+        -0.20000000298023224
+      ],
+      "axis": [
+        0,
+        -1,
+        0
+      ],
+      "connection": "bearing"
+    },
+    {
+      "id": "top",
+      "pieceId": "opening_wedge_stone_dressed_1500x500x400_v00_p001",
+      "position": [
+        0.0,
+        0.2499999850988388,
+        -0.20000000298023224
+      ],
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "connection": "bearing"
+    }
+  ],
+  "validation": {
+    "physicalChunks": 3,
+    "collisionHulls": 3,
+    "renderTriangles": 32,
+    "connectedComponents": 1
+  }
+}
