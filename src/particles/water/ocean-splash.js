@@ -23,14 +23,15 @@ export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, f
     const sh = SHEETS[S.sprite]; u.uSpriteMode.value = sh ? 1 : 0; if (sh) { u.tSheet.value = loadSheet(S.sprite); u.uTiles.value.set(sh.cols, sh.rows); }
     m.blending = S.blend === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending; u.uFxAdditive = { value: S.blend === 'additive' ? 1 : 0 }; m.needsUpdate = true; }
 
+  const DROPLET_ANISOTROPY = 4, RENDER_ORDER = 10, DEFAULT_AMBIENT = [0.35, 0.45, 0.55];   // drawn after the scene's transparent surfaces
   // WaterSplashEmitter constants
   const MIN_BURST_COUNT = 3, OUT_JITTER = [0.4, 1], UP_JITTER = [0.5, 1.2], UP_STRENGTH_FLOOR = 0.4, UP_STRENGTH_GAIN = 0.6, SPAWN_RING_RADIUS_SCALE = 0.5, SPAWN_HEIGHT = 0.01,
     MIN_OUTWARD_STRENGTH = 0.4, SIZE_JITTER = [0.6, 1.3], ALPHA_STRENGTH_FLOOR = 0.45, ALPHA_STRENGTH_GAIN = 0.55, MAX_ELEVATION = Math.PI / 2;
   // WaterFoamParticles.compute constants
   const SPRAY_LANDING_EPSILON = 0.005, SPRAY_LANDING_KEEP = 0.4, KIND_SURFACE = 0, KIND_SPRAY = 1, CAPACITY = 4096;
 
-  const tDrop = dropletUrl ? (loadTexture ?? (url => new THREE.TextureLoader().load(url)))(dropletUrl) : createSoftDiscTexture(THREE); tDrop.anisotropy = 4;
-  const LIT_U = { uSunCol: { value: new THREE.Color(...CLEAR_NOON_SUN) }, uAmb: { value: new THREE.Color(0.35, 0.45, 0.55) }, uLight: { value: new THREE.Vector3(0, 1, 0) } };
+  const tDrop = dropletUrl ? (loadTexture ?? (url => new THREE.TextureLoader().load(url)))(dropletUrl) : createSoftDiscTexture(THREE); tDrop.anisotropy = DROPLET_ANISOTROPY;
+  const LIT_U = { uSunCol: { value: new THREE.Color(...CLEAR_NOON_SUN) }, uAmb: { value: new THREE.Color(...DEFAULT_AMBIENT) }, uLight: { value: new THREE.Vector3(0, 1, 0) } };
 
   // ---- pool: position (x, height above local surface, z), velocity, (age, life), (size, seed, kind, opacity)
   const pos = new Float32Array(CAPACITY * 3), vel = new Float32Array(CAPACITY * 3), life = new Float32Array(CAPACITY * 2), misc = new Float32Array(CAPACITY * 4);
@@ -80,7 +81,7 @@ export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, f
         gl_FragColor = vec4(fxFog(vLit * sprite.rgb, vWorldFx), alpha);
         #include <colorspace_fragment>
       }` }));
-  mesh.frustumCulled = false; mesh.renderOrder = 10; fxScene.add(mesh);
+  mesh.frustumCulled = false; mesh.renderOrder = RENDER_ORDER; fxScene.add(mesh);
 
   const rnd = (a, b) => a + Math.random() * (b - a);
   // WaterFoamParticles.compute Elevate: lift the whole burst in its vertical plane.

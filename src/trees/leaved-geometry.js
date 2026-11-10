@@ -5,6 +5,11 @@ import {hash2} from '../core/hash.js';
 import {resolveProfile} from './profiles.js';
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+// Lobe surface noise: two sine products; phases decorrelate seeds, stretches skew the pattern off the axes.
+const LOBE_NOISE = Object.freeze({phase: [17, 9, 31], stretchY: 1.3, stretchZ: .9, crossX: 1.3});
+const LEAF_SWAY = Object.freeze({base: .35, gain: .65});   // wind sway weight of a leaf card, bottom to top of the crown
+const VARIANT_SEED = Object.freeze({step: 7.31, bush: 101});   // seed per variant; bushes use a separate seed range
+const LOBE_ANGLE_JITTER = 1.2;   // rad: random turn added to each side lobe's even spacing
 
 function push(out, position, normal, uv, shade, sway, leaf) {
   out.positions.push(position.x, position.y, position.z); out.normals.push(normal.x, normal.y, normal.z);
@@ -13,7 +18,8 @@ function push(out, position, normal, uv, shade, sway, leaf) {
 const bandOf = (y, bottom, top) => THREE.MathUtils.clamp((y - bottom) / (top - bottom), 0, 1);
 
 function makeNoise({noiseAmplitude: A, noiseFrequency: F}) {
-  return (x, y, z, seed) => 1 + A * (Math.sin(x * F + seed * 17) * Math.cos(y * F * 1.3 + seed * 9) * .5 + Math.sin(z * F * .9 + x * 1.3 + seed * 31) * .5);
+  const [px, py, pz] = LOBE_NOISE.phase, {stretchY, stretchZ, crossX} = LOBE_NOISE;
+  return (x, y, z, seed) => 1 + A * (Math.sin(x * F + seed * px) * Math.cos(y * F * stretchY + seed * py) * .5 + Math.sin(z * F * stretchZ + x * crossX + seed * pz) * .5);
 }
 
 function appendCore(out, P, noise, centre, radius, squash, seed, band) {
@@ -51,7 +57,7 @@ function appendCards(out, P, noise, centre, radius, squash, seed, tintJitter, ba
     const size = THREE.MathUtils.lerp(C.size[0], C.size[1], hash2(k, seed, 3)) * C.scale;
     const u0 = ru + Math.floor(hash2(k, seed, 4) * C.subcells) * cellW, v0 = rv + Math.floor(hash2(k, seed, 5) * C.subcells) * cellH;
     shade.setScalar(THREE.MathUtils.lerp(P.shade.bottom, P.shade.top, band(p.y)) * tintJitter * (1 + C.tintJitter * (hash2(k, seed, 6) * 2 - 1)));
-    const sway = .35 + .65 * band(p.y), base = out.positions.length / 3;
+    const sway = LEAF_SWAY.base + LEAF_SWAY.gain * band(p.y), base = out.positions.length / 3;
     for (const [cx, cy, u, v] of [[-.5, -.5, u0, v0], [.5, -.5, u0 + cellW, v0], [.5, .5, u0 + cellW, v0 + cellH], [-.5, .5, u0, v0 + cellH]]) {
       corner.copy(tangent).multiplyScalar(cx * size).addScaledVector(bitangent, cy * size).applyQuaternion(tilt).applyQuaternion(spin);
       corner.y *= C.yCompensation; corner.add(p);
@@ -77,12 +83,12 @@ export function leavedTreeGeometry(profile, variant, leafRect = [0, 0, 1, 1]) {
   const out = {positions: [], normals: [], uvs: [], colors: [], sway: [], leaf: [], index: []};
   const depth = P.crown.depth, crownTopY = 1, crownBottomY = 1 - depth, crownHalf = depth / 2, crownCentreY = crownBottomY + crownHalf;
   const band = y => bandOf(y, crownBottomY, crownTopY);
-  const seed = variant * 7.31 + (P.name === 'bush' ? 101 : 0);
+  const seed = variant * VARIANT_SEED.step + (P.name === 'bush' ? VARIANT_SEED.bush : 0);
   const squash = P.crown.fixedSquash ?? (crownHalf / P.crown.mainRadius) * P.crown.mainSquash;
   const lobes = [{centre: new THREE.Vector3(0, P.crown.mainCentreY ?? crownCentreY, 0), radius: P.crown.mainRadius, seed, tint: 1}];
   const L = P.lobes, count = Math.round(THREE.MathUtils.lerp(L.count[0], L.count[1], hash2(variant, 1, 3)));
   for (let k = 0; k < count; k++) {
-    const angle = (k / count) * Math.PI * 2 + hash2(variant, k, 4) * 1.2;
+    const angle = (k / count) * Math.PI * 2 + hash2(variant, k, 4) * LOBE_ANGLE_JITTER;
     const radius = THREE.MathUtils.lerp(L.radius[0], L.radius[1], hash2(variant, k, 5));
     const offset = THREE.MathUtils.lerp(L.offset[0], L.offset[1], hash2(variant, k, 6)) * L.spread;
     const drop = THREE.MathUtils.lerp(L.drop[0], L.drop[1], hash2(variant, k, 7)) * depth * L.dropScale;
