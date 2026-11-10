@@ -1,4 +1,5 @@
-import {DataTexture, LinearFilter, MathUtils, RGBAFormat, Vector4} from 'three';
+import {MathUtils, Vector4} from 'three';
+import {createDataTexture} from '../core/data-texture.js';
 
 // Reduced browser adaptation of WebGPUWater's River Fluid pressure projection.
 // Face fluxes enforce solid walls and leave the first and last cross sections open.
@@ -16,8 +17,7 @@ export function createFlowBake({origin = [-34, -28.6], size: gridSize = [112, 88
  const [width, height] = gridSize, [left, bottom] = origin;
  const size = width * height;
  const pixels = new Uint8Array(size * 4);
- const texture = new DataTexture(pixels, width, height, RGBAFormat);
- texture.minFilter = texture.magFilter = LinearFilter;
+ const texture = createDataTexture(pixels, width, height, {filter: 'linear', upload: false});
  const bounds = new Vector4(left, bottom, width * cell, height * cell);
  let ready = false;
  const vx = new Float32Array(size), vz = new Float32Array(size);

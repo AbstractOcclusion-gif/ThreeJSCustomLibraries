@@ -3,6 +3,7 @@ import {Body, Box, ContactMaterial, Material, Vec3} from 'cannon-es';
 import {hasIceSupport} from '../../src/water/freeze.js';
 import {createIceSlab, ICE_THICKNESS, ICE_TOP} from './ice-slab.js';
 import {createIceFracture, iceFractureDistance} from './ice-fracture.js';
+import {createDataTexture} from '../../src/core/data-texture.js';
 
 const SLIDE_FRICTION = .00015;
 
@@ -14,8 +15,7 @@ export function createTerrainIce(field, freezeMap, scene) {
  const pixelsPerCell = 4, mapColumns = columns * pixelsPerCell, mapRows = rows * pixelsPerCell;
  const mapWidth = width / pixelsPerCell, mapDepth = depth / pixelsPerCell;
  const mask = new Uint8Array(mapColumns * mapRows);
- const texture = new THREE.DataTexture(mask, mapColumns, mapRows, THREE.RedFormat);
- texture.needsUpdate = true;
+ const texture = createDataTexture(mask, mapColumns, mapRows, {format: THREE.RedFormat});
  const active = {value: false};
  const solidSurface = {value: false}, holes = [], slab = createIceSlab(scene, freezeMap);
  const bodies = new Map(), material = new Material({friction: SLIDE_FRICTION, restitution: 0});

@@ -6,6 +6,7 @@ import {ICE_COVERAGE_GLSL, ICE_MAP_SCALE} from './freeze.js';
 import {createPlanarCapture} from './planar-capture.js';
 import {POND_OPTICS_GLSL} from './pond-optics.js';
 import {createPondShadow, POND_SHADOW_GLSL} from './pond-shadow.js';
+import {createRenderScope} from '../core/render-state.js';
 
 // WebAquarium's Fishing pond reflection settings.
 export const POND_REFLECTION_DEFAULTS = Object.freeze({on: true, mix: .75, distort: .08, resolution: 512, hz: 15, floor: .15});
@@ -523,7 +524,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   uniforms.tPondGod.value = godTarget.texture;
  }
  const size = new THREE.Vector2();
- const viewport = new THREE.Vector4(), scissor = new THREE.Vector4();
+ const scope = createRenderScope(renderer, {clearColor: false});
  const worldPosition = new THREE.Vector3(), eye = new THREE.Vector3();
  const planar = createPlanarCapture(renderer);
 
@@ -641,14 +642,8 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    if (settings.impactFoam) uniforms.impactFoam.value.copy(settings.impactFoam);
    if (settings.windWaves) waves.configure(settings.windWaves);
    else waves.update(settings.waveHeight ?? R.waveHeight, settings.wavelength ?? R.wavelength, settings.waveDirection ?? R.waveDirection, settings.waveSpread ?? R.waveSpread);
-   const previous = renderer.getRenderTarget();
-   const face = renderer.getActiveCubeFace(), level = renderer.getActiveMipmapLevel();
-   const scissorTest = renderer.getScissorTest();
-   renderer.getViewport(viewport);
-   renderer.getScissor(scissor);
    surface.visible = false;
-   try {
-    renderer.setScissorTest(false);
+   scope(() => { try {
     if (sun.y > MIN_SUN_HEIGHT) shadow?.render(ripples.bounds, uniforms.pondLightLevel.value, uniforms.pondRefractedSun.value, settings);
     if ((uniforms.caustics.value > 0 || uniforms.godRays.value > 0) && sun.y > MIN_SUN_HEIGHT) {
      renderer.setRenderTarget(causticTarget);
@@ -669,11 +664,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
     }
    } finally {
     surface.visible = true;
-    renderer.setRenderTarget(previous, face, level);
-    renderer.setViewport(viewport);
-    renderer.setScissor(scissor);
-    renderer.setScissorTest(scissorTest);
-   }
+   } });
   },
   dispose() {
    scene.remove(surface);

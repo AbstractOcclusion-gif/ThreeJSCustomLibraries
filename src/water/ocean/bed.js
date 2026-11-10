@@ -7,6 +7,7 @@
 // Green's-law gain, phase compression; refraction is applied by the analytic bands) reads them through ShoreData. Constants keep
 // the package names (SHORE_*) so the two implementations diff cleanly. CPU buoyancy mirror NOT ported: our probes sample the GPU.
 import * as THREE from 'three';
+import {createDataTexture} from '../../core/data-texture.js';
 
 // Unity BedDepthSettings defaults: shoreShoalDepth 4, shoreRefraction .7, shoreCompression .6, shoreGreens 1.35. The compression
 // reach is 2 x the surf front wavelength (SURF_WARP_REACH_SPACINGS, published by applySurf) -- one curve for swell and fronts.
@@ -98,9 +99,7 @@ export function createOceanShore(renderer) {
   const packed = new Float32Array(n * n * 4), hasSdf = buildSdf(depth, n, worldX, worldZ, 2 * half / n, packed);
   for (let i = 0; i < n * n; i++) packed[i * 4] = depth[i];
   if (SHORE_U.tShore.value) SHORE_U.tShore.value.dispose();
-  const t = new THREE.DataTexture(packed, n, n, THREE.RGBAFormat, THREE.FloatType);
-  t.minFilter = t.magFilter = floatFilter;
-  t.needsUpdate = true;
+  const t = createDataTexture(packed, n, n, {type: THREE.FloatType, filter: floatFilter});
   SHORE_U.tShore.value = t; SHORE_U.uShoreCenter.value.set(centerX, centerZ); SHORE_U.uShoreHalf.value = half; SHORE_U.uShoreOffFieldDepth.value = offFieldDepth;
   shoreSdfBaked = hasSdf; applyShore(s);
   lastBake = {size: n, sdf: hasSdf, ms: performance.now() - started};

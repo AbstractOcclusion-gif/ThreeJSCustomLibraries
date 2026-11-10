@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {createTerrainRules} from './terrain-rules.js';
+import {createDataTexture} from '../core/data-texture.js';
 
 const MAX_RESOLUTION = 1025;   // samples per side
 const BYTE = 255;              // 8-bit weight and coverage scale
@@ -34,14 +35,11 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  geometry.boundingBox.min.y -= EDIT_ENVELOPE.below;
  geometry.boundingBox.max.y += EDIT_ENVELOPE.above;
  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
- const heightMap = new THREE.DataTexture(samples, nx, nz, THREE.RedFormat, THREE.FloatType);
+ const heightMap = createDataTexture(samples, nx, nz, {format: THREE.RedFormat, type: THREE.FloatType});
  const weights = new Uint8Array(samples.length * 4);
- const weightMap = new THREE.DataTexture(weights, nx, nz);
- weightMap.minFilter = weightMap.magFilter = THREE.LinearFilter;
+ const weightMap = createDataTexture(weights, nx, nz, {filter: 'linear'});
  const forestWeights = settings?.forestCover !== undefined ? new Uint8Array(samples.length) : null;
- const forestMap = forestWeights ? new THREE.DataTexture(forestWeights, nx, nz, THREE.RedFormat) : null;
- if (forestMap) forestMap.minFilter = forestMap.magFilter = THREE.LinearFilter;
- heightMap.needsUpdate = true;
+ const forestMap = forestWeights ? createDataTexture(forestWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
  const bounds = new THREE.Vector4(...origin, ...size);
  function updateRules(values = {}) {
   if (!forestMap && values.forestCover > 0) throw Error('Enable forest cover when creating the terrain field');
@@ -89,9 +87,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  const snowCover = {value: false};
  const snowMask = new Uint8Array(samples.length);
  let snowMaskDirty = false;
- const snowMap = new THREE.DataTexture(snowMask, nx, nz, THREE.RedFormat);
- snowMap.minFilter = snowMap.magFilter = THREE.LinearFilter;
- snowMap.needsUpdate = true;
+ const snowMap = createDataTexture(snowMask, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
  const baseNormals = geometry.getAttribute('normal').array.slice();
  const normals = geometry.getAttribute('normal');
  const face = new THREE.Vector3();

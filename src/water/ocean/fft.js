@@ -9,6 +9,7 @@
 // current drift, no direction map (see aperiodic.js), and the normal array has no mip chain (array render targets are not mipmapped),
 // so far-field slope is tamed by the cascade distance fade + far slope floor only.
 import * as THREE from 'three';
+import { createDataTexture } from '../../core/data-texture.js';
 import { QV, createPass, createTargetScope, pingPong } from './passes.js';
 import { APERIODIC_GLSL } from './aperiodic.js';
 import { SHORE_GLSL, createOceanShore } from './bed.js';
@@ -300,9 +301,7 @@ function buildButterfly(size, stages) {
       const i = (y * stages + stage) * 4; px[i] = Math.cos(ang); px[i + 1] = Math.sin(ang); px[i + 2] = a; px[i + 3] = b;
     }
   }
-  const tex = new THREE.DataTexture(px, stages, size, THREE.RGBAFormat, THREE.FloatType);
-  tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.needsUpdate = true;
-  return tex;
+  return createDataTexture(px, stages, size, {type: THREE.FloatType, filter: 'nearest'});
 }
 function arrayTarget(size, layers, type, filter, wrap) {
   const rt = new THREE.WebGLArrayRenderTarget(size, size, layers);

@@ -10,6 +10,7 @@ import { Interactable } from './interactable.js';
 import { SprayPump } from '../../particles/water/spray-pump.js';
 import { OCEAN_CAUSTIC_GLSL } from './caustics.js';
 import { SurfaceProbes } from './surface-sampler.js';
+import { configureTexture } from '../../core/data-texture.js';
 
 // Asset conventions (read off the file, see the batch notes): Z-up, Y-forward, centimetres, LOD0..3 + a UCX collision hull,
 // two material slots (hull, outboard motor; the motor maps are the shared "BoatsCommon" set shipped with Motorboat02).
@@ -55,9 +56,8 @@ export class Boat {
     if (this.disposed) { this.releaseResources(); return this; }
     const texLoader = new THREE.TextureLoader(), aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     const tex = (base, suffix, srgb) => {
-      const t = texLoader.load(url(base + suffix + '.PNG'));
-      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
-      t.anisotropy = aniso; this.owned.add(t); return t;
+      const t = configureTexture(texLoader.load(url(base + suffix + '.PNG')), {anisotropy: aniso, ...(srgb ? {colorSpace: THREE.SRGBColorSpace} : {})});
+      this.owned.add(t); return t;
     };
     const pbr = base => {
       const m = new THREE.MeshStandardMaterial({map: tex(base,'BC',true), normalMap: tex(base,'N'),

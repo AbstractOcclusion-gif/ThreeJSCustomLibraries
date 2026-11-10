@@ -5,6 +5,7 @@ import {createThreeWeather} from '../../src/weather/three/index.js';
 import {createWeatherDevPanel} from '../../src/weather/three/dev-panel.js';
 import {bundledWeatherAssets} from '../../src/weather/three/bundled-assets.js';
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
+import {createDataTexture} from '../../src/core/data-texture.js';
 import '../bench.css';
 import '../ui-demo.js';
 import {detectAssets} from '../kit/assets.js';
@@ -77,10 +78,7 @@ for (let z = 0; z < soilSize; z++) for (let x = 0; x < soilSize; x++) {
   const value = 191 + grain + 11 * pattern;
   soil.set([value, value, value, 255], (z * soilSize + x) * 4);
 }
-const soilMap = new THREE.DataTexture(soil, soilSize, soilSize);
-soilMap.wrapS = soilMap.wrapT = THREE.RepeatWrapping;
-soilMap.magFilter = THREE.LinearFilter; soilMap.minFilter = THREE.LinearMipmapLinearFilter;
-soilMap.generateMipmaps = true; soilMap.repeat.setScalar(170); soilMap.needsUpdate = true;
+const soilMap = createDataTexture(soil, soilSize, soilSize, {wrap: THREE.RepeatWrapping, filter: 'mipmap', repeat: 170});
 const ground = new THREE.PlaneGeometry(900, 900, 60, 60); ground.rotateX(-Math.PI / 2);
 const p = ground.attributes.position;
 for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i), r = Math.hypot(x, z); p.setY(i, Math.sin(x * .025) * Math.cos(z * .021) * Math.max(0, r - 28) * .035 - 1); }

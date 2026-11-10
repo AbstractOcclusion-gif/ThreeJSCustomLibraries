@@ -1,6 +1,7 @@
 import {makePool, reuploadAll} from './pool.js';
 import {CLEAR_NOON_SUN} from '../../core/lighting.js';
 import {createSoftDiscTexture} from './soft-disc.js';
+import {createRenderScope} from '../../core/render-state.js';
 // The host supplies its renderer, surface, depth, lighting and impact bindings. dropletUrl is optional: without it the
 // droplet sprite is a generated soft disc.
 export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, SURFACE_HEIGHT_GLSL, surfaceHeightUniforms, SHEETS, loadSheet, dropletUrl = null, loadTexture, onDeposit = null}) {
@@ -148,21 +149,20 @@ export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, f
       void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; float disc = 1.0 - smoothstep(0.3, 1.0, d); if (disc <= 0.0) discard;
         gl_FragColor = vec4(clamp(uStrength * vOpacity * disc, 0.0, 1.0), 0.0, 0.0, 1.0); }` });
   const landScene = new THREE.Scene(), landCam = new THREE.Camera(); const landPoints = new THREE.Points(landGeo, landMat); landPoints.frustumCulled = false; landScene.add(landPoints);
+  const depositScope = createRenderScope(renderer, {clearColor: false, scissorOff: false});
   function depositFoam(simWindow) {
     if (!landedCount) return; landedTotal += landedCount;
     if (onDeposit) for (let i = 0; i < landedCount; i++) onDeposit(landed[i * 3], landed[i * 3 + 1], S.depositRadius, landed[i * 3 + 2] * S.depositStrength);
     if (simWindow) { const u = landMat.uniforms; u.uSimCenter.value.copy(simWindow.center); u.uSimHalf.value = simWindow.halfSize; u.uRadiusPx.value = Math.max(1, S.depositRadius / simWindow.texelMeters); u.uStrength.value = S.depositStrength;
       landGeo.attributes.position.needsUpdate = true; landGeo.setDrawRange(0, landedCount);
-      const previous = renderer.getRenderTarget(), autoClear = renderer.autoClear;
-      const face = renderer.getActiveCubeFace(), level = renderer.getActiveMipmapLevel();
-      try {
+      const autoClear = renderer.autoClear;
+      depositScope(() => { try {
         renderer.setRenderTarget(simWindow.foam.read);
         renderer.autoClear = false;
         renderer.render(landScene, landCam);
       } finally {
         renderer.autoClear = autoClear;
-        renderer.setRenderTarget(previous, face, level);
-      } }
+      } }); }
     landedCount = 0;
   }
 

@@ -5,7 +5,7 @@
 // porous-wet term), and gets a mirror-flat sheen; WHERE it is wet comes from the band above the live surface and the swash's wet line.
 import * as THREE from 'three';
 import {createLighting} from '../core/lighting.js';
-import {valueNoise} from '../core/value-noise.js';
+import {valueNoise, fbm} from '../core/value-noise.js';
 
 export const TERRAIN_DEFAULTS = Object.freeze({ on: true, centerX: 0, centerZ: 220, peakHeight: 18, hillRadius: 70, beachRadius: 85, slopeEndRadius: 330, abyssDepth: 100, noiseAmp: 5, noiseScale: 55, seed: 7 });
 const ISLAND_EXTENT = 400, CELL = 2, ABYSS_EXTENT = 20000;   // island mesh half-size (m), grid cell (m), abyss plane half-size (m)
@@ -13,9 +13,10 @@ const ISLAND_EXTENT = 400, CELL = 2, ABYSS_EXTENT = 20000;   // island mesh half
 export const WET_DEFAULTS = Object.freeze({ strength: 1, bandHeight: 0.25, swashStrength: 1, darken: 0.85, smoothness: 0.85 });
 
 // 5-octave fbm over the shared terrain value noise (core/value-noise.js), deterministic per seed
+const COAST_FBM = Object.freeze({octaves: 5, amplitude: 0.5, gain: 0.5, lacunarity: 2.1});
 function makeNoise(seed) {
   const value = valueNoise(seed);
-  return (x, y) => { let a = 0, w = 0.5, f = 1; for (let o = 0; o < 5; o++) { a += value(x * f, y * f) * w; w *= 0.5; f *= 2.1; } return a; };
+  return (x, y) => fbm(value, x, y, COAST_FBM);
 }
 const smooth01 = (a, b, x) => { const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 

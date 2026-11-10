@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {JERLOV} from './jerlov.js';
 import {OCEAN_CAUSTIC_GLSL} from './ocean/caustics.js';
 import {POND_OPTICS_GLSL} from './pond-optics.js';
+import {createRenderScope} from '../core/render-state.js';
 
 // WebAquarium ocean/composite.js: split the camera near plane at the local water
 // plane and integrate only the submerged part of each view ray.
@@ -150,7 +151,7 @@ export function createWaterlineComposite(renderer, {caustics} = {}) {
  const composite = new THREE.Scene(), quadCamera = new THREE.Camera();
  composite.add(quad);
  const size = new THREE.Vector2(), corner = new THREE.Vector3();
- const viewport = new THREE.Vector4(), scissor = new THREE.Vector4();
+ const scope = createRenderScope(renderer, {clearColor: false});
  const normal = uniforms.uPlaneN.value;
 
  // height is the plane height at the camera's xz, with optional slopes from the host's surface probes.
@@ -200,24 +201,14 @@ export function createWaterlineComposite(renderer, {caustics} = {}) {
    uniforms.tDepth.value = depth;
    uniforms.uWaterLayer.value = false;
    const previous = renderer.getRenderTarget();
-   const face = renderer.getActiveCubeFace(), level = renderer.getActiveMipmapLevel();
-   const scissorTest = renderer.getScissorTest();
-   renderer.getViewport(viewport);
-   renderer.getScissor(scissor);
    if (previous) size.set(previous.width, previous.height);
    else renderer.getDrawingBufferSize(size);
    target.setSize(size.x, size.y);
-   try {
+   scope(() => {
     renderer.setRenderTarget(target);
-    renderer.setScissorTest(false);
     renderer.clear();
     renderer.render(scene, camera);
-   } finally {
-    renderer.setRenderTarget(previous, face, level);
-    renderer.setViewport(viewport);
-    renderer.setScissor(scissor);
-    renderer.setScissorTest(scissorTest);
-   }
+   });
    renderer.render(composite, quadCamera);
   },
   dispose() {

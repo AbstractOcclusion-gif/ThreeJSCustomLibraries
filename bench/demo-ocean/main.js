@@ -12,7 +12,7 @@ import {createCameraShots} from '../kit/shots.js';
 import {createFixedStep} from '../../src/core/fixed-step.js';
 import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
-import {detectAssets} from '../kit/assets.js';
+import {loadOceanLace} from '../kit/assets.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {oceanDemoControls} from './controls.js';
 import {sprayControls} from '../particles/controls.js';
@@ -29,12 +29,7 @@ const controls = new OrbitControls(camera, renderer.domElement); controls.target
 controls.minDistance = 12; controls.maxDistance = 165; controls.maxPolarAngle = Math.PI * .495; controls.enablePan = false; controls.update();
 controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
 const weather = await createBenchWeather({scene, renderer, camera, initial: 'cloudy 1', hour: 15});
-const aquariumAssets = new URL(import.meta.env.BASE_URL + 'webaquarium/', location.href);
-const sheetsUrl = new URL('library/ocean/textures/', aquariumAssets).href;
-const sheetBase = await detectAssets(sheetsUrl + 'foam_lace.png', sheetsUrl);
-const foamUrl = sheetBase ? sheetBase + 'foam_lace.png' : import.meta.env.BASE_URL + 'webaquarium-water/foam_lace.png';
-const laceTexture = await detectAssets(foamUrl, foamUrl)
-  ? await new THREE.TextureLoader().loadAsync(foamUrl).catch(error => { console.warn('Foam lace texture failed to load; the ocean uses its generated one.', error); }) : undefined;
+const {aquariumAssets, sheetBase, laceTexture} = await loadOceanLace();
 const ocean = createOceanSurface({renderer, sky: skyFromWeather(weather.view), caustics: {}, wake: {}, exclusion: true, laceTexture});
 const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);

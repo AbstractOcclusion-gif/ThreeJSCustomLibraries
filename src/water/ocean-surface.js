@@ -15,6 +15,7 @@ import {REFLECTION_GLSL} from './ocean/reflection-glsl.js';
 import {createPlanarCapture} from './planar-capture.js';
 import {createWaveBank, WIND_WAVE_GLSL} from './waves.js';
 import {ExclusionVolumes} from './ocean/exclusion.js';
+import {createRenderScope} from '../core/render-state.js';
 
 export const OCEAN_REFLECTION_MODES = Object.freeze(['sky capture', 'planar', 'screen space']);
 
@@ -73,8 +74,9 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
   const exclusion = renderer && exclude ? new ExclusionVolumes(renderer) : null;
   let unmaskedWater;
   const eye = new THREE.Vector3();
-  const clearColor = new THREE.Color();
-  const captureSize = new THREE.Vector2(), viewport = new THREE.Vector4(), scissor = new THREE.Vector4();
+  const captureSize = new THREE.Vector2();
+  // Offscreen captures put the host's target, viewport and scissor back; the water layer also its clear colour.
+  const sceneScope = renderer ? createRenderScope(renderer, {clearColor: false}) : null, waterScope = renderer ? createRenderScope(renderer) : null;
   const useClipmap = !geometry && (clipmapSettings ?? !!fft);
   const ownsGeometry = !geometry && !useClipmap, ownsLace = !laceTexture;
   if (ownsGeometry) geometry = createOceanGeometry();
@@ -487,15 +489,11 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
       const water = Object.hasOwn(JERLOV, waterType) ? JERLOV[waterType] : JERLOV[DEFAULT_WATER_TYPE];
       uniforms.uOceanExtinction.value.fromArray(water.extinction);
       uniforms.uScatterColor.value.setRGB(...water.body, THREE.SRGBColorSpace).multiplyScalar(bodyGain);
-      const previous = renderer.getRenderTarget();
-      const face = renderer.getActiveCubeFace(), level = renderer.getActiveMipmapLevel();
-      const scissorTest = renderer.getScissorTest(), wasVisible = mesh.visible;
-      renderer.getViewport(viewport);
-      renderer.getScissor(scissor);
+      const wasVisible = mesh.visible;
       renderer.getDrawingBufferSize(captureSize);
       capture.setSize(captureSize.x, captureSize.y);
       mesh.visible = false;
-      try {
+      sceneScope(() => { try {
         if (exclusion) exclusion.uniforms.uExclusionOn.value = 0;
         uniforms.uReflectionMode.value = 0;
         if (state.reflectionMix > 0 && state.reflectionSource === 'planar' && camera.getWorldPosition(eye).y > PLANAR_MIN_EYE_HEIGHT) {
@@ -505,7 +503,6 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
         } else if (state.reflectionSource === 'screen space') uniforms.uReflectionMode.value = 2;
         exclusion?.update(camera, capture.width, capture.height, excludeHulls);
         renderer.setRenderTarget(capture);
-        renderer.setScissorTest(false);
         renderer.clear();
         renderer.render(scene, camera);
         uniforms.uOceanInvVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
@@ -513,22 +510,11 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
         uniforms.uOceanSceneReady.value = true;
       } finally {
         mesh.visible = wasVisible;
-        renderer.setRenderTarget(previous, face, level);
-        renderer.setViewport(viewport);
-        renderer.setScissor(scissor);
-        renderer.setScissorTest(scissorTest);
-      }
+      } });
       return capture;
     },
     captureWater(waterScene, camera) {
       if (!uniforms.uOceanSceneReady?.value) throw new Error('Capture the opaque scene before the water layer');
-      const previous = renderer.getRenderTarget();
-      const face = renderer.getActiveCubeFace(), level = renderer.getActiveMipmapLevel();
-      const scissorTest = renderer.getScissorTest();
-      renderer.getViewport(viewport);
-      renderer.getScissor(scissor);
-      renderer.getClearColor(clearColor);
-      const alpha = renderer.getClearAlpha();
       waterTarget.setSize(capture.width, capture.height);
       const mask = exclusion?.uniforms.uExclusionOn.value > .5;
       if (mask) {
@@ -538,9 +524,8 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
         unmaskedWater.setSize(capture.width, capture.height);
       }
       uniforms.uOceanWaterLayer.value = true;
-      try {
+      waterScope(() => { try {
         renderer.setRenderTarget(mask ? unmaskedWater : waterTarget);
-        renderer.setScissorTest(false);
         renderer.setClearColor(0, 0);
         renderer.clear();
         renderer.render(waterScene, camera);
@@ -549,12 +534,7 @@ export function createOceanSurface({renderer, sky = proceduralSky(), geometry, l
         if (mask) exclusion.filter(unmaskedWater, waterTarget);
       } finally {
         uniforms.uOceanWaterLayer.value = false;
-        renderer.setClearColor(clearColor, alpha);
-        renderer.setRenderTarget(previous, face, level);
-        renderer.setViewport(viewport);
-        renderer.setScissor(scissor);
-        renderer.setScissorTest(scissorTest);
-      }
+      } });
       return waterTarget;
     },
     setShore(heightAt, {centerX = 0, centerZ = 0, half, shore, surf, offFieldDepth} = {}) {

@@ -2,6 +2,7 @@
 // A DataTexture built in code, so both run with no files at all.
 import * as THREE from 'three';
 import {hash2} from './hash.js';
+import {createDataTexture} from './data-texture.js';
 
 const TILE = 128, TILES = 3;   // px per tile, tiles across
 const ANISOTROPY = 4;
@@ -31,7 +32,5 @@ export function createVegetationAtlas() {
     for (let k = 0; k < LEAF.discs; k++) { const a = k * LEAF.turn, r = LEAF.radius[0] + hash2(k, 1, LEAF.seed) * LEAF.radius[1], cx = Math.cos(a) * LEAF.spread[0] * hash2(k, 2, LEAF.seed), cy = Math.sin(a) * LEAF.spread[1] * hash2(k, 3, LEAF.seed); const d = Math.hypot(u - cx, v - cy); if (d < r) { inside = 1; light = Math.max(light, 1 - d / r); } }
     const shade = LEAF.shade[0] + LEAF.shade[1] * light; put(2 * TILE + x, y, Math.round(LEAF.color[0] * shade), Math.round(LEAF.color[1] * shade), Math.round(LEAF.color[2] * shade), inside ? OPAQUE : 0);
   }
-  const atlas = new THREE.DataTexture(data, w, h, THREE.RGBAFormat); atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = ANISOTROPY;
-  atlas.minFilter = THREE.LinearMipmapLinearFilter; atlas.magFilter = THREE.LinearFilter; atlas.generateMipmaps = true; atlas.needsUpdate = true;
-  return atlas;
+  return createDataTexture(data, w, h, {colorSpace: THREE.SRGBColorSpace, anisotropy: ANISOTROPY, filter: 'mipmap'});
 }

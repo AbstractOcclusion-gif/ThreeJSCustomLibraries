@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {createDataTexture} from './data-texture.js';
 
 // A bounded world-XZ mask. The host decides which contacts leave marks.
 export function createTrackMask({origin = [-32, -32], size = [64, 64], resolution = 256, directional = false} = {}) {
@@ -8,9 +9,7 @@ export function createTrackMask({origin = [-32, -32], size = [64, 64], resolutio
  const bounds = new THREE.Vector4(...origin, ...size);
  const stride = directional ? 4 : 1;
  const data = new Uint8Array(resolution * resolution * stride);
- const texture = new THREE.DataTexture(data, resolution, resolution, directional ? THREE.RGBAFormat : THREE.RedFormat);
- texture.minFilter = texture.magFilter = THREE.LinearFilter;
- texture.needsUpdate = true;
+ const texture = createDataTexture(data, resolution, resolution, {format: directional ? THREE.RGBAFormat : THREE.RedFormat, filter: 'linear'});
  const cellX = size[0] / resolution, cellZ = size[1] / resolution;
 
  return {

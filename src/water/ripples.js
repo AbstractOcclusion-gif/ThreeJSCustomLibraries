@@ -1,4 +1,5 @@
-import {DataTexture, FloatType, RedFormat, Vector4} from 'three';
+import {FloatType, RedFormat, Vector4} from 'three';
+import {createDataTexture} from '../core/data-texture.js';
 
 const step = 1 / 60;
 // WebAquarium's ripple solver per step: velocity gains waveSpeed x laplacian, then keeps `damping`; height keeps `decay`.
@@ -15,7 +16,7 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = .4
  const velocity = new Float32Array(heights.length);
  const next = new Float32Array(heights.length);
  const wet = new Uint8Array(heights.length);
- const texture = new DataTexture(heights, columns, rows, RedFormat, FloatType);
+ const texture = createDataTexture(heights, columns, rows, {format: RedFormat, type: FloatType, upload: false});
  const bounds = new Vector4(xMin, zMin, columns * cell, rows * cell);
  let active = 0, accumulator = 0;
 

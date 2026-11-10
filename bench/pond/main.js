@@ -10,6 +10,7 @@ import {detectAssets} from '../kit/assets.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {valueNoise} from '../../src/core/value-noise.js';
+import {configureTexture} from '../../src/core/data-texture.js';
 import {sprayControls} from '../particles/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
@@ -18,7 +19,8 @@ import {aimRay} from '../kit/input.js';
 // within spread m across, splashing the ripples at rippleShare x flow and throwing mist and droplets; impact foam = foamShare x flow.
 const FALL = Object.freeze({scrollBase: .5, interval: .18, minFlow: .25, spread: 3, rippleShare: .5, sprayHeight: .12,
   mistRadius: .75, splashShare: .5, splashRadius: .18, foamShare: .75});
-const FLOW_TIME_SCALE = .12;   // the pond surface's foam / flow clock against real seconds
+const FLOW_TIME_SCALE = .12;
+const MAX_ANISOTROPY = 8;   // the pond surface's foam / flow clock against real seconds
 const renderer = benchRenderer();
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.1, 500);
@@ -87,10 +89,7 @@ const sand = await detectAssets(sandBase + 'sandAlb.webp', sandBase);
 if (sand) {
  const loader = new THREE.TextureLoader();
  const texture = name => {
-  const t = loader.load(sand + name);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-  return t;
+  return configureTexture(loader.load(sand + name), {wrap: THREE.RepeatWrapping, anisotropy: Math.min(MAX_ANISOTROPY, renderer.capabilities.getMaxAnisotropy())});
  };
  bedMaterial.map = texture('sandAlb.webp'); bedMaterial.map.colorSpace = THREE.SRGBColorSpace;
  bedMaterial.normalMap = texture('sandNrm.webp'); bedMaterial.normalScale.set(.7, .7);

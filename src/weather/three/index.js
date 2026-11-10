@@ -8,6 +8,7 @@ import {createCloudShadows} from './cloud-shadows.js';
 import {resolveVisualConfig,APPEARANCE_DEFAULTS} from './settings.js';
 import {createEnvironment,setEnvironmentWind} from '../../core/environment.js';
 import {assertFrameTime} from '../../core/validate.js';
+import {createRenderScope} from '../../core/render-state.js';
 export {SKY_FIELDS,APPEARANCE_FIELDS,PRECIPITATION_FIELDS,resolveVisualConfig} from './settings.js';
 
 export {DYNAMIC_SKY_DEFAULTS,CLOUD_QUALITY};
@@ -54,7 +55,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  const wakeHead=new THREE.Vector4(),wakeTail=new THREE.Vector3();
  let bankTime=0;
  let rain=precipitationConfig===false?null:createPrecipitation(group,precipitationConfig);
- const viewport=new THREE.Vector4(),scissor=new THREE.Vector4();
+ const updateScope=createRenderScope(renderer,{clearColor:false,scissorOff:false});   // the sky captures put the host's target, viewport and scissor back
  const bridge={s:{on:true,auto:false,hour:NOON},daylight:1,moonDir:new THREE.Vector3(),moonPhase:.5};
  const reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
  const flashPosition=new THREE.Vector2();
@@ -154,9 +155,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    bolt?.update(groundStrike&&flashStrength>0?flashRemaining/LIGHTNING.flashSeconds*settings.lightningStrength/LIGHTNING.boltScale:0);
    // Offscreen captures may be invoked within a host render pass. Restore its target,
    // viewport and scissor even when a shader/asset error interrupts the update.
-   const target=renderer.getRenderTarget(),face=renderer.getActiveCubeFace(),level=renderer.getActiveMipmapLevel(),test=renderer.getScissorTest();renderer.getViewport(viewport);renderer.getScissor(scissor);
-   try{dynamic.update(dt,{active:true,sunDir,weather:w,day:bridge,windHeading:w.windHeading,flashPosition,flashStrength});}
-   finally{renderer.setRenderTarget(target,face,level);renderer.setViewport(viewport);renderer.setScissor(scissor);renderer.setScissorTest(test);}
+   updateScope(()=>dynamic.update(dt,{active:true,sunDir,weather:w,day:bridge,windHeading:w.windHeading,flashPosition,flashStrength}));
    cloudShadows.update(sun,dynamic.ready&&!d.moonLit&&sun.intensity>0?look.cloudShadowStrength:0);
    return view;
   },

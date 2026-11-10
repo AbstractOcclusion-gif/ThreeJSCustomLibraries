@@ -5,7 +5,7 @@ import {createOceanSurface, createWaterlineComposite, proceduralSky, SurfaceProb
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
-import {detectAssets} from '../kit/assets.js';
+import {loadOceanLace} from '../kit/assets.js';
 import {aimRay} from '../kit/input.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {oceanControls} from './controls.js';
@@ -22,13 +22,7 @@ controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
 // Standalone: the basic stage gives the sun, light and wind; the ocean draws its own sky through the procedural sky hook.
 const stage = createBasicStage({scene, ground: false});
 const sky = proceduralSky();
-// Same foam lace as the demo: the staged WebAquarium sheet when present, else the bundled copy, else the generated one.
-const aquariumAssets = new URL(import.meta.env.BASE_URL + 'webaquarium/', location.href);
-const sheetsUrl = new URL('library/ocean/textures/', aquariumAssets).href;
-const sheetBase = await detectAssets(sheetsUrl + 'foam_lace.png', sheetsUrl);
-const foamUrl = sheetBase ? sheetBase + 'foam_lace.png' : import.meta.env.BASE_URL + 'webaquarium-water/foam_lace.png';
-const laceTexture = await detectAssets(foamUrl, foamUrl)
-  ? await new THREE.TextureLoader().loadAsync(foamUrl).catch(error => { console.warn('Foam lace texture failed to load; the ocean uses its generated one.', error); }) : undefined;
+const {laceTexture} = await loadOceanLace();   // staged WebAquarium sheet, else the bundled copy, else the generated one
 const ocean = createOceanSurface({renderer, sky, caustics: {}, wake: {}, laceTexture});
 ocean.setEnvironment(stage.environment);
 const waterScene = new THREE.Scene();

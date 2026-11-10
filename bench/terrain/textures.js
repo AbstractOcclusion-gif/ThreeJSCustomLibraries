@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {TERRAIN_LAYERS} from '../../src/terrain/terrain-rules.js';
+import {configureTexture, createDataTexture} from '../../src/core/data-texture.js';
 
 const files = import.meta.glob([
  '../../assets/terrain/*/{color,height}.jpg',
@@ -47,11 +48,7 @@ export async function loadTerrainTextures(renderer) {
  const context = canvas.getContext('2d', {willReadFrequently: true});
  const anisotropy = Math.min(2, renderer.capabilities.getMaxAnisotropy());
  function configure(texture) {
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = true;
-  texture.anisotropy = anisotropy;
+  configureTexture(texture, {wrap: THREE.RepeatWrapping, filter: 'mipmap', anisotropy});
   texture.needsUpdate = true;
   return texture;
  }
@@ -63,10 +60,8 @@ export async function loadTerrainTextures(renderer) {
   context.drawImage(height, 0, 0, color.width, color.height);
   const relief = context.getImageData(0, 0, color.width, color.height).data;
   for (let i = 0; i < pixels.length; i += 4) pixels[i + 3] = relief[i];
-  const texture = new THREE.DataTexture(new Uint8Array(pixels.buffer), color.width, color.height);
-  texture.flipY = true;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return [layer, configure(texture)];
+  return [layer, createDataTexture(new Uint8Array(pixels.buffer), color.width, color.height,
+   {flipY: true, colorSpace: THREE.SRGBColorSpace, wrap: THREE.RepeatWrapping, filter: 'mipmap', anisotropy})];
  }));
  return {layerArray: packTerrainLayers(layers), rock: layers.rock, detail: configure(new THREE.Texture(rockNormal))};
 }

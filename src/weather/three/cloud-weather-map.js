@@ -2,6 +2,7 @@
 // atmosphere/cloud-weather-map.js -- the dynamic sky's cloud weather map (from OceanPlayTest, 14 Oct 2026; shared since 16 Oct).
 // Spatial coverage/type/top map following the inspected EnviroWeatherMap path.
 import * as THREE from 'three';
+import {createRenderScope} from '../../core/render-state.js';
 export function createCloudWeatherMap(renderer,uniforms){
   const target=new THREE.WebGLRenderTarget(256,256,{type:THREE.HalfFloatType,depthBuffer:false,wrapS:THREE.RepeatWrapping,wrapT:THREE.RepeatWrapping});
   const material=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,
@@ -17,9 +18,7 @@ export function createCloudWeatherMap(renderer,uniforms){
         gl_FragColor=vec4(coverage,top,type,sqrt(top));}`});
   const scene=new THREE.Scene(),camera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
   const quad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),material);scene.add(quad);
-  const previous=renderer.getRenderTarget(),face=renderer.getActiveCubeFace?.()??0,level=renderer.getActiveMipmapLevel?.()??0;
-  const viewport=renderer.getViewport(new THREE.Vector4()),scissor=renderer.getScissor(new THREE.Vector4()),scissorTest=renderer.getScissorTest();
-  try{renderer.setRenderTarget(target);renderer.render(scene,camera);}catch(error){target.dispose();throw error;}
-  finally{renderer.setRenderTarget(previous,face,level);renderer.setViewport(viewport);renderer.setScissor(scissor);renderer.setScissorTest(scissorTest);quad.geometry.dispose();material.dispose();}
+  try{createRenderScope(renderer,{clearColor:false,scissorOff:false})(()=>{renderer.setRenderTarget(target);renderer.render(scene,camera);});}catch(error){target.dispose();throw error;}
+  finally{quad.geometry.dispose();material.dispose();}
   uniforms.tCloudWeather.value=target.texture;return target;
 }

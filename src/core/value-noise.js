@@ -6,3 +6,10 @@ export function valueNoise(seed){
  return(x,z)=>{const i=Math.floor(x),j=Math.floor(z),a=fade(x-i),b=fade(z-j);
   return(1-a)*((1-b)*hash(i,j)+b*hash(i,j+1))+a*((1-b)*hash(i+1,j)+b*hash(i+1,j+1));};
 }
+
+// Fractal sum of a 2D noise: octaves layers, each `lacunarity` x finer and `gain` x weaker, the first weighted `amplitude`.
+export function fbm(noise, x, z, {octaves = 5, amplitude = .5, gain = .5, lacunarity = 2} = {}) {
+ let sum = 0, weight = amplitude, frequency = 1;
+ for (let octave = 0; octave < octaves; octave++) { sum += noise(x * frequency, z * frequency) * weight; weight *= gain; frequency *= lacunarity; }
+ return sum;
+}

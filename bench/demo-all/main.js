@@ -5,6 +5,7 @@ import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERR
 import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
 import {seededRandom} from '../../src/core/hash.js';
 import {valueNoise} from '../../src/core/value-noise.js';
+import {createDataTexture} from '../../src/core/data-texture.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createChannelSurface, createFlowBake, createFreezeTexture, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
@@ -64,14 +65,7 @@ function tile(pixel, colorSpace = THREE.NoColorSpace) {
  for (let y = 0; y < textureSize; y++) for (let x = 0; x < textureSize; x++) {
   data.set(pixel(x / textureSize, y / textureSize), (y * textureSize + x) * 4);
  }
- const texture = new THREE.DataTexture(data, textureSize, textureSize);
- texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
- texture.minFilter = THREE.LinearMipmapLinearFilter;
- texture.magFilter = THREE.LinearFilter;
- texture.generateMipmaps = true;
- texture.colorSpace = colorSpace;
- texture.needsUpdate = true;
- return texture;
+ return createDataTexture(data, textureSize, textureSize, {wrap: THREE.RepeatWrapping, filter: 'mipmap', colorSpace});
 }
 const layerColors = {grass: [99, 108, 62], rock: [118, 110, 100], snow: [204, 216, 219], mud: [108, 83, 62], forest: [64, 52, 39]};
 let layerArray, rockTexture, detail, proceduralLayers = [];

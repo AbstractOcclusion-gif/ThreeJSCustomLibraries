@@ -1,6 +1,7 @@
 // Generated foam tiles (no licensed textures in the lib). Both are tileable value-noise DataTextures.
 import * as THREE from 'three';
 import {hash2} from '../core/hash.js';
+import {createDataTexture} from '../core/data-texture.js';
 
 const OCTAVE_FALLOFF = .5;   // each octave's amplitude relative to the previous one
 const BYTE = 255;            // 8-bit channel scale
@@ -29,7 +30,7 @@ function noise2(size, scale, seed, octaves = 4) {
   for (let i = 0; i < out.length; i++) out[i] /= total;
   return out;
 }
-const toTexture = (data, size) => { const t = new THREE.DataTexture(data, size, size, THREE.RGBAFormat); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; t.needsUpdate = true; return t; };
+const toTexture = (data, size) => createDataTexture(data, size, size, {wrap: THREE.RepeatWrapping, filter: 'mipmap'});
 
 // Inland foam film: r/g brightness detail, b density threshold (where the film appears as coverage rises), a coverage.
 export function createFoamTexture(size = 256, seed = 3) {
@@ -52,9 +53,5 @@ export function createLaceTexture(size = 256, seed = 7) {
 export function createFreezeTexture(size = 128, seed = 31) {
  const noise = noise2(size, FREEZE_CELLS, seed);
  const data = Uint8Array.from(noise, value => Math.round(value * BYTE));
- const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat);
- texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
- texture.minFilter = texture.magFilter = THREE.LinearFilter;
- texture.needsUpdate = true;
- return texture;
+ return createDataTexture(data, size, size, {format: THREE.RedFormat, wrap: THREE.RepeatWrapping, filter: 'linear'});
 }
