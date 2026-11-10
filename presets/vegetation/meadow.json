@@ -4,6 +4,7 @@
   "grass": {
     "clumps": 14000,
     "radius": 45,
+    "size": 1,
     "color": "#7da24a",
     "soilColor": "#aa965d",
     "tintVariation": 0.45,

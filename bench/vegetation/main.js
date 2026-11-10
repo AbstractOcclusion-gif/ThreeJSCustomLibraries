@@ -5,7 +5,7 @@ import {createGrassField, createFreeVegetation, loadSyntyVegetation} from '../..
 import {LeavedTrees, TREE_PROFILE} from '../../src/trees/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS} from '../../src/terrain/index.js';
-import {createSurfaceWeather} from '../../src/surface/index.js';
+import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {hash2, seededRandom} from '../../src/core/hash.js';
 import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder, detectAssets} from '../shared.js';
 import {loadTerrainTextures} from '../terrain/textures.js';
@@ -32,7 +32,10 @@ const {layers, detail} = await loadTerrainTextures(renderer);
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;
 const surfaceWeather = createSurfaceWeather();
-const groundMaterial = createTerrainMaterial({}, {field, layers, detailNormal: detail, appearance, weather: surfaceWeather});
+const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: 512});
+const groundMaterial = createTerrainMaterial({}, {
+  field, layers, detailNormal: detail, appearance, weather: surfaceWeather, tracks, trackContrast: .5,
+});
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
 ground.receiveShadow = true;
 scene.add(ground);
@@ -44,7 +47,7 @@ const free = createFreeVegetation();
 let pack = null; if (syntyBase) { try { pack = await loadSyntyVegetation({baseUrl: syntyBase}); } catch (e) { console.error(e); } }
 
 const P = {
-  grass: {clumps: 14000, radius: 45, color: '#7da24a', soilColor: '#aa965d', tintVariation: .45, density: 1, lodDistance: 26, farDensity: .45, shadowDistance: 18, transmission: .8},
+  grass: {clumps: 14000, radius: 45, size: 1, color: '#7da24a', soilColor: '#aa965d', tintVariation: .45, density: 1, lodDistance: 26, farDensity: .45, shadowDistance: 18, transmission: .8},
   plants: {trees: 14, bushes: 24, gust: .4, treeWidth: 1, treeCrown: 1, asymmetry: .3},
   interact: {ballSpeed: 6, ballRadius: 1.1, recoverySeconds: 3},
 };
@@ -63,14 +66,15 @@ function placements() {
     const soil = field.layerWeightAt(x, z, soilLayer);
     const brightness = 1 + (hash2(x, z, 3) - .5) * P.grass.tintVariation * .5;
     tint.lerpColors(green, muted, soil * P.grass.tintVariation).multiplyScalar(brightness);
-    out.push({x, z, y: heightAt(x, z) - .02, yaw: random() * Math.PI * 2, scale: .7 + random() * .55, tint: tint.toArray()});
+    out.push({x, z, y: heightAt(x, z) - .02, yaw: random() * Math.PI * 2, scale: P.grass.size * (.7 + random() * .55), tint: tint.toArray()});
   }
   return out;
 }
 function buildGrass() {
   grass?.dispose();
   const source = pack ?? free;
-  grass = createGrassField({scene, geometries: source.grassGeometries, map: source.atlas, color: 0xffffff, placements: placements(), tileSize: 6, flatColorMix: pack ? .75 : 0});
+  grass = createGrassField({scene, geometries: source.grassGeometries, map: source.atlas, color: 0xffffff,
+    placements: placements(), tileSize: 6, flatColorMix: pack ? .75 : 0, contactTracks: tracks});
 }
 function plantSites(count, seed) {
   const random = seededRandom(seed);
@@ -114,6 +118,7 @@ const gui = new GUI({title: 'Vegetation'});
 const wf = weatherFolder(gui, weather);
 const fg = gui.addFolder('Grass');
 fg.add(P.grass, 'clumps', 500, 60000, 500).onFinishChange(buildGrass); fg.add(P.grass, 'radius', 10, 60, 1).onFinishChange(buildGrass);
+fg.add(P.grass, 'size', .35, 2.5, .05).name('Clump size').onFinishChange(buildGrass);
 fg.addColor(P.grass, 'color').name('Meadow color').onFinishChange(buildGrass);
 fg.addColor(P.grass, 'soilColor').name('Color over soil').onFinishChange(buildGrass);
 fg.add(P.grass, 'tintVariation', 0, 1, .01).name('Terrain color influence').onFinishChange(buildGrass);

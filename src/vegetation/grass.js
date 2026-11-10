@@ -23,11 +23,14 @@ vec3 bendGrass(vec3 position) {
   float contact = 0.0;
   if (grassContactActive) {
     vec2 uv = (root - grassContactBounds.xy) / grassContactBounds.zw;
-    contact = texture2D(grassContact, uv).r;
+    if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) {
+      contact = texture2D(grassContact, uv).r;
+    }
   }
   bend *= min(1.0, ${MAX_BEND} / max(length(bend), 0.001));
-  vec3 offset = vec3(bend.x, 0.0, bend.y) * bendWeight;
-  position.y *= 1.0 - 0.85 * contact * bendWeight;
+  float flatten = smoothstep(0.0, 0.8, contact);
+  vec3 offset = vec3(bend.x, 0.0, bend.y) * bendWeight * (1.0 - flatten);
+  position.y *= 1.0 - 0.95 * flatten * bendWeight;
   // Placement has orthogonal axes (translation, yaw and uniform scale).
   vec3 x = placement[0].xyz, y = placement[1].xyz, z = placement[2].xyz;
   return position + vec3(dot(x, offset), dot(y, offset), dot(z, offset)) / dot(x, x);
@@ -64,8 +67,8 @@ function patchMaterial(material, uniforms, lit, flatColorMix) {
 }
 
 // Placements are world-space {x, y, z, yaw (radians), scale (>0), tint? [r, g, b] linear}.
-// LOD geometries and texture are borrowed. Tiles and materials belong to the field.
-export function createGrassField({scene, geometries, map, color, placements, tileSize = 5, flatColorMix = 0}) {
+// LOD geometries and map are borrowed. An optional contact mask is borrowed exclusively for this field's trail.
+export function createGrassField({scene, geometries, map, color, placements, tileSize = 5, flatColorMix = 0, contactTracks}) {
   if (directionalCall < 0 || directionalEnd < 0 || callEnd <= directionalCall) {
     throw new Error('Unsupported Three.js directional lighting shader');
   }
@@ -75,12 +78,12 @@ export function createGrassField({scene, geometries, map, color, placements, til
     grassWind: {value: new THREE.Vector2()},
     grassGust: {value: 0},
     grassTransmission: {value: 0},
-    grassContact: {value: null},
-    grassContactBounds: {value: new THREE.Vector4()},
+    grassContact: {value: contactTracks?.texture ?? null},
+    grassContactBounds: {value: contactTracks?.bounds ?? new THREE.Vector4()},
     grassContactActive: {value: false},
   };
   const sweeps = [];
-  let contactMask;
+  let contactMask = contactTracks;
   const cutout = {map, alphaTest: 0.5, side: THREE.DoubleSide};
   const material = new THREE.MeshStandardMaterial({...cutout, color, roughness: 1, flatShading: true});
   const depth = new THREE.MeshDepthMaterial({...cutout, depthPacking: THREE.RGBADepthPacking});
@@ -131,7 +134,8 @@ export function createGrassField({scene, geometries, map, color, placements, til
   return {
     stats,
     addSweep({fromX, fromZ, toX, toZ, radius}) {
-      if (!Number.isFinite(minX) || ![fromX, fromZ, toX, toZ, radius].every(Number.isFinite) || radius <= 0) return;
+      if (!contactMask && !Number.isFinite(minX)) return;
+      if (![fromX, fromZ, toX, toZ, radius].every(Number.isFinite) || radius <= 0) return;
       if (!contactMask) {
         contactMask = createTrackMask({origin: [minX - 1, minZ - 1], size: [maxX - minX + 2, maxZ - minZ + 2], resolution: 512});
         uniforms.grassContact.value = contactMask.texture;
@@ -141,6 +145,7 @@ export function createGrassField({scene, geometries, map, color, placements, til
     },
     clear() {
       sweeps.length = 0;
+      contactMask?.clear();
       uniforms.grassContactActive.value = false;
       uniforms.grassTime.value = 0;
     },
@@ -158,12 +163,10 @@ export function createGrassField({scene, geometries, map, color, placements, til
         let expired = 0;
         while (expired < sweeps.length && sweeps[expired].age >= recovery) expired++;
         if (expired) sweeps.splice(0, expired);
-        if (sweeps.length) {
-          contactMask.clear();
-          for (const sweep of sweeps) {
-            const strength = 1 - THREE.MathUtils.smoothstep(sweep.age, 0, recovery);
-            contactMask.stamp(sweep.from, sweep.to, sweep.radius, strength);
-          }
+        contactMask.clear();
+        for (const sweep of sweeps) {
+          const strength = 1 - THREE.MathUtils.smoothstep(sweep.age, 0, recovery);
+          contactMask.stamp(sweep.from, sweep.to, sweep.radius, strength);
         }
       }
       uniforms.grassContactActive.value = sweeps.length > 0;
@@ -191,7 +194,8 @@ export function createGrassField({scene, geometries, map, color, placements, til
         scene.remove(mesh);
         mesh.dispose();
       }
-      contactMask?.dispose();
+      if (contactTracks) contactTracks.clear();
+      else contactMask?.dispose();
       material.dispose();
       depth.dispose();
     },
