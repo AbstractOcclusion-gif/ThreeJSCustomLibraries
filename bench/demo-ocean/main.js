@@ -6,6 +6,7 @@ import {OceanCoastTerrain} from '../../src/terrain/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createParticleDepthBinding, createWaterSpray, Motes} from '../../src/particles/water/index.js';
 import {createOceanFloat} from './float.js';
+import {createIslandLife} from './island.js';
 import {benchRenderer, createBenchWeather, detectAssets, mountWeatherControls} from '../shared.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {oceanControls} from './controls.js';
@@ -30,7 +31,12 @@ const ocean = createOceanSurface({renderer, sky: skyFromWeather(weather.view), c
 const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);
 const terrainLighting = createLighting();
-const coast = new OceanCoastTerrain({scene, settings: {centerZ: -220}, water: ocean.shoreBinding, onHeightField: ocean.setShore, lighting: terrainLighting});
+const ISLAND_CENTRE = [0, -220], PLANT_GUST = .4;
+const coast = new OceanCoastTerrain({scene, settings: {centerX: ISLAND_CENTRE[0], centerZ: ISLAND_CENTRE[1]}, water: ocean.shoreBinding, onHeightField: ocean.setShore, lighting: terrainLighting});
+// One environment for everything: the weather fills it, the ocean, plants, fire, smoke and spray read it.
+const environment = weather.view.environment; environment.wind.gust = PLANT_GUST;
+ocean.setEnvironment(environment);
+const island = await createIslandLife({scene, ground: (x, z) => coast.collisionHeightAt(x, z), centre: ISLAND_CENTRE, environment, lighting: terrainLighting});
 const probes = new SurfaceProbes(ocean.fft, 3, {wake: ocean.wake}), probeStep = 2;
 const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics});
 const postColor = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthBuffer: false});
@@ -112,7 +118,11 @@ const rippleGesture = bindRippleGesture(renderer.domElement, controls, event => 
   if ((coast.collisionHeightAt(impact.x, impact.z) ?? -1) < 0) return impact;
 }, ({x, z}, strength) => ocean.wake.addDrop(x, z, 3.2, .65 * strength), {spacing: 1.5});
 
-const gui = createBenchPanel('Ocean');
+const gui = createBenchPanel('Ocean coast demo');
+const islandActions = gui.addFolder('Island');
+islandActions.add(island, 'ignite').name('Light the camp fire');
+islandActions.add(island, 'resetFire').name('Reset the camp');
+islandActions.add({look() { controls.target.set(island.camp.x, 4, island.camp.z); camera.position.set(island.camp.x + 9, 8, island.camp.z + 16); controls.update(); }}, 'look').name('Go to the camp');
 sprayControls(gui, {spray, depth: fxDepth}).close();
 const wf = mountWeatherControls(weather);
 const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanControls(gui, {
@@ -135,10 +145,11 @@ renderer.setAnimationLoop(now => {
   const light = weather.view.uniforms;
   syncLighting(terrainLighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});   // island lit and fogged like the rest
   const wind = weather.system.weather;
+  island.update(dt, camera);
   float.step(dt);
   stepBoat(dt);
   rippleGesture.update(dt);
-  ocean.update(dt, wind.wind, camera.position, wind.windHeading);
+  ocean.update(dt, undefined, camera.position);   // wind speed and heading come from the shared environment
   spray.update(dt, ocean.wake);
   trail.update(dt, boat);
   trail.inject(ocean.wake);
@@ -192,7 +203,7 @@ Surface at camera ${a.valid ? a.height.toFixed(2) + ' m' : 'sampling…'}${float
   }
 });
 document.body.dataset.ready = 'true';
-window.oceanBench = {ocean, weather, scene, camera, renderer, probes};
+window.oceanBench = {ocean, weather, scene, camera, renderer, probes, island, controls};
 addEventListener('pagehide', event => {
   if (event.persisted) return;
   disposed = true;
@@ -201,6 +212,7 @@ addEventListener('pagehide', event => {
   rippleGesture.dispose();
   probes.dispose();
   float.dispose();
+  island.dispose();
   removeHullFootprint?.();
   boat?.dispose();
   trail.dispose();
