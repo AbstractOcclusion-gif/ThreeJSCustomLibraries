@@ -12,7 +12,7 @@ import {benchRenderer, createBenchWeather, mountWeatherControls} from '../shared
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
 import {createTerrainIce} from './ice.js';
-import {loadTerrainTextures} from './textures.js';
+import {loadTerrainTextures, packTerrainLayers} from './textures.js';
 import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from './controls.js';
 import {grassControls} from '../vegetation/controls.js';
 import {sprayControls} from '../particles/controls.js';
@@ -68,25 +68,25 @@ function tile(pixel, colorSpace = THREE.NoColorSpace) {
  return texture;
 }
 const layerColors = {grass: [99, 108, 62], rock: [118, 110, 100], snow: [204, 216, 219], mud: [108, 83, 62], forest: [64, 52, 39]};
-let layers = Object.fromEntries(Object.entries(layerColors).map(([name, rgb], index) => [name, tile((u, v) => {
- const h = relief(u + index * .17, v);
- const grain = periodicNoise(u + index * .31, v, 33);
- const strata = name === 'rock' ? .045 * Math.sin(2 * Math.PI * (v * 7 + .65 * periodicNoise(u, v, 3))) : 0;
- const variation = .73 + h * .5 + .14 * grain + strata;
- return [...rgb.map(channel => channel * variation), h * 255];
-}, THREE.SRGBColorSpace)]));
-let detail = tile((u, v) => {
- const step = 1 / textureSize;
- const n = new THREE.Vector3(relief(u - step, v) - relief(u + step, v), relief(u, v - step) - relief(u, v + step), .5).normalize();
- return [(n.x * .5 + .5) * 255, (n.y * .5 + .5) * 255, (n.z * .5 + .5) * 255, 255];
-});
+let layerArray, rockTexture, detail;
 try {
- const photos = await loadTerrainTextures(renderer, {forest: true});
- Object.values(layers).forEach(texture => texture.dispose());
- detail.dispose();
- ({layers, detail} = photos);
+ ({layerArray, rock: rockTexture, detail} = await loadTerrainTextures(renderer));
 } catch (error) {
  console.warn('Terrain photo maps unavailable. Using procedural textures.', error);
+ const layers = Object.fromEntries(Object.entries(layerColors).map(([name, rgb], index) => [name, tile((u, v) => {
+  const h = relief(u + index * .17, v);
+  const grain = periodicNoise(u + index * .31, v, 33);
+  const strata = name === 'rock' ? .045 * Math.sin(2 * Math.PI * (v * 7 + .65 * periodicNoise(u, v, 3))) : 0;
+  const variation = .73 + h * .5 + .14 * grain + strata;
+  return [...rgb.map(channel => channel * variation), h * 255];
+ }, THREE.SRGBColorSpace)]));
+ layerArray = packTerrainLayers(layers);
+ rockTexture = layers.rock;
+ detail = tile((u, v) => {
+  const step = 1 / textureSize;
+  const n = new THREE.Vector3(relief(u - step, v) - relief(u + step, v), relief(u, v - step) - relief(u, v + step), .5).normalize();
+  return [(n.x * .5 + .5) * 255, (n.y * .5 + .5) * 255, (n.z * .5 + .5) * 255, 255];
+ });
 }
 
 const resolution = 129, span = 66, half = span / 2;
@@ -103,10 +103,10 @@ const field = createTerrainField({origin: [-half, -half], size: [span, span], re
 const appearance = createTerrainAppearance(), surfaceWeather = createSurfaceWeather();
 appearance.rockScale.value = .36;
 const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: 512, directional: true});
-const shared = {field, layers, detailNormal: detail, appearance, weather: surfaceWeather};
+const shared = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather};
 const groundMaterial = createTerrainMaterial({}, {...shared, tracks, trackContrast: .29});
-const boulderSurface = {color: '#a49a86', map: layers.rock, roughness: .87};
-layers.rock.repeat.setScalar(.72);
+const boulderSurface = {color: '#a49a86', map: rockTexture, roughness: .87};
+rockTexture.repeat.setScalar(.72);
 const rockMaterial = createTerrainMaterial(boulderSurface, {...shared, contactBand: .8, puddles: 0});
 const plainRock = createTerrainMaterial(boulderSurface, {...shared, contactBand: 0, puddles: 0});
 const ground = new THREE.Mesh(field.geometry, groundMaterial);

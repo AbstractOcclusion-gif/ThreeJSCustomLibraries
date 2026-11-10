@@ -1,5 +1,3 @@
-import './ui-theme.css';
-
 const key = 'three-kit.bench-skin.v1';
 const normalize = name => name === 'slate' ? 'slate' : 'field';
 
@@ -16,7 +14,9 @@ export function setBenchSkin(name) {
   try { localStorage.setItem(key, normalize(name)); } catch {}
 }
 
-applyBenchSkin(readBenchSkin());
-window.addEventListener('storage', event => {
-  if (event.key === key || event.key === null) applyBenchSkin(readBenchSkin());
-});
+export function bindUISkin(signal) {
+  applyBenchSkin(readBenchSkin());
+  window.addEventListener('storage', event => {
+    if (event.key === key || event.key === null) applyBenchSkin(readBenchSkin());
+  }, {signal});
+}

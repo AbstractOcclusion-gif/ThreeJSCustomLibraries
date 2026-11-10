@@ -33,13 +33,13 @@ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
 const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0};
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules});
 const {heightAt} = field;
-const {layers, detail} = await loadTerrainTextures(renderer, {forest: true});
+const {layerArray, detail} = await loadTerrainTextures(renderer);
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;
 const surfaceWeather = createSurfaceWeather();
 const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: 512, directional: true});
 const groundMaterial = createTerrainMaterial({}, {
-  field, layers, detailNormal: detail, appearance, weather: surfaceWeather, tracks, trackContrast: .5,
+  field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, tracks, trackContrast: .5,
 });
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
 ground.receiveShadow = true;

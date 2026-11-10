@@ -4,7 +4,7 @@ import {createReplay} from '../../src/camera/replay.js';
 import {createCameraPost} from '../../src/camera/post.js';
 import {createCameraCollision} from '../../src/camera/collision.js';
 import {createCameraPanel} from '../../src/camera/panel.js';
-import '../ui-theme.js';
+import '../ui-demo.js';
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;document.body.append(renderer.domElement);
 const scene=new T.Scene();scene.background=new T.Color('#a7c3c9');scene.add(new T.HemisphereLight(0xffffff,0x617451,2));const sun=new T.DirectionalLight(0xffe6c2,2.5);sun.position.set(6,12,8);scene.add(sun);
 const camera=new T.PerspectiveCamera(55,innerWidth/innerHeight,.1,300);camera.position.set(12,8,-14);

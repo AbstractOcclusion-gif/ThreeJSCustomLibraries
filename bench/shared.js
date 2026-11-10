@@ -1,6 +1,6 @@
 // Bench-only helpers (not part of the library): weather + sky setup, private asset probe, preset menus.
 import * as THREE from 'three';
-import './ui-theme.js';
+import './ui-demo.js';
 import {createWeatherSystem, hourLabel} from '../src/weather/index.js';
 import {createThreeWeather} from '../src/weather/three/index.js';
 import {bundledWeatherAssets} from '../src/weather/three/bundled-assets.js';

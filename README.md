@@ -3,14 +3,15 @@
 **Live bench:** https://abstractocclusion-gif.github.io/ThreeJSCustomLibraries/ — public module demos run in the browser
 (deep links: `…/bench/?tool=vegetation`). Deployed from `main` by `.github/workflows/pages.yml`.
 
-Open **UI Tool** in the bench toolbar to search the active demo's controls, reveal a setting in its original panel, or pin it for later. Pins and the last demo are remembered in the current browser. Use the demo's preset controls to save scene values. Shared module panels live beside their owning bench. Terrain and Vegetation both use `bench/terrain/controls.js` for terrain and grass coverage.
+Choose **UI Tool** from the module list for an interactive sample. The same tool is available beside the settings in each bench demo, including on direct links. Search a demo's controls, reveal a setting in its original panel, or pin it for later. Use the demo's preset controls to save scene values.
 
-Press **/** to open and focus the UI Tool, **Enter** to reveal the first match, or **Escape** to close it. The **Field** and **Slate** skins are remembered in the browser. Edit `bench/ui-theme.css` to customize the shared palette and panel styling.
+Press **/** to open and focus the UI Tool, **Enter** to reveal the first match, or **Escape** to close it. Pins and the **Field** and **Slate** skins are remembered in the browser. The UI Tool is optional. Import `createUITool` from `@abstractocclusion/three-kit/ui` and mount it with a host element, a toggle button, and a stable demo ID. Load `@abstractocclusion/three-kit/ui/theme.css` for the included styles and override its CSS variables to customize the palette.
 
 When adding a tweak, put its control in the module panel and pass scene settings or callbacks from the demo. This keeps the label, range, and behavior the same wherever the capability is used.
 
 | Panel | Definition | Where it is used |
 | --- | --- | --- |
+| UI Tool | `src/ui/index.js` | UI Tool demo and the library's other bench demos |
 | Weather | `src/weather/three/dev-panel.js` | Weather, Boundaries, Channel, Ocean, Pond, Terrain, Vegetation |
 | Terrain, shoreline, coast | `bench/terrain/controls.js` | Terrain and Vegetation share terrain layers and textures. Ocean uses the coast controls for its terrain model. |
 | Grass and plants | `bench/vegetation/controls.js` | Terrain and Vegetation share Grass. Vegetation also hosts planting and contact controls. |

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {createWeatherSurfaceMaterial} from '../surface/index.js';
+import {TERRAIN_LAYERS} from './terrain-rules.js';
 export {createTerrainField} from './field.js';
 export {TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
 export {valueNoise} from './terrain-noise.js';
@@ -15,10 +16,20 @@ export function createTerrainAppearance() {
 
 // Triplanar sampling adapted from Glider's stunt/cart/terrain-material.js.
 const TERRAIN_GLSL = /* glsl */`
-uniform sampler2D terrainHeights, terrainLayers, terrainGrass, terrainRock, terrainSnow, terrainMud, terrainDetail;
+uniform sampler2D terrainHeights, terrainLayers, terrainDetail;
+#ifdef TERRAIN_LAYER_ARRAY
+uniform highp sampler2DArray terrainLayerArray;
+#else
+uniform sampler2D terrainGrass, terrainRock, terrainSnow, terrainMud;
 #ifdef TERRAIN_FOREST_FLOOR
-uniform sampler2D terrainForestWeight, terrainForest;
+uniform sampler2D terrainForest;
 #endif
+#endif
+#ifdef TERRAIN_FOREST_FLOOR
+uniform sampler2D terrainForestWeight;
+#endif
+${TERRAIN_LAYERS.map((name, index) => `const int TERRAIN_${name.toUpperCase()} = ${index};`).join('\n')}
+const int TERRAIN_DETAIL = ${TERRAIN_LAYERS.length};
 uniform vec4 terrainBounds;
 uniform float terrainTiling, terrainSharpness, terrainAntiTiling, terrainDetailStrength, terrainHeightBlend;
 uniform float terrainRockScale;
@@ -40,40 +51,55 @@ float terrainHeightAt(vec2 grid, out vec3 groundNormal) {
  return f.x + f.y <= 1.0 ? a + (b - a) * f.x + (c - a) * f.y : d + (c - d) * (1.0 - f.x) + (b - d) * (1.0 - f.y);
 }
 
-vec4 terrainTexture(sampler2D tex, vec2 uv, vec2 dx, vec2 dy) {
- vec4 primary = textureGrad(tex, uv, dx, dy);
+vec4 terrainSample(int layer, vec2 uv, vec2 dx, vec2 dy) {
+ if (layer == TERRAIN_DETAIL) return textureGrad(terrainDetail, uv, dx, dy);
+ #ifdef TERRAIN_LAYER_ARRAY
+ return textureGrad(terrainLayerArray, vec3(uv, float(layer)), dx, dy);
+ #else
+ if (layer == TERRAIN_GRASS) return textureGrad(terrainGrass, uv, dx, dy);
+ if (layer == TERRAIN_ROCK) return textureGrad(terrainRock, uv, dx, dy);
+ if (layer == TERRAIN_SNOW) return textureGrad(terrainSnow, uv, dx, dy);
+ #ifdef TERRAIN_FOREST_FLOOR
+ if (layer == TERRAIN_FOREST) return textureGrad(terrainForest, uv, dx, dy);
+ #endif
+ return textureGrad(terrainMud, uv, dx, dy);
+ #endif
+}
+
+vec4 terrainTexture(int layer, vec2 uv, vec2 dx, vec2 dy) {
+ vec4 primary = terrainSample(layer, uv, dx, dy);
  if (terrainAntiTiling <= 0.0) return primary;
- vec4 secondary = textureGrad(tex, uv * .731 + vec2(17.13, 23.71), dx * .731, dy * .731);
+ vec4 secondary = terrainSample(layer, uv * .731 + vec2(17.13, 23.71), dx * .731, dy * .731);
  float blend = (.25 + .5 * valueNoise(vec3(uv * .19, 5.7))) * terrainAntiTiling;
  return mix(primary, secondary, blend);
 }
 
-vec4 terrainProjection(sampler2D tex, vec2 uv, vec2 dx, vec2 dy, float handedness) {
+vec4 terrainProjection(int layer, vec2 uv, vec2 dx, vec2 dy, float handedness) {
  vec2 orientation = vec2(handedness, 1.0);
- return terrainTexture(tex, uv * orientation, dx * orientation, dy * orientation);
+ return terrainTexture(layer, uv * orientation, dx * orientation, dy * orientation);
 }
 
-vec4 terrainTriplanar(sampler2D tex, vec3 p, vec3 dx, vec3 dy, vec3 signN, vec3 axes) {
+vec4 terrainTriplanar(int layer, vec3 p, vec3 dx, vec3 dy, vec3 signN, vec3 axes) {
  vec4 color = vec4(0.0);
- if (axes.x > 0.0) color += terrainProjection(tex, p.zy, dx.zy, dy.zy, -signN.x) * axes.x;
- if (axes.y > 0.0) color += terrainTexture(tex, p.xz * vec2(1.0, -signN.y), dx.xz * vec2(1.0, -signN.y), dy.xz * vec2(1.0, -signN.y)) * axes.y;
- if (axes.z > 0.0) color += terrainProjection(tex, p.xy, dx.xy, dy.xy, signN.z) * axes.z;
+ if (axes.x > 0.0) color += terrainProjection(layer, p.zy, dx.zy, dy.zy, -signN.x) * axes.x;
+ if (axes.y > 0.0) color += terrainTexture(layer, p.xz * vec2(1.0, -signN.y), dx.xz * vec2(1.0, -signN.y), dy.xz * vec2(1.0, -signN.y)) * axes.y;
+ if (axes.z > 0.0) color += terrainProjection(layer, p.xy, dx.xy, dy.xy, signN.z) * axes.z;
  return color;
 }
 
 vec3 terrainNormalDetail(vec3 p, vec3 dx, vec3 dy, vec3 signN, vec3 axes) {
  vec3 detail = vec3(0.0);
  if (axes.x > 0.0) {
-  vec3 n = normalize(terrainProjection(terrainDetail, p.zy, dx.zy, dy.zy, -signN.x).xyz * 2.0 - 1.0);
+  vec3 n = normalize(terrainProjection(TERRAIN_DETAIL, p.zy, dx.zy, dy.zy, -signN.x).xyz * 2.0 - 1.0);
   detail += vec3((n.z - 1.0) * signN.x, n.y, -n.x * signN.x) * axes.x;
  }
  if (axes.y > 0.0) {
   vec2 orientation = vec2(1.0, -signN.y);
-  vec3 n = normalize(terrainTexture(terrainDetail, p.xz * orientation, dx.xz * orientation, dy.xz * orientation).xyz * 2.0 - 1.0);
+  vec3 n = normalize(terrainTexture(TERRAIN_DETAIL, p.xz * orientation, dx.xz * orientation, dy.xz * orientation).xyz * 2.0 - 1.0);
   detail += vec3(n.x, (n.z - 1.0) * signN.y, -n.y * signN.y) * axes.y;
  }
  if (axes.z > 0.0) {
-  vec3 n = normalize(terrainProjection(terrainDetail, p.xy, dx.xy, dy.xy, signN.z).xyz * 2.0 - 1.0);
+  vec3 n = normalize(terrainProjection(TERRAIN_DETAIL, p.xy, dx.xy, dy.xy, signN.z).xyz * 2.0 - 1.0);
   detail += vec3(n.x * signN.z, n.y, (n.z - 1.0) * signN.z) * axes.z;
  }
  return detail;
@@ -105,20 +131,20 @@ const TERRAIN_FRAGMENT = /* glsl */`
  vec3 terrainSign = sign(terrainNormal + vec3(.00001));
  vec4 terrainWeights = textureLod(terrainLayers, (terrainGrid + .5) / terrainSize, 0.0);
  vec4 grass = vec4(0.0), rock = vec4(0.0), snow = vec4(0.0), mud = vec4(0.0);
- if (terrainWeights.x > 0.0) grass = terrainTriplanar(terrainGrass, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
- if (terrainWeights.y > 0.0) rock = terrainTriplanar(terrainRock, terrainP * terrainRockScale, terrainDx * terrainRockScale, terrainDy * terrainRockScale, terrainSign, terrainAxes);
+ if (terrainWeights.x > 0.0) grass = terrainTriplanar(TERRAIN_GRASS, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
+ if (terrainWeights.y > 0.0) rock = terrainTriplanar(TERRAIN_ROCK, terrainP * terrainRockScale, terrainDx * terrainRockScale, terrainDy * terrainRockScale, terrainSign, terrainAxes);
  if (terrainWeights.z > 0.0 || (terrainSnowCover && !terrainProp)) {
-  snow = terrainTriplanar(terrainSnow, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
+  snow = terrainTriplanar(TERRAIN_SNOW, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
   terrainSnowAlbedo = snow.rgb;
  }
- if (terrainWeights.w > 0.0) mud = terrainTriplanar(terrainMud, terrainP * 1.4, terrainDx * 1.4, terrainDy * 1.4, terrainSign, terrainAxes);
+ if (terrainWeights.w > 0.0) mud = terrainTriplanar(TERRAIN_MUD, terrainP * 1.4, terrainDx * 1.4, terrainDy * 1.4, terrainSign, terrainAxes);
  vec4 microHeight = vec4(grass.a, rock.a, snow.a, mud.a);
  terrainWeights *= exp2((microHeight - .5) * terrainHeightBlend * 8.0);
  vec4 forest = vec4(0.0);
  float forestWeight = 0.0;
  #ifdef TERRAIN_FOREST_FLOOR
  forestWeight = textureLod(terrainForestWeight, (terrainGrid + .5) / terrainSize, 0.0).r;
- if (forestWeight > 0.0) forest = terrainTriplanar(terrainForest, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
+ if (forestWeight > 0.0) forest = terrainTriplanar(TERRAIN_FOREST, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
  forestWeight *= exp2((forest.a - .5) * terrainHeightBlend * 8.0);
  #endif
  float totalWeight = max(dot(terrainWeights, vec4(1.0)) + forestWeight, .0001);
@@ -146,22 +172,27 @@ const TERRAIN_FRAGMENT = /* glsl */`
  }
 `;
 
-// Layer textures are repeat-wrapped color maps. Their optional alpha carries material height.
+// Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, detailNormal, appearance = createTerrainAppearance(), contactBand, ...surface
+ field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, ...surface
 } = {}) {
- if (!field?.heightMap || !field?.weightMap || !['grass', 'rock', 'snow', 'mud'].every(name => layers?.[name]?.isTexture) || !detailNormal?.isTexture) {
-  throw Error('Terrain material needs a field, four layer textures and a detail normal');
+ const hasLayers = layerArray !== undefined ?
+  layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
+  TERRAIN_LAYERS.slice(0, 4).every(name => layers?.[name]?.isTexture);
+ if (!field?.heightMap || !field?.weightMap || !hasLayers || !detailNormal?.isTexture) {
+  throw Error('Terrain material needs a field, layer textures and a detail normal');
  }
  if (contactBand !== undefined && (!Number.isFinite(contactBand) || contactBand < 0)) throw Error('Contact band must be a non-negative distance');
- if (field.forestMap && !layers.forest?.isTexture) throw Error('Terrain forest cover needs a forest floor texture');
+ if (!layerArray && field.forestMap && !layers.forest?.isTexture) throw Error('Terrain forest cover needs a forest floor texture');
  const material = createWeatherSurfaceMaterial(parameters, surface);
  if (field.forestMap) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
+ if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  const compileSurface = material.onBeforeCompile;
  const uniforms = {
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap}, terrainBounds: {value: field.bounds},
-  terrainGrass: {value: layers.grass}, terrainRock: {value: layers.rock}, terrainSnow: {value: layers.snow}, terrainMud: {value: layers.mud},
-  terrainForest: {value: layers.forest ?? null}, terrainForestWeight: {value: field.forestMap ?? null},
+  terrainLayerArray: {value: layerArray ?? null},
+  terrainGrass: {value: layers?.grass}, terrainRock: {value: layers?.rock}, terrainSnow: {value: layers?.snow}, terrainMud: {value: layers?.mud},
+  terrainForest: {value: layers?.forest}, terrainForestWeight: {value: field.forestMap ?? null},
   terrainDetail: {value: detailNormal}, terrainProp: {value: contactBand !== undefined}, terrainContactBand: {value: contactBand ?? 0},
   terrainTiling: appearance.tiling, terrainSharpness: appearance.sharpness, terrainAntiTiling: appearance.antiTiling,
   terrainRockScale: appearance.rockScale ?? {value: .55},

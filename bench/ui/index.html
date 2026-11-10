@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <link rel="icon" href="data:,">
+ <title>three-kit · UI Tool</title>
+ <style>
+  .preview {position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:20px;text-align:center}
+  .preview-shape {width:var(--size);aspect-ratio:1;border-radius:30%;background:var(--color);transform:rotate(var(--angle));box-shadow:0 18px 48px #0004}
+ </style>
+</head>
+<body>
+ <header><div><small>THREE-KIT / UI TOOL</small><h1>UI Tool</h1></div><a href="../" target="_top">All modules ↗</a></header>
+ <main class="preview" aria-label="Control preview"><div class="preview-shape"></div><output>Preview shape</output></main>
+ <aside>
+  <p class="intro">Search for Shape size, pin a control, or try a different skin. Enter opens the first matching control inside its panel.</p>
+  <button type="button" id="reset">Reset shape</button>
+ </aside>
+ <script type="module" src="./main.js"></script>
+</body>
+</html>
