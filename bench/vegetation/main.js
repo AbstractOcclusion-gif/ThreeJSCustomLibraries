@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
-import {createGrassField, createSpecimens, createProceduralMeadowTree, createProceduralMeadowBush, createFreeVegetation, loadSyntyVegetation} from '../../src/vegetation/index.js';
+import {createGrassField, createFreeVegetation, loadSyntyVegetation} from '../../src/vegetation/index.js';
+import {LeavedTrees, TREE_PROFILE} from '../../src/trees/index.js';
+import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {hash2, seededRandom} from '../../src/core/hash.js';
 import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder, detectAssets} from '../shared.js';
 import '../bench.css';
@@ -30,7 +32,12 @@ const P = {
   plants: {trees: 14, bushes: 24, gust: .4, treeWidth: 1, treeCrown: 1, asymmetry: .3},
   interact: {ballSpeed: 6, ballRadius: 1.1},
 };
-let grass, specimens;
+let grass;
+const lighting = createLighting();
+const trees = new LeavedTrees({scene, lighting, sampleGround: heightAt, leafTexture: free.atlas, leafRect: free.atlasRects.leaf});
+const bushes = new LeavedTrees({scene, profile: 'bush', lighting, sampleGround: heightAt, leafTexture: free.atlas, leafRect: free.atlasRects.leaf});
+const treeTint = new THREE.Color();
+const shade = new THREE.Color('#2f6b1f'), highlight = new THREE.Color('#779640');
 function placements() {
   const random = seededRandom(7), out = [], base = new THREE.Color(P.grass.color);
   for (let i = 0; i < P.grass.clumps; i++) {
@@ -45,29 +52,39 @@ function buildGrass() {
   const source = pack ?? free;
   grass = createGrassField({scene, geometries: source.grassGeometries, map: source.atlas, color: pack ? 0xffffff : P.grass.color, placements: placements(), tileSize: 6, flatColorMix: pack ? .75 : 0});
 }
-function buildPlants() {
-  specimens?.dispose();
-  function sites(kind) {
-    const tree = kind === 'tree', random = seededRandom(tree ? 11 : 13);
-    return Array.from({length: tree ? P.plants.trees : P.plants.bushes}, () => {
-      const a = random() * Math.PI * 2, r = 6 + random() * 34, x = Math.cos(a) * r, z = Math.sin(a) * r;
-      const yaw = random() * Math.PI * 2, size = random();
-      return {x, z, y: heightAt(x, z) - .05, yaw, scale: tree ? .8 + size * .5 : pack?.parts.bush ? .35 + size * .25 : .55 + size * .4};
-    });
-  }
-  const reference = pack ? {parts: pack.parts.birch ?? Object.values(pack.parts)[0]} : free.reference;
-  const treeParts = createProceduralMeadowTree(reference, {width: P.plants.treeWidth, depth: P.plants.treeWidth, crownHeight: P.plants.treeCrown, asymmetry: P.plants.asymmetry});
-  const bushParts = pack?.parts.bush ?? createProceduralMeadowBush(reference);
-  specimens = createSpecimens({scene, parts: {tree: treeParts, bush: bushParts}, atlas: (pack ?? free).atlas, atlasRects: (pack ?? free).atlasRects,
-    placements: {tree: sites('tree'), bush: sites('bush')}, profiles: {tree: {mode: 'tree', height: 6.5}, bush: {mode: 'bush', height: pack?.parts.bush ? 2.7 : 2.2}}});
-  specimens.setCount(1e6);
+function plantSites(count, seed) {
+  const random = seededRandom(seed);
+  return Array.from({length: count}, () => {
+    const angle = random() * Math.PI * 2, radius = 6 + random() * 34;
+    return {x: Math.cos(angle) * radius, z: Math.sin(angle) * radius, yaw: random() * Math.PI * 2, size: random()};
+  });
 }
-buildGrass(); buildPlants();
+function placeTrees() {
+  trees.place(plantSites(P.plants.trees, 11).map(({x, z, yaw, size}) => {
+    const h = 6.5 * (.8 + size * .5);
+    treeTint.lerpColors(shade, highlight, hash2(x, z, 7));
+    return {x, z, yaw, h, r: h * .34 * P.plants.treeWidth, tint: treeTint.toArray()};
+  }));
+}
+function shapeTrees() {
+  trees.setProfile({
+    crown: {depth: THREE.MathUtils.clamp(TREE_PROFILE.crown.depth * P.plants.treeCrown, .1, .9)},
+    lobes: {spread: 1 + (P.plants.asymmetry - .3) * .5},
+  });
+}
+function buildBushes() {
+  bushes.place(plantSites(P.plants.bushes, 13).map(({x, z, yaw, size}) => {
+    const h = 1.2 + size * .8;
+    treeTint.lerpColors(shade, highlight, hash2(x, z, 7));
+    return {x, z, yaw, h, r: h * .8, tint: treeTint.toArray()};
+  }));
+}
+buildGrass(); placeTrees(); buildBushes();
 
-// Rolling ball: flattens grass (sweeps) and pushes plants (sweep).
+// Rolling ball: flattens grass along its path.
 const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshStandardMaterial({color: 0xd9b36a, roughness: .6})); ball.castShadow = true; ball.visible = false; scene.add(ball);
-let roll = null, plantSweep = null;
-const rollBall = () => { roll = {x: -P.grass.radius, z: 2, fromX: -P.grass.radius, elapsed: 0}; plantSweep = {x: -P.grass.radius, z: 2, radius: P.interact.ballRadius * 1.6, speed: P.interact.ballSpeed}; ball.visible = true; ball.scale.setScalar(P.interact.ballRadius); };
+let roll = null;
+const rollBall = () => { roll = {x: -P.grass.radius, z: 2, fromX: -P.grass.radius, elapsed: 0}; ball.visible = true; ball.scale.setScalar(P.interact.ballRadius); };
 
 const gui = new GUI({title: 'Vegetation'});
 const wf = weatherFolder(gui, weather);
@@ -75,12 +92,18 @@ const fg = gui.addFolder('Grass');
 fg.add(P.grass, 'clumps', 500, 60000, 500).onFinishChange(buildGrass); fg.add(P.grass, 'radius', 10, 60, 1).onFinishChange(buildGrass); fg.addColor(P.grass, 'color').onFinishChange(buildGrass); fg.add(P.grass, 'tintVariation', 0, .6, .01).name('per-instance tint').onFinishChange(buildGrass);
 fg.add(P.grass, 'density', 0, 1, .01); fg.add(P.grass, 'lodDistance', 5, 80, 1); fg.add(P.grass, 'farDensity', 0, 1, .01); fg.add(P.grass, 'shadowDistance', 0, 60, 1); fg.add(P.grass, 'transmission', 0, 2, .01).name('backlight');
 const fp = gui.addFolder('Plants');
-fp.add(P.plants, 'trees', 0, 60, 1).onFinishChange(buildPlants); fp.add(P.plants, 'bushes', 0, 120, 1).onFinishChange(buildPlants); fp.add(P.plants, 'gust', 0, 1, .01);
-fp.add(P.plants, 'treeWidth', .5, 1.8, .01).onFinishChange(buildPlants); fp.add(P.plants, 'treeCrown', .4, 1.6, .01).onFinishChange(buildPlants); fp.add(P.plants, 'asymmetry', 0, 1, .01).onFinishChange(buildPlants);
+fp.add(P.plants, 'trees', 0, 60, 1).onFinishChange(placeTrees); fp.add(P.plants, 'bushes', 0, 120, 1).onFinishChange(buildBushes); fp.add(P.plants, 'gust', 0, 1, .01);
+fp.add(P.plants, 'treeWidth', .5, 1.8, .01).name('Crown width').onFinishChange(placeTrees);
+fp.add(P.plants, 'treeCrown', .4, 1.6, .01).name('Crown depth').onFinishChange(shapeTrees);
+fp.add(P.plants, 'asymmetry', 0, 1, .01).name('Lobe spread').onFinishChange(shapeTrees);
 const fi = gui.addFolder('Interact'); fi.add(P.interact, 'ballSpeed', 1, 15, .5); fi.add(P.interact, 'ballRadius', .4, 2.5, .1); fi.add({rollBall}, 'rollBall').name('roll the ball');
 presetsFolder(gui, {bundled: import.meta.glob('../../presets/vegetation/*.json'), name: 'vegetation',
   getState: () => ({schema: 'three-kit.vegetation', version: 1, grass: {...P.grass}, plants: {...P.plants}}),
-  apply: p => { Object.assign(P.grass, p.grass); Object.assign(P.plants, p.plants); buildGrass(); buildPlants(); gui.controllersRecursive().forEach(c => c.updateDisplay()); }});
+  apply: p => {
+    Object.assign(P.grass, p.grass); Object.assign(P.plants, p.plants);
+    buildGrass(); trees.place([]); shapeTrees(); placeTrees(); buildBushes();
+    gui.controllersRecursive().forEach(c => c.updateDisplay());
+  }});
 
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize);
@@ -90,16 +113,19 @@ renderer.setAnimationLoop(now => {
   const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
   controls.update(); weather.system.update(dt); weather.view.update(dt);
   const w = weather.system.weather, heading = THREE.MathUtils.degToRad(w.windHeading), windX = Math.cos(heading) * w.wind, windZ = Math.sin(heading) * w.wind;
+  syncLighting(lighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});
+  const wind = THREE.MathUtils.clamp(w.wind * (.08 + P.plants.gust * .1), 0, 3);
+  trees.setWind(wind); bushes.setWind(wind);
+  trees.update(dt); bushes.update(dt);
   if (roll) {
-    roll.x = Math.min(P.grass.radius, roll.x + P.interact.ballSpeed * dt); roll.elapsed += dt; plantSweep.x = roll.x;
+    roll.x = Math.min(P.grass.radius, roll.x + P.interact.ballSpeed * dt); roll.elapsed += dt;
     if (roll.elapsed > .08 || roll.x === P.grass.radius) { grass.addSweep({fromX: roll.fromX, fromZ: roll.z, toX: roll.x, toZ: roll.z, radius: P.interact.ballRadius}); roll.fromX = roll.x; roll.elapsed = 0; }
     ball.position.set(roll.x, heightAt(roll.x, roll.z) + P.interact.ballRadius, roll.z); ball.rotation.z -= P.interact.ballSpeed * dt / P.interact.ballRadius;
-    if (roll.x === P.grass.radius) { roll = null; plantSweep = null; ball.visible = false; }
+    if (roll.x === P.grass.radius) { roll = null; ball.visible = false; }
   }
-  specimens.update(dt, {windX, windZ, gust: P.plants.gust, sweep: plantSweep});
   grass.update(dt, {camera, windX, windZ, gust: P.plants.gust, transmission: P.grass.transmission * weather.system.day.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density});
   weather.view.render();
   if (now - lastUI > 250) { lastUI = now; wf.sync(); const s = grass.stats; $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + (weather.assetBaseUrl === 'bundled' ? ' · bundled sky textures' : '') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\n${w.dominant} · ${weather.hourLabel(weather.system.day.hour)} · wind ${w.wind.toFixed(1)} m/s`; }
 });
 document.body.dataset.ready = 'true';
-window.vegetationBench = {get grass() { return grass; }, get specimens() { return specimens; }, rollBall, weather, scene, camera, renderer, pack};
+window.vegetationBench = {get grass() { return grass; }, trees, bushes, rollBall, weather, scene, camera, renderer, pack};
