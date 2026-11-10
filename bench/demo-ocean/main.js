@@ -6,8 +6,8 @@ import {OceanCoastTerrain} from '../../src/terrain/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createParticleDepthBinding, createWaterSpray, Motes} from '../../src/particles/water/index.js';
 import {createOceanFloat} from './float.js';
-import {createIslandLife} from './island.js';
-import {createCoastStructures} from './structures.js';
+import {createDemoLife} from '../demo-kit/life.js';
+import {createDemoStructures} from '../demo-kit/structures.js';
 import {createCameraDirector, createOrbitRig} from '../../src/camera/director.js';
 import {benchRenderer, createBenchWeather, detectAssets, mountWeatherControls} from '../shared.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -39,8 +39,15 @@ const coast = new OceanCoastTerrain({scene, settings: {centerX: ISLAND_CENTRE[0]
 const environment = weather.view.environment; environment.wind.gust = PLANT_GUST;
 ocean.setEnvironment(environment);
 const groundAt = (x, z) => coast.collisionHeightAt(x, z);
-const island = await createIslandLife({scene, ground: groundAt, centre: ISLAND_CENTRE, environment, lighting: terrainLighting});
-const structures = createCoastStructures({scene, ground: groundAt, centre: ISLAND_CENTRE, camp: island.camp, environment, lighting: terrainLighting});
+// Demo layout, metres. Plant lines are ground heights above mean sea: nothing grows on the wave-washed beach below them.
+const [islandX, islandZ] = ISLAND_CENTRE, FISH_CEILING = -.6;
+const island = await createDemoLife({scene, ground: groundAt, centre: ISLAND_CENTRE, environment, lighting: terrainLighting,
+  plants: {radius: 64, treeLine: 6, bushLine: 3.6, grassLine: 2.4, trees: 38, bushes: 70, grass: 16000},
+  camp: [islandX + 3, islandZ + 45],   // on the grass edge, toward the default camera
+  fish: {bounds: new THREE.Box3(new THREE.Vector3(islandX - 22, -5, islandZ + 92), new THREE.Vector3(islandX + 22, FISH_CEILING, islandZ + 116)),
+    counts: {roach: 24, rudd: 12, perch: 6}, size: 1, surfaceHeight: () => FISH_CEILING}});
+// The bridge stands in the shallows; its physics ground is the seabed there, so wreckage sinks.
+const structures = createDemoStructures({scene, ground: groundAt, camp: island.camp, bridge: [islandX - 78, -6, islandZ + 96], environment, lighting: terrainLighting});
 // Camera shots: 'free' is the orbit controls; the others are director rigs circling a subject.
 const director = createCameraDirector(camera);
 const SHOTS = {

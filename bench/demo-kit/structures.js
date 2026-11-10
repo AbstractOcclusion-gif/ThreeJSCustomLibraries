@@ -1,5 +1,5 @@
-// Built things for the ocean coast demo: a fence and a hedge round the camp (boundaries), a rope slung between two posts
-// (cable, on cannon-es) and a truss bridge standing in the shallows to shoot down (destruction). The hedge and the rope read
+// Built things shared by the mixed demos: a fence and a hedge round the camp (boundaries), a rope slung between two posts
+// (cable, on cannon-es) and a truss bridge to shoot down (destruction). The hedge and the rope read
 // the shared environment; the bridge reuses the Destruction demo's physics client.
 import * as THREE from 'three';
 import * as C from 'cannon-es';
@@ -12,10 +12,11 @@ const STEP = 1 / 120, MAX_STEPS_PER_FRAME = 6;   // fixed physics step; a slow f
 // Metres, relative to the camp.
 const RUNS = Object.freeze([['fence', [[-8, -6], [1, -8.5], [10, -6]]], ['hedge', [[-11, 3], [-11, -4]]]]);
 const ROPE = Object.freeze({posts: [[-8, 6], [-1.5, 8]], height: 2.1, slack: 1.12, postRadius: .09, postColor: 0x6b4f35});
-// Bridge: offset from the island centre and the height of its physics ground (the seabed there), so wreckage sinks.
-const BRIDGE = Object.freeze({x: -78, z: 96, seabed: -6, pierColor: 0x7c8b91, shotSpeed: 32, ball: {mass: 35, radius: .65, color: 0xffa54a}});
+const BRIDGE = Object.freeze({pierColor: 0x7c8b91, shotSpeed: 32, lookHeight: 12, ball: {mass: 35, radius: .65, color: 0xffa54a}});
 
-export function createCoastStructures({scene, ground, centre: [centreX, centreZ], camp, environment, lighting}) {
+// camp: {x, z} (from the demo life). bridge: [x, groundY, z, yaw] - the bridge centre, the height of its physics ground
+// (a seabed for a bridge in water, so wreckage sinks) and its heading in radians (0 = deck along X, shots come from -Z).
+export function createDemoStructures({scene, ground, camp, bridge: [bridgeX, bridgeGround, bridgeZ, bridgeYaw = 0], environment, lighting}) {
   // Boundaries live in a group at the camp so their layout stays in small local coordinates.
   const campGroup = new THREE.Group(); campGroup.position.set(camp.x, 0, camp.z); scene.add(campGroup);
   const boundaries = createBoundaries({scene: campGroup, lighting, sampleGround: (x, z) => ground(x + camp.x, z + camp.z)});
@@ -40,7 +41,7 @@ export function createCoastStructures({scene, ground, centre: [centreX, centreZ]
   }
   hangRope();
 
-  const bridgeGroup = new THREE.Group(); bridgeGroup.position.set(centreX + BRIDGE.x, BRIDGE.seabed, centreZ + BRIDGE.z); scene.add(bridgeGroup);
+  const bridgeGroup = new THREE.Group(); bridgeGroup.position.set(bridgeX, bridgeGround, bridgeZ); bridgeGroup.rotation.y = bridgeYaw; scene.add(bridgeGroup);
   const pierGeometry = new THREE.BoxGeometry(1, 1, 1), pierMaterial = new THREE.MeshStandardMaterial({color: BRIDGE.pierColor});
   const ballGeometry = new THREE.SphereGeometry(BRIDGE.ball.radius, 20, 12), ballMaterial = new THREE.MeshStandardMaterial({color: BRIDGE.ball.color, metalness: .45, roughness: .32});
   const projectile = [{mass: BRIDGE.ball.mass, radius: BRIDGE.ball.radius, position: new THREE.Vector3()}], piers = new THREE.Group(), balls = new Map();
@@ -55,7 +56,7 @@ export function createCoastStructures({scene, ground, centre: [centreX, centreZ]
     targetId = demolition.members.find(member => member.type === 'endpost').id;
     for (const x of [-demolition.span / 2, demolition.span / 2]) {
       const pier = new THREE.Mesh(pierGeometry, pierMaterial), height = demolition.deckY - .25;
-      pier.scale.set(2.4, height, demolition.width + 3); pier.position.set(x, height / 2, 0); piers.add(pier);
+      pier.scale.set(2.4, height, demolition.width + 3); pier.position.set(x, height / 2, 0); pier.castShadow = true; piers.add(pier);
     }
     bridgeTime = 0;
   }
@@ -63,7 +64,7 @@ export function createCoastStructures({scene, ground, centre: [centreX, centreZ]
 
   let disposed = false;
   return {
-    boundaries, bridgeCentre: new THREE.Vector3(centreX + BRIDGE.x, BRIDGE.seabed + 12, centreZ + BRIDGE.z),
+    boundaries, bridgeCentre: new THREE.Vector3(bridgeX, bridgeGround + BRIDGE.lookHeight, bridgeZ),
     get rope() { return cable; }, get bridge() { return demolition; },
     cutRope() { cable.breakAt(Math.floor(cable.joints.length / 2)); },
     hangRope,

@@ -12,8 +12,12 @@ import {benchRenderer, createBenchWeather, mountWeatherControls} from '../shared
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
 import {createTerrainIce} from './ice.js';
-import {loadTerrainTextures, packTerrainLayers} from './textures.js';
-import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from './controls.js';
+import {loadTerrainTextures, packTerrainLayers} from '../terrain/textures.js';
+import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from '../terrain/controls.js';
+import {createLighting, syncLighting} from '../../src/core/lighting.js';
+import {createCameraDirector, createOrbitRig} from '../../src/camera/director.js';
+import {createDemoLife} from '../demo-kit/life.js';
+import {createDemoStructures} from '../demo-kit/structures.js';
 import {grassControls} from '../vegetation/controls.js';
 import {sprayControls} from '../particles/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -192,7 +196,8 @@ function stampDemo() {
   for (let i = 0; i < 28; i++) tracks.stamp(point(i), point(i + 1), .32);
  }
 }
-const gui = createBenchPanel('Terrain material');
+const gui = createBenchPanel('All tools demo');
+const demoActions = gui.addFolder('Demo');   // filled once the demo life and structures exist
 sprayControls(gui, {spray, depth: sprayDepth}).close();
 const controlsState = {blendObjects: true, water: true, wetPreview: false};
 const meadow = createFreeVegetation({meadowBlades: true});
@@ -231,6 +236,42 @@ function rebuildGrass() {
  grassDirty = false;
 }
 rebuildGrass();
+// One environment for everything: the weather fills it; plants, fire, smoke, rope and grass read it.
+const environment = weather.view.environment; environment.wind.gust = .4;
+const demoLighting = createLighting();   // hook for the leaved trees and hedges, synced from the weather lights each frame
+const groundAt = (x, z) => field.heightAt(x, z) ?? 0;
+// Demo layout, metres: the pond lies around (-8, 2), the camp on the east bank; the bridge runs along the west edge from
+// the south bank up to the cliff, turned so its shots fly in from over the pond.
+const BRIDGE = Object.freeze({x: -27, ground: 1, z: 6, yaw: -Math.PI / 2, halfStrip: 8}), FISH_DEPTH = .15;
+const life = await createDemoLife({scene, ground: groundAt, centre: [0, 0], environment, lighting: demoLighting,
+  plants: {radius: 31, treeLine: 1.3, bushLine: 1.2, ceiling: 7, trees: 14, bushes: 22, grass: 0},   // the terrain grass above is the grass
+  camp: [18, 7], blocked: x => Math.abs(x - BRIDGE.x) < BRIDGE.halfStrip,
+  fish: {bounds: new THREE.Box3(new THREE.Vector3(-15, -2.3, -3), new THREE.Vector3(-1, -.2, 7)), counts: {roach: 10, rudd: 6, perch: 3}, size: .3,
+    surfaceHeight: () => appearance.waterLevel.value - FISH_DEPTH}});
+const structures = createDemoStructures({scene, ground: groundAt, camp: life.camp, bridge: [BRIDGE.x, BRIDGE.ground, BRIDGE.z, BRIDGE.yaw], environment, lighting: demoLighting});
+weather.view.sun.shadow.needsUpdate = true;
+// Camera shots: 'free' is the orbit controls; the others are director rigs circling a subject.
+const director = createCameraDirector(camera);
+const SHOTS = {
+  scene: {rig: createOrbitRig({radius: 50, height: 24, speed: .1}), target: new THREE.Vector3(0, 2, 0)},
+  camp: {rig: createOrbitRig({radius: 17, height: 7, speed: .22}), target: new THREE.Vector3(life.camp.x + 2, groundAt(life.camp.x, life.camp.z) + 1, life.camp.z)},
+  bridge: {rig: createOrbitRig({radius: 58, height: 12, speed: .15}), target: structures.bridgeCentre},
+};
+for (const [id, {rig}] of Object.entries(SHOTS)) director.register(id, rig);
+const shot = {id: 'free'};
+function selectShot(id) {
+  const directed = id !== 'free';
+  if (directed) director.select(id, {duration: 1.5});
+  else { controls.target.copy(SHOTS[director.selected].target); controls.update(); }
+  controls.enabled = !directed && !diving;
+}
+demoActions.add(life, 'ignite').name('Light the camp fire');
+demoActions.add(life, 'resetFire').name('Reset the camp');
+demoActions.add(structures, 'cutRope').name('Cut the rope');
+demoActions.add(structures, 'hangRope').name('Hang a new rope');
+demoActions.add(structures, 'fireAtBridge').name('Fire at the bridge');
+demoActions.add(structures, 'buildBridge').name('Rebuild the bridge');
+demoActions.add(shot, 'id', ['free', ...Object.keys(SHOTS)]).name('Camera').onChange(selectShot);
 grassDensityControls(gui, {cover, defaults: defaultCover, stats: coverStats, rebuild: rebuildGrass});
 grassControls(gui, {settings: grassSettings, rebuild: rebuildGrass});
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
@@ -271,7 +312,7 @@ const {diveControl, diveHeight} = inlandWaterControls(waterControls, {
 function setDiving(enabled) {
  rippleGesture.cancel();
  diving = enabled;
- controls.enabled = !enabled;
+ controls.enabled = !enabled && shot.id === 'free';
  if (enabled) aboveWater.copy(camera.position);
  else { camera.position.copy(aboveWater); controls.update(); }
  diveHeight.enable(enabled);
@@ -340,7 +381,9 @@ renderer.setAnimationLoop(now => {
  }
  const dt = last === undefined ? 0 : Math.min(.05, (now - last) / 1000);
  last = now;
- if (!diving) controls.update();
+ if (diving) { /* the dive view places the camera below */ }
+ else if (shot.id !== 'free') director.update(dt, {target: SHOTS[shot.id].target});
+ else controls.update();
  weather.system.update(dt);
  weather.view.update(dt);
  weatherUI.sync();
@@ -354,9 +397,10 @@ renderer.setAnimationLoop(now => {
  const bedChanged = impacts.update(dt, controlsState.water ? freeze.progress : 0, appearance.waterLevel.value);
  if (bedChanged) { bedHeight.needsUpdate = true; grassDirty = true; }
  if (grassDirty && !impacts.moving) rebuildGrass();
- const wind = weather.system.weather, heading = THREE.MathUtils.degToRad(wind.windHeading);
- terrainGrass.update(dt, {camera, windX: Math.cos(heading) * wind.wind, windZ: Math.sin(heading) * wind.wind,
-  gust: .4, transmission: grassSettings.transmission * weather.system.day.daylight,
+ syncLighting(demoLighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});
+ life.update(dt, camera);
+ structures.update(dt, camera);
+ terrainGrass.update(dt, {camera, environment, transmission: grassSettings.transmission * weather.system.day.daylight,
   lodDistance: grassSettings.lodDistance, farDensity: grassSettings.farDensity,
   shadowDistance: grassSettings.shadowDistance, density: grassSettings.density});
  const moving = impacts.moving, sun = weather.view.sun;
@@ -397,6 +441,8 @@ renderer.setAnimationLoop(now => {
   finally { renderer.autoClear = autoClear; }
  }
 });
+document.body.dataset.ready = 'true';
+window.allToolsDemo = {scene, camera, renderer, controls, weather, life, structures, shot, selectShot};
 addEventListener('pagehide', event => {
  if (event.persisted) return;
  renderer.setAnimationLoop(null);
@@ -407,6 +453,8 @@ addEventListener('pagehide', event => {
  gui.destroy();
  weatherUI.dispose();
  impacts.dispose();
+ life.dispose();
+ structures.dispose();
  spray.dispose();
  pond.dispose();
  waterline.dispose();

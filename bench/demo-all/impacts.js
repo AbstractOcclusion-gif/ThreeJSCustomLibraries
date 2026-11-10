@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {Body, Box, Material, Sphere, Vec3, World} from 'cannon-es';
 import {createChips} from '../../src/particles/index.js';
-import {createTerrainCollider} from './heightfield.js';
+import {createTerrainCollider} from '../terrain/heightfield.js';
 
 const STEP = 1 / 120;
 const SURFACES = {
