@@ -105,8 +105,8 @@ function patchMaterial(material, uniforms, lit, flatColorMix) {
 }
 
 // Placements are world-space {x, y, z, yaw (radians), scale (>0), tint? [r, g, b] linear}.
-// LOD geometries and map are borrowed. An optional contact mask is borrowed exclusively for this field's trail.
-export function createGrassField({scene, geometries, map, color, placements, tileSize = 5, flatColorMix = 0, contactTracks}) {
+// LOD geometries and map are borrowed. With followTracks, the host paints and clears the supplied mask.
+export function createGrassField({scene, geometries, map, color, placements, tileSize = 5, flatColorMix = 0, contactTracks, followTracks = false}) {
   if (directionalCall < 0 || directionalEnd < 0 || callEnd <= directionalCall) {
     throw new Error('Unsupported Three.js directional lighting shader');
   }
@@ -118,7 +118,7 @@ export function createGrassField({scene, geometries, map, color, placements, til
     grassTransmission: {value: 0},
     grassContact: {value: contactTracks?.texture ?? null},
     grassContactBounds: {value: contactTracks?.bounds ?? new THREE.Vector4()},
-    grassContactActive: {value: false},
+    grassContactActive: {value: Boolean(followTracks && contactTracks)},
     grassContactDirectional: {value: Boolean(contactTracks?.directional)},
   };
   const sweeps = [];
@@ -173,6 +173,7 @@ export function createGrassField({scene, geometries, map, color, placements, til
   return {
     stats,
     addSweep({fromX, fromZ, toX, toZ, radius}) {
+      if (followTracks) return;
       if (!contactMask && !Number.isFinite(minX)) return;
       if (![fromX, fromZ, toX, toZ, radius].every(Number.isFinite) || radius <= 0) return;
       if (!contactMask) {
@@ -185,8 +186,10 @@ export function createGrassField({scene, geometries, map, color, placements, til
     },
     clear() {
       sweeps.length = 0;
-      contactMask?.clear();
-      uniforms.grassContactActive.value = false;
+      if (!followTracks) {
+        contactMask?.clear();
+        uniforms.grassContactActive.value = false;
+      }
       uniforms.grassTime.value = 0;
     },
     setCutoff(value) {
@@ -209,7 +212,7 @@ export function createGrassField({scene, geometries, map, color, placements, til
           contactMask.stamp(sweep.from, sweep.to, sweep.radius, strength);
         }
       }
-      uniforms.grassContactActive.value = sweeps.length > 0;
+      uniforms.grassContactActive.value = followTracks ? Boolean(contactMask) : sweeps.length > 0;
       camera.updateMatrixWorld();
       frustum.setFromProjectionMatrix(projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
       stats.visibleTiles = stats.visibleClumps = stats.shadowTiles = 0;
@@ -234,7 +237,9 @@ export function createGrassField({scene, geometries, map, color, placements, til
         scene.remove(mesh);
         mesh.dispose();
       }
-      if (contactTracks) contactTracks.clear();
+      if (contactTracks) {
+        if (!followTracks) contactTracks.clear();
+      }
       else contactMask?.dispose();
       material.dispose();
       depth.dispose();

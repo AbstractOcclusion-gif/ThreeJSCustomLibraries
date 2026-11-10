@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import GUI from 'lil-gui';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {createTerrainAppearance, createTerrainField, createTerrainMaterial} from '../../src/terrain/index.js';
+import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS} from '../../src/terrain/index.js';
+import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
+import {seededRandom} from '../../src/core/hash.js';
 import {valueNoise} from '../../src/terrain/terrain-noise.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
@@ -96,7 +98,7 @@ const rules = {rockSlope: .71, snowLine: 13.5, snowBlend: 2, snowJitter: 1.5, mu
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules});
 const appearance = createTerrainAppearance(), surfaceWeather = createSurfaceWeather();
 appearance.rockScale.value = .36;
-const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: 512});
+const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: 512, directional: true});
 const shared = {field, layers, detailNormal: detail, appearance, weather: surfaceWeather};
 const groundMaterial = createTerrainMaterial({}, {...shared, tracks, trackContrast: .29});
 const boulderSurface = {color: '#a49a86', map: layers.rock, roughness: .87};
@@ -187,6 +189,38 @@ function stampDemo() {
 }
 const gui = new GUI({title: 'Terrain material'});
 const controlsState = {blendObjects: true, water: true, wetPreview: false};
+const meadow = createFreeVegetation({meadowBlades: true});
+const cover = {grass: 1, rock: 0, snow: 0, mud: .06, patchiness: .85, patchSize: 5};
+const patchNoise = valueNoise(23);
+const meadowGreen = new THREE.Color('#50762e'), meadowDry = new THREE.Color('#c2aa61'), meadowTint = new THREE.Color();
+let terrainGrass, grassDirty = false;
+function rebuildGrass() {
+ terrainGrass?.dispose();
+ const random = seededRandom(41), placements = [];
+ for (let i = 0; i < 14000; i++) {
+  const x = (random() - .5) * span, z = (random() - .5) * span;
+  const chance = random(), yaw = random() * Math.PI * 2, variation = random();
+  const y = field.heightAt(x, z);
+  if (controlsState.water && y < appearance.waterLevel.value + .06) continue;
+  let density = 0, strongest = -1, dominant = 'grass';
+  for (let layer = 0; layer < TERRAIN_LAYERS.length; layer++) {
+   const weight = field.layerWeightAt(x, z, layer), name = TERRAIN_LAYERS[layer];
+   density += weight * cover[name];
+   if (weight > strongest) { strongest = weight; dominant = name; }
+  }
+  if (cover[dominant] === 0) continue;
+  const patch = THREE.MathUtils.smoothstep(patchNoise(x / cover.patchSize, z / cover.patchSize), -.5, .5);
+  if (chance >= density * (1 - cover.patchiness * patch)) continue;
+  const dry = Math.max(patch, field.layerWeightAt(x, z, TERRAIN_LAYERS.indexOf('mud')));
+  meadowTint.lerpColors(meadowGreen, meadowDry, dry);
+  const scale = THREE.MathUtils.lerp(.4, 1.75, .7 * (1 - dry) + .3 * variation);
+  placements.push({x, y: y - .02, z, yaw, scale, tint: meadowTint.toArray()});
+ }
+ terrainGrass = createGrassField({scene, geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff,
+  placements, tileSize: 6, flatColorMix: .75, contactTracks: tracks, followTracks: true});
+ grassDirty = false;
+}
+rebuildGrass();
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
  onIceBreak(x, y, z, energy) {
   const strength = THREE.MathUtils.clamp(energy / 2400, .55, 1);
@@ -199,7 +233,7 @@ const impactSettings = {surface: 'mud', preview: false};
 const impactControls = gui.addFolder('Rolling and impact');
 impactControls.add(impactSettings, 'surface', ['mud', 'snow']).name('Impact surface').onChange(surface => {
  impactSettings.preview = true;
- if (impacts.setSurface(surface)) bedHeight.needsUpdate = true;
+ if (impacts.setSurface(surface)) { bedHeight.needsUpdate = true; rebuildGrass(); }
  weather.view.sun.shadow.needsUpdate = true;
 });
 function launch(kind) {
@@ -209,7 +243,7 @@ function launch(kind) {
 impactControls.add({roll: () => launch('sphere')}, 'roll').name('Roll a boulder');
 impactControls.add({drop: () => launch('box')}, 'drop').name('Drop a block');
 impactControls.add({reset: () => {
- if (impacts.reset()) bedHeight.needsUpdate = true;
+ if (impacts.reset()) { bedHeight.needsUpdate = true; rebuildGrass(); }
  spray.clear();
  weather.view.sun.shadow.needsUpdate = true;
 }}, 'reset').name('Reset impacts and tracks');
@@ -217,16 +251,22 @@ gui.add(controlsState, 'blendObjects').name('Blend boulder bases').onChange(valu
 gui.add(controlsState, 'wetPreview').name('Rain wetness preview');
 const automatic = gui.addFolder('Automatic layers');
 for (const [key, min, max, step] of [['rockSlope', .2, 2, .05], ['snowLine', -2, 22, .5], ['mudBelow', -3, 6, .1]]) {
- automatic.add(rules, key, min, max, step).onFinishChange(() => field.updateRules(rules));
+ automatic.add(rules, key, min, max, step).onFinishChange(() => { field.updateRules(rules); rebuildGrass(); });
 }
+const groundCover = gui.addFolder('Grass cover');
+for (const [layer, label] of [['grass', 'Meadow'], ['mud', 'Mud / forest floor'], ['rock', 'Rock'], ['snow', 'Snow']]) {
+ groundCover.add(cover, layer, 0, 1, .01).name(label + ' density').onFinishChange(rebuildGrass);
+}
+groundCover.add(cover, 'patchiness', 0, 1, .01).name('Patch contrast').onFinishChange(rebuildGrass);
+groundCover.add(cover, 'patchSize', 2, 15, .5).name('Patch size · m').onFinishChange(rebuildGrass);
 const textures = gui.addFolder('Triplanar textures');
 textures.add(appearance.rockScale, 'value', .15, 1.2, .01).name('Rock tiling');
 for (const [key, min, max, step] of [['tiling', .1, 2, .05], ['sharpness', 1, 8, .25], ['antiTiling', 0, 1, .05], ['detailStrength', 0, 2, .05], ['heightBlend', 0, 1, .05]]) {
  textures.add(appearance[key], 'value', min, max, step).name(key);
 }
 const waterControls = gui.addFolder('Water');
-waterControls.add(controlsState, 'water').name('Show pond');
-waterControls.add(appearance.waterLevel, 'value', -2, maxWaterLevel, .05).name('Water level · m');
+waterControls.add(controlsState, 'water').name('Show pond').onChange(rebuildGrass);
+waterControls.add(appearance.waterLevel, 'value', -2, maxWaterLevel, .05).name('Water level · m').onFinishChange(rebuildGrass);
 waterControls.add(pondSettings, 'foam', 0, 1, .05).name('Shore foam');
 waterControls.add(pondSettings, 'foamFeather', 0, 1, .05).name('Foam feather');
 pondWindControls(waterControls.addFolder('Wind ripples'), pondSettings.windWaves);
@@ -321,7 +361,11 @@ renderer.setAnimationLoop(now => {
  else surfaceWeather.update(dt, weather.system.weather);
  pondSettings.freezeProgress = freeze.update(dt, weather.system.weather.temperature);
  const bedChanged = impacts.update(dt, controlsState.water ? freeze.progress : 0, appearance.waterLevel.value);
- if (bedChanged) bedHeight.needsUpdate = true;
+ if (bedChanged) { bedHeight.needsUpdate = true; grassDirty = true; }
+ if (grassDirty && !impacts.moving) rebuildGrass();
+ const wind = weather.system.weather, heading = THREE.MathUtils.degToRad(wind.windHeading);
+ terrainGrass.update(dt, {camera, windX: Math.cos(heading) * wind.wind, windZ: Math.sin(heading) * wind.wind,
+  gust: .4, transmission: 1.45 * weather.system.day.daylight, lodDistance: 22, farDensity: .45, shadowDistance: 0, density: 1});
  const moving = impacts.moving, sun = weather.view.sun;
  if (moving || wasMoving || !lastSun.equals(sun.position)) sun.shadow.needsUpdate = true;
  wasMoving = moving;
@@ -377,6 +421,9 @@ addEventListener('pagehide', event => {
  ripples.dispose();
  flow.dispose();
  field.dispose();
+ terrainGrass.dispose();
+ meadow.grassGeometries.forEach(geometry => geometry.dispose());
+ meadow.dispose();
  tracks.dispose();
  for (const resource of [...Object.values(layers), detail, groundMaterial, rockMaterial, plainRock, rockGeometry]) resource.dispose();
  renderer.dispose();
