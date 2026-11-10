@@ -9,6 +9,7 @@ import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js'
 import {hash2, seededRandom} from '../../src/core/hash.js';
 import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder, detectAssets} from '../shared.js';
 import {loadTerrainTextures} from '../terrain/textures.js';
+import {grassCoverageAt, grassDensityControls, terrainControls} from '../terrain/controls.js';
 import {createRollingBodies} from './ball.js';
 import {Sphere} from 'cannon-es';
 import '../bench.css';
@@ -27,10 +28,10 @@ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
   const x = index % resolution - half, z = Math.floor(index / resolution) - half;
   return Math.sin(x * .11) * Math.cos(z * .09) * 1.6 + Math.sin(x * .031 + z * .05) * .8;
 });
-const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights,
-  rules: {mudBelow: -.55, mudBlend: 1.2}});
+const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0};
+const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules});
 const {heightAt} = field;
-const {layers, detail} = await loadTerrainTextures(renderer);
+const {layers, detail} = await loadTerrainTextures(renderer, {forest: true});
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;
 const surfaceWeather = createSurfaceWeather();
@@ -60,6 +61,9 @@ const bushes = new LeavedTrees({scene, profile: 'bush', lighting, sampleGround: 
 const treeTint = new THREE.Color();
 const shade = new THREE.Color('#2f6b1f'), highlight = new THREE.Color('#779640');
 const meadowNoise = valueNoise(23);
+const defaultCover = {grass: 100, mud: 100, forest: 100, rock: 100, snow: 100, patchiness: 0, patchSize: 4};
+const cover = {...defaultCover};
+const coverStats = {clumps: 0};
 function placements() {
   const random = seededRandom(7), out = [];
   const green = new THREE.Color(P.grass.color), muted = new THREE.Color(P.grass.soilColor), tint = new THREE.Color();
@@ -72,6 +76,8 @@ function placements() {
     const brightness = 1 + (hash2(x, z, 3) - .5) * P.grass.tintVariation * .35;
     tint.lerpColors(green, muted, dry * P.grass.tintVariation).multiplyScalar(brightness);
     const yaw = random() * Math.PI * 2, individual = random();
+    const densityPatch = THREE.MathUtils.smoothstep(meadowNoise(x / cover.patchSize, z / cover.patchSize), -.5, .5);
+    if (hash2(x, z, 17) >= grassCoverageAt(field, x, z, cover, densityPatch)) continue;
     const heightMix = .65 * (1 - dry) + .35 * individual;
     const scale = P.grass.size * THREE.MathUtils.lerp(1, THREE.MathUtils.lerp(.28, 2.15, heightMix), P.grass.sizeVariation);
     out.push({x, z, y: heightAt(x, z) - .02, yaw, scale, tint: tint.toArray()});
@@ -81,8 +87,10 @@ function placements() {
 function buildGrass() {
   grass?.dispose();
   const source = pack ?? free;
+  const items = placements();
   grass = createGrassField({scene, geometries: source.grassGeometries, map: source.atlas, color: 0xffffff,
-    placements: placements(), tileSize: 6, flatColorMix: .75, contactTracks: tracks});
+    placements: items, tileSize: 6, flatColorMix: .75, contactTracks: tracks});
+  coverStats.clumps = items.length;
 }
 function plantSites(count, seed) {
   const random = seededRandom(seed);
@@ -142,6 +150,9 @@ fg.addColor(P.grass, 'color').name('Meadow color').onFinishChange(buildGrass);
 fg.addColor(P.grass, 'soilColor').name('Dry grass color').onFinishChange(buildGrass);
 fg.add(P.grass, 'tintVariation', 0, 1, .01).name('Color variation').onFinishChange(buildGrass);
 fg.add(P.grass, 'density', 0, 1, .01); fg.add(P.grass, 'lodDistance', 5, 80, 1); fg.add(P.grass, 'farDensity', 0, 1, .01); fg.add(P.grass, 'shadowDistance', 0, 60, 1); fg.add(P.grass, 'transmission', 0, 2, .01).name('backlight');
+const terrain = gui.addFolder('Terrain').close();
+terrainControls(terrain, {rules, appearance, onLayersChanged() { field.updateRules(rules); buildGrass(); }});
+grassDensityControls(terrain, {cover, defaults: defaultCover, stats: coverStats, rebuild: buildGrass});
 const fp = gui.addFolder('Plants');
 fp.add(P.plants, 'trees', 0, 60, 1).onFinishChange(placeTrees); fp.add(P.plants, 'bushes', 0, 120, 1).onFinishChange(buildBushes); fp.add(P.plants, 'gust', 0, 1, .01);
 fp.add(P.plants, 'treeWidth', .5, 1.8, .01).name('Crown width').onFinishChange(placeTrees);

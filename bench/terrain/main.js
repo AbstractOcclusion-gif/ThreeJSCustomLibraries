@@ -12,6 +12,7 @@ import {benchRenderer, createBenchPondSettings, createBenchWeather, pondWindCont
 import {createTerrainImpacts} from './impacts.js';
 import {createTerrainIce} from './ice.js';
 import {loadTerrainTextures} from './textures.js';
+import {grassCoverageAt, grassDensityControls, terrainControls} from './controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
 
@@ -204,15 +205,8 @@ function rebuildGrass() {
   const chance = random(), yaw = random() * Math.PI * 2, variation = random();
   const y = field.heightAt(x, z);
   if (controlsState.water && y < appearance.waterLevel.value + .06) continue;
-  let density = 0, strongest = -1, dominant = 'grass';
-  for (let layer = 0; layer < TERRAIN_LAYERS.length; layer++) {
-   const weight = field.layerWeightAt(x, z, layer), name = TERRAIN_LAYERS[layer];
-   density += weight * cover[name];
-   if (weight > strongest) { strongest = weight; dominant = name; }
-  }
-  if (cover[dominant] === 0) continue;
   const patch = THREE.MathUtils.smoothstep(patchNoise(x / cover.patchSize, z / cover.patchSize), -.5, .5);
-  if (chance >= density * .01 * (1 - cover.patchiness * patch)) continue;
+  if (chance >= grassCoverageAt(field, x, z, cover, patch)) continue;
   const dry = Math.max(patch, field.layerWeightAt(x, z, TERRAIN_LAYERS.indexOf('mud')));
   meadowTint.lerpColors(meadowGreen, meadowDry, dry);
   const scale = THREE.MathUtils.lerp(.4, 1.75, .7 * (1 - dry) + .3 * variation);
@@ -224,18 +218,7 @@ function rebuildGrass() {
  grassDirty = false;
 }
 rebuildGrass();
-const groundCover = gui.addFolder('Grass density by texture');
-for (const [layer, label] of [['grass', 'Meadow'], ['mud', 'Mud'], ['forest', 'Forest floor'], ['rock', 'Rock'], ['snow', 'Snow']]) {
- groundCover.add(cover, layer, 0, 100, 1).name(label + ' · %').onFinishChange(rebuildGrass);
-}
-groundCover.add(cover, 'patchiness', 0, 1, .01).name('Patch contrast').onFinishChange(rebuildGrass);
-groundCover.add(cover, 'patchSize', 2, 15, .5).name('Patch size · m').onFinishChange(rebuildGrass);
-groundCover.add(coverStats, 'clumps').name('Placed clumps').disable().listen();
-groundCover.add({reset() {
- Object.assign(cover, defaultCover);
- rebuildGrass();
- groundCover.controllers.forEach(controller => controller.updateDisplay());
-}}, 'reset').name('Reset grass settings');
+grassDensityControls(gui, {cover, defaults: defaultCover, stats: coverStats, rebuild: rebuildGrass});
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
  onIceBreak(x, y, z, energy) {
   const strength = THREE.MathUtils.clamp(energy / 2400, .55, 1);
@@ -264,16 +247,7 @@ impactControls.add({reset: () => {
 }}, 'reset').name('Reset impacts and tracks');
 gui.add(controlsState, 'blendObjects').name('Blend boulder bases').onChange(value => rocks.forEach(rock => { rock.material = value ? rockMaterial : plainRock; }));
 gui.add(controlsState, 'wetPreview').name('Rain wetness preview');
-const automatic = gui.addFolder('Automatic layers');
-for (const [key, min, max, step] of [['rockSlope', .2, 2, .05], ['snowLine', -2, 22, .5], ['mudBelow', -3, 6, .1]]) {
- automatic.add(rules, key, min, max, step).onFinishChange(() => { field.updateRules(rules); rebuildGrass(); });
-}
-automatic.add(rules, 'forestCover', 0, 1, .01).name('Forest floor coverage').onFinishChange(() => { field.updateRules(rules); rebuildGrass(); });
-const textures = gui.addFolder('Triplanar textures');
-textures.add(appearance.rockScale, 'value', .15, 1.2, .01).name('Rock tiling');
-for (const [key, min, max, step] of [['tiling', .1, 2, .05], ['sharpness', 1, 8, .25], ['antiTiling', 0, 1, .05], ['detailStrength', 0, 2, .05], ['heightBlend', 0, 1, .05]]) {
- textures.add(appearance[key], 'value', min, max, step).name(key);
-}
+terrainControls(gui, {rules, appearance, onLayersChanged() { field.updateRules(rules); rebuildGrass(); }});
 const waterControls = gui.addFolder('Water');
 waterControls.add(controlsState, 'water').name('Show pond').onChange(rebuildGrass);
 waterControls.add(appearance.waterLevel, 'value', -2, maxWaterLevel, .05).name('Water level · m').onFinishChange(rebuildGrass);
