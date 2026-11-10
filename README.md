@@ -1,7 +1,7 @@
 # three-kit
 
 **Live bench:** https://abstractocclusion-gif.github.io/ThreeJSCustomLibraries/ — public module demos run in the browser
-(deep links: `…/bench/?tool=trees`). Deployed from `main` by `.github/workflows/pages.yml`.
+(deep links: `…/bench/?tool=vegetation`). Deployed from `main` by `.github/workflows/pages.yml`.
 
 Neutral Three.js modules extracted from Abstract Occlusion's projects. Plain ESM under `src/`, no build step; `bench/` holds one
 authoring page per module (Vite), `presets/` the JSON they save, `assets/` only free assets. Anything licensed (Synty packs,
@@ -36,7 +36,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | weathered surfaces (wetness, runoff streaks, snow, puddles, tracks, albedo anti-tiling) | `three-kit/surface` | `bench/weather/`, `bench/water/` | ✓ |
 | terrain (heightfield, automatic triplanar layers, prop contact blending, detail normals, shoreline wetness) | `three-kit/terrain` | `bench/terrain/` | ✓ |
 | vegetation (grass with per-instance tint, specimens, procedural meadow tree, generated free assets, Synty loader code) | `three-kit/vegetation` | `bench/vegetation/` | ✓ |
-| leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/trees/` | ✓ |
+| leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
 | cable (articulated rope on cannon-es, tube view) | `three-kit/cable` | `bench/cable/` | ✓ |
 | destruction (rigid structures, impact fracture, overload detachment) | `three-kit/destruction`, `/destruction/three` | `bench/destruction/` | ✓ |
@@ -142,7 +142,7 @@ private prepared pack (SYNTY.md).
 
 `new LeavedTrees({scene, profile, lighting, leafTexture?, leafRect?, cellSize, sampleGround, canopy?, nearHole?})` then
 `place(items)` with `{x, z, h, r, yaw?, tint | tint8}`; one InstancedMesh per 80 m cell and silhouette variant. `profile` is
-`'tree'`, `'bush'` or a JSON object (`presets/trees/*.json`, authored in the bench); `setProfile()` rebuilds in place. The
+`'tree'`, `'bush'` or a JSON object (see `presets/trees/*.json`); `setProfile()` rebuilds in place. The
 material owns its shader and takes the `lighting` hook; the canopy sun-visibility map and the near dither hole are opt-in
 defines. Hedges are the bush profile placed along a run.
 
