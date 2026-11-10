@@ -23,11 +23,6 @@
  <div class="buttons"><button id="pause">Pause</button><button id="save">Save preset</button><label class="file-button">Load preset<input id="load" type="file" accept=".json,application/json" hidden></label></div>
  <div id="status" role="status">Starting…</div><div id="error" role="alert" hidden></div>
  <details id="developer"><summary>Developer settings · all controls</summary><div id="dev-panel"></div></details>
- <details><summary>Terrain and object surfaces</summary>
-  <label>Surface state <select id="surface-state"><option value="weather">Follow weather</option><option value="dry">Dry</option><option value="wet">Wet with puddles</option><option value="snow">Snow cover</option></select></label>
-  <label class="check"><input id="paint-tracks" type="checkbox"> Drag on the ground to paint tracks</label>
-  <div class="buttons"><button id="preview-surfaces">Inspect surfaces</button><button id="clear-tracks">Clear tracks</button></div>
- </details>
  <details><summary>Recent weather events</summary><pre id="events">No changes yet.</pre></details>
  <p class="footnote">Cloud / celestial textures are optional: drop them in <code>private-assets/weather/</code>. Without them the procedural sky, lights, fog and precipitation still run.</p>
 </aside>

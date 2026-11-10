@@ -4,13 +4,11 @@ import {createWeatherSystem, DEFAULT_WEATHER_STATES, hourLabel} from '../../src/
 import {createThreeWeather} from '../../src/weather/three/index.js';
 import {createWeatherDevPanel} from '../../src/weather/three/dev-panel.js';
 import {bundledWeatherAssets} from '../../src/weather/three/bundled-assets.js';
-import {createSurfaceWeather, createTrackMask, createWeatherSurfaceMaterial} from '../../src/surface/index.js';
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
 import '../bench.css';
 import '../ui-demo.js';
 import {detectAssets} from '../kit/assets.js';
 import {bindResize} from '../kit/page.js';
-import {aimRay} from '../kit/input.js';
 
 const $ = id => document.getElementById(id), errors = [], events = [];
 function showError(error) { errors.push(String(error)); $('error').hidden = false; $('error').textContent = String(error); console.error(error); }
@@ -63,11 +61,9 @@ view.sun.castShadow = true; view.sun.shadow.mapSize.set(1024, 1024); Object.assi
 
 // Neutral test valley: ground, hills, trees, blocks, three roughness spheres.
 const materials = [], geometries = [];
-const surfaceWeather = createSurfaceWeather();
-const tracks = createTrackMask({origin: [-48, -48], size: [96, 96], resolution: 512});
-function mesh(geometry, color, x, y, z, surface) {
-  const parameters = {color, roughness: .85, map: surface?.map ?? null};
-  const material = surface ? createWeatherSurfaceMaterial(parameters, {weather: surfaceWeather, ...surface}) : new THREE.MeshStandardMaterial(parameters);
+// Plain materials: wet, snow and track surfaces are the surface module's job (see the Terrain & surface page).
+function mesh(geometry, color, x, y, z, map = null) {
+  const material = new THREE.MeshStandardMaterial({color, roughness: .85, map});
   view.addCloudShadowReceiver(material);
   materials.push(material); geometries.push(geometry);
   const object = new THREE.Mesh(geometry, material);
@@ -88,11 +84,11 @@ soilMap.generateMipmaps = true; soilMap.repeat.setScalar(170); soilMap.needsUpda
 const ground = new THREE.PlaneGeometry(900, 900, 60, 60); ground.rotateX(-Math.PI / 2);
 const p = ground.attributes.position;
 for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i), r = Math.hypot(x, z); p.setY(i, Math.sin(x * .025) * Math.cos(z * .021) * Math.max(0, r - 28) * .035 - 1); }
-ground.computeVertexNormals(); const terrain = mesh(ground, 0x718469, 0, 0, 0, {map: soilMap, tracks, antiTiling: 1});
+ground.computeVertexNormals(); const terrain = mesh(ground, 0x718469, 0, 0, 0, soilMap);
 for (let i = 0; i < 15; i++) { const a = i * 2.399, r = 170 + (i % 3) * 45; mesh(new THREE.ConeGeometry(23 + i % 4 * 7, 40 + i % 5 * 12, 5), 0x657767, Math.cos(a) * r, 12, Math.sin(a) * r); }
 for (let i = 0; i < 17; i++) { const a = i * 2.399, r = 30 + i % 6 * 13, x = Math.cos(a) * r, z = Math.sin(a) * r; mesh(new THREE.CylinderGeometry(.45, .7, 5, 6), 0x6a5847, x, 1.5, z); mesh(new THREE.ConeGeometry(3, 10, 7), 0x37584a, x, 7, z); }
 const blocks = [];
-for (let i = 0; i < 7; i++) blocks.push(mesh(new THREE.BoxGeometry(4, 2 + i, 4), [0xc48e62, 0x8ca4aa, 0xd1c09a][i % 3], (i - 3) * 7, (2 + i) / 2, -12, {puddles: 0}));
+for (let i = 0; i < 7; i++) blocks.push(mesh(new THREE.BoxGeometry(4, 2 + i, 4), [0xc48e62, 0x8ca4aa, 0xd1c09a][i % 3], (i - 3) * 7, (2 + i) / 2, -12));
 for (let i = 0; i < 3; i++) { const m = mesh(new THREE.SphereGeometry(2.5, 32, 20), 0xb9c7ca, (i - 1) * 9, 2, 6); m.material.metalness = 1; m.material.roughness = [.08, .35, .75][i]; }
 const wakeProbe = mesh(new THREE.SphereGeometry(2.3, 20, 12), 0xa78256, 0, 2, 22);
 const wakeTail = new THREE.Vector3();
@@ -104,29 +100,6 @@ function strikeAt(x, z, objects) {
 }
 $('strike-block').onclick = () => strikeAt(0, -12, [blocks[3]]);
 $('strike-ground').onclick = () => strikeAt(12, 18, [terrain]);
-const canvas = renderer.domElement, trackEvents = new AbortController();
-let lastTrackPoint;
-function paintTrack(event) {
-  if (!$('paint-tracks').checked || !(event.buttons & 1)) { lastTrackPoint = undefined; return; }
-  aimRay(raycaster, event, canvas, camera);
-  const hit = raycaster.intersectObject(terrain)[0]?.point;
-  if (hit) tracks.stamp(lastTrackPoint ?? hit, hit, .65);
-  lastTrackPoint = hit;
-}
-for (const type of ['pointerdown', 'pointermove']) canvas.addEventListener(type, paintTrack, {signal: trackEvents.signal});
-for (const type of ['pointerup', 'pointerleave', 'pointercancel']) canvas.addEventListener(type, () => { lastTrackPoint = undefined; }, {signal: trackEvents.signal});
-$('paint-tracks').onchange = () => { controls.enabled = !$('paint-tracks').checked; lastTrackPoint = undefined; };
-$('clear-tracks').onclick = () => tracks.clear();
-$('preview-surfaces').onclick = () => {
-  camera.position.set(16, 13, 17);
-  controls.target.set(0, 0, -6);
-  controls.update();
-};
-$('surface-state').onchange = () => {
-  const state = $('surface-state').value;
-  if (state !== 'weather') surfaceWeather.set({wetness: Number(state === 'wet'), snow: Number(state === 'snow')});
-};
-
 let assetsReady = false;
 view.ready.then(() => { assetsReady = true; document.body.dataset.ready = 'true'; }).catch(showError);
 
@@ -188,7 +161,6 @@ let last = null, lastUI = 0;
 renderer.setAnimationLoop(now => {
   if (document.hidden) { last = null; return; }
   const dt = last === null ? 0 : Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; controls.update(); system.update(dt);
-  if (!system.paused) surfaceWeather.update(dt, $('surface-state').value === 'weather' ? system.weather : null);
   wakeProbe.visible = $('fog-wake').checked;
   if (wakeProbe.visible) {
     if (!system.paused) wakeTime += dt;
@@ -206,5 +178,5 @@ renderer.setAnimationLoop(now => {
     syncControls(); if ($('developer').open) devPanel.refresh(); lastUI = now;
   }
 });
-addEventListener('pagehide', () => { renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort(); devPanel.dispose(); view.dispose(); controls.dispose(); geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); tracks.dispose(); soilMap.dispose(); renderer.dispose(); }, {once: true});
+addEventListener('pagehide', () => { renderer.setAnimationLoop(null); unbindResize(); devPanel.dispose(); view.dispose(); controls.dispose(); geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); soilMap.dispose(); renderer.dispose(); }, {once: true});
 window.weatherBench = {system, view, devPanel, renderer, scene, camera, events, errors};

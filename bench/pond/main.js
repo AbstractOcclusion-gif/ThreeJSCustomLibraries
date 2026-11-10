@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
-import {createFishFlock} from '../../src/flocking/index.js';
-import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
+import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
+import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize} from '../kit/page.js';
-import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
+import {stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -26,13 +26,15 @@ controls.minDistance = 5;
 controls.maxDistance = 64;
 controls.maxPolarAngle = Math.PI * 0.49;
 controls.update();
-const weather = await createBenchWeather({scene, renderer, camera, initial: 'clear', hour: 13});
+// Standalone: the basic stage gives the sun and light; the water, waterfall sheet and spray read the procedural sky's uniforms.
+const stage = createBasicStage({scene, ground: false});
+const sky = proceduralSky();
 const ripples = createRipples({origin: [-15, -13], size: [100, 88], cell: 0.3});
 const flow = createFlowBake();
 const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
 const lightOccluders = [];
 const freeze = createWaterFreeze(), freezeMap = createFreezeTexture();
-const water = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view), ripples, obstacles, flow,
+const water = createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow,
  freezeMap, causticSegments: 280, clipToBed: true, pondOptics: true, bedCaustics: 'material', lightOccluders});
 const waterline = createWaterlineComposite(renderer, {caustics: water.lighting});
 
@@ -119,7 +121,7 @@ foamTile.wrapS = foamTile.wrapT = THREE.RepeatWrapping;
 const sheetGeometry = new THREE.PlaneGeometry(4.6, 6.8, 20, 30);
 const sheetMaterial = new THREE.ShaderMaterial({
  side: THREE.DoubleSide, transparent: true, depthWrite: false,
- uniforms: {tile: {value: foamTile}, time: {value: 0}, discharge: {value: 1}, light: weather.view.uniforms.uDaylight},
+ uniforms: {tile: {value: foamTile}, time: {value: 0}, discharge: {value: 1}, light: sky.uniforms.uDaylight},
  vertexShader: `
  uniform float time;
  varying vec2 sheetUV;
@@ -162,41 +164,24 @@ const spray = createWaterSpray({
   uniforms: {uOceanAmplitude: {value: 1}},
  },
  lighting: {
-  uniforms: {uSunCol: weather.view.uniforms.uSunCol, uFxAmbient: weather.view.uniforms.uAmb},
-  direction: weather.view.uniforms.uSkySunDir.value, ambient: weather.view.uniforms.uAmb.value,
+  uniforms: {uSunCol: sky.uniforms.uSunCol, uFxAmbient: sky.uniforms.uAmb},
+  direction: sky.uniforms.uSkySunDir.value, ambient: sky.uniforms.uAmb.value,
  },
  onDeposit(x, z, radius, strength) { if (freeze.progress < 1) ripples.splash(x, z, strength * .5); },
 });
 
 
 
-const state = {...createBenchPondSettings(), bankFoam: .12, discharge: 1, diveHeight: -2.1};
+const state = {...createBenchPondSettings(), bankFoam: .12, discharge: 1, diveHeight: -2.1, airTemperature: 15};
 const gui = createBenchPanel('Pond & waterfall');
+stageControls(gui, stage, {wind: false, onChange: () => sky.setEnvironment(stage.environment)}).apply();
 sprayControls(gui, {spray, depth}).close();
 gui.add(state, 'discharge', 0, 2, 0.05).name('Waterfall flow');
+// No weather here: this temperature drives the ice when Water > Pond phase is 'Weather' (freezes at -1 °C, thaws above 1 °C).
+gui.add(state, 'airTemperature', -15, 30, 1).name('Air temperature · °C');
 const {diveControl, diveHeight} = inlandWaterControls(gui.addFolder('Water'), {
  settings: state, freeze, toggleUnderwater, positionDiveCamera,
 });
-const fishState = {show: false};
-const fishLoad = new AbortController();
-let flock, loading;
-gui.add(fishState, 'show').name('Show fish school').onChange(async enabled => {
- if (flock) { flock.group.visible = enabled; return; }
- if (!enabled || loading) return;
- loading = true;
- try {
-  flock = await createFishFlock({
-   bounds: new THREE.Box3(new THREE.Vector3(-2.5, -2.6, -2.5), new THREE.Vector3(2.5, 0, 2.5)),
-   floorHeight: pondBedHeight, surfaceHeight: () => water.surface.position.y, signal: fishLoad.signal,
-  });
-  if (fishLoad.signal.aborted) { flock.dispose(); return; }
-  flock.group.visible = fishState.show;
-  scene.add(flock.group);
- } catch (error) {
-  if (!fishLoad.signal.aborted) console.error(error);
- } finally { loading = false; }
-});
-const weatherUI = mountWeatherControls(weather);
 
 let diving = false;
 const above = new THREE.Vector3();
@@ -239,10 +224,8 @@ renderer.setAnimationLoop(now => {
   last = now;
   time += dt;
   if (!diving) controls.update();
-  weather.system.update(dt);
-  weather.view.update(dt);
-  weatherUI.sync();
-  const freezeProgress = freeze.update(dt, weather.system.weather.temperature);
+  stage.update(camera);
+  const freezeProgress = freeze.update(dt, state.airTemperature);
   if (freezeProgress >= 1) rippleGesture.cancel();
   rippleGesture.update(dt);
   const discharge = state.discharge;
@@ -260,7 +243,6 @@ renderer.setAnimationLoop(now => {
     spray.splash(sprayPosition, Math.min(1, discharge * 0.5), 0.18);
   }
   spray.update(dt);
-  if (flock?.group.visible) flock.update(dt);
   if (freezeProgress < 1) ripples.update(dt);
   canvas.dataset.ripples = ripples.active ? 'active' : 'still';
   water.render(time * 0.12, {
@@ -269,7 +251,7 @@ renderer.setAnimationLoop(now => {
     freezeProgress,
   });
   if (diving) {
-    const light = weather.view.uniforms;
+    const light = sky.uniforms;
     waterline.render(scene, camera, {height: water.surface.position.y,
       clarity: state.clarity, godRays: state.godRays, sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
   } else renderer.render(scene, camera);
@@ -284,18 +266,15 @@ window.addEventListener('pagehide', event => {
   renderer.setAnimationLoop(null);
   rippleGesture.dispose();
   spray.dispose();
-  fishLoad.abort();
-  flock?.dispose();
   water.dispose();
   waterline.dispose();
   freezeMap.dispose();
-  weather.view.dispose();
+  stage.dispose();
   ripples.dispose();
   flow.dispose();
   bedMaterial.map?.dispose(); bedMaterial.normalMap?.dispose();
   for (const resource of [bedGeometry, bedMaterial, cliff, stone, stoneMaterial, sheetGeometry, sheetMaterial, foamTile]) resource.dispose();
   controls.dispose();
   gui.destroy();
-  weatherUI.dispose();
   renderer.dispose();
 });
