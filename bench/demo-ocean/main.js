@@ -7,6 +7,8 @@ import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createParticleDepthBinding, createWaterSpray, Motes} from '../../src/particles/water/index.js';
 import {createOceanFloat} from './float.js';
 import {createIslandLife} from './island.js';
+import {createCoastStructures} from './structures.js';
+import {createCameraDirector, createOrbitRig} from '../../src/camera/director.js';
 import {benchRenderer, createBenchWeather, detectAssets, mountWeatherControls} from '../shared.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {oceanControls} from './controls.js';
@@ -36,7 +38,24 @@ const coast = new OceanCoastTerrain({scene, settings: {centerX: ISLAND_CENTRE[0]
 // One environment for everything: the weather fills it, the ocean, plants, fire, smoke and spray read it.
 const environment = weather.view.environment; environment.wind.gust = PLANT_GUST;
 ocean.setEnvironment(environment);
-const island = await createIslandLife({scene, ground: (x, z) => coast.collisionHeightAt(x, z), centre: ISLAND_CENTRE, environment, lighting: terrainLighting});
+const groundAt = (x, z) => coast.collisionHeightAt(x, z);
+const island = await createIslandLife({scene, ground: groundAt, centre: ISLAND_CENTRE, environment, lighting: terrainLighting});
+const structures = createCoastStructures({scene, ground: groundAt, centre: ISLAND_CENTRE, camp: island.camp, environment, lighting: terrainLighting});
+// Camera shots: 'free' is the orbit controls; the others are director rigs circling a subject.
+const director = createCameraDirector(camera);
+const SHOTS = {
+  island: {rig: createOrbitRig({radius: 135, height: 42, speed: .1}), target: new THREE.Vector3(ISLAND_CENTRE[0], 8, ISLAND_CENTRE[1])},
+  camp: {rig: createOrbitRig({radius: 19, height: 7, speed: .22}), target: new THREE.Vector3(island.camp.x + 2, groundAt(island.camp.x, island.camp.z) + 1, island.camp.z)},
+  bridge: {rig: createOrbitRig({radius: 62, height: 14, speed: .15}), target: structures.bridgeCentre},
+};
+for (const [id, {rig}] of Object.entries(SHOTS)) director.register(id, rig);
+const shot = {id: 'free'};
+function selectShot(id) {
+  const directed = id !== 'free';
+  if (directed) director.select(id, {duration: 1.5});
+  else { controls.target.copy(SHOTS[director.selected].target); controls.update(); }
+  controls.enabled = !directed;
+}
 const probes = new SurfaceProbes(ocean.fft, 3, {wake: ocean.wake}), probeStep = 2;
 const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics});
 const postColor = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthBuffer: false});
@@ -122,7 +141,11 @@ const gui = createBenchPanel('Ocean coast demo');
 const islandActions = gui.addFolder('Island');
 islandActions.add(island, 'ignite').name('Light the camp fire');
 islandActions.add(island, 'resetFire').name('Reset the camp');
-islandActions.add({look() { controls.target.set(island.camp.x, 4, island.camp.z); camera.position.set(island.camp.x + 9, 8, island.camp.z + 16); controls.update(); }}, 'look').name('Go to the camp');
+islandActions.add(structures, 'cutRope').name('Cut the rope');
+islandActions.add(structures, 'hangRope').name('Hang a new rope');
+islandActions.add(structures, 'fireAtBridge').name('Fire at the bridge');
+islandActions.add(structures, 'buildBridge').name('Rebuild the bridge');
+islandActions.add(shot, 'id', ['free', ...Object.keys(SHOTS)]).name('Camera').onChange(selectShot);
 sprayControls(gui, {spray, depth: fxDepth}).close();
 const wf = mountWeatherControls(weather);
 const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanControls(gui, {
@@ -140,12 +163,14 @@ renderer.setAnimationLoop(now => {
   if (view.waterline) {
     camera.position.set(orbitPosition.x, view.eyeHeight, orbitPosition.z);
     camera.lookAt(controls.target.x, view.eyeHeight, controls.target.z);
-  } else controls.update();
+  } else if (shot.id !== 'free') director.update(dt, {target: SHOTS[shot.id].target});
+  else controls.update();
   weather.system.update(dt); weather.view.update(dt);
   const light = weather.view.uniforms;
   syncLighting(terrainLighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});   // island lit and fogged like the rest
   const wind = weather.system.weather;
   island.update(dt, camera);
+  structures.update(dt, camera);
   float.step(dt);
   stepBoat(dt);
   rippleGesture.update(dt);
@@ -203,7 +228,7 @@ Surface at camera ${a.valid ? a.height.toFixed(2) + ' m' : 'sampling…'}${float
   }
 });
 document.body.dataset.ready = 'true';
-window.oceanBench = {ocean, weather, scene, camera, renderer, probes, island, controls};
+window.oceanBench = {ocean, weather, scene, camera, renderer, probes, island, structures, controls, shot, selectShot};
 addEventListener('pagehide', event => {
   if (event.persisted) return;
   disposed = true;
@@ -213,6 +238,7 @@ addEventListener('pagehide', event => {
   probes.dispose();
   float.dispose();
   island.dispose();
+  structures.dispose();
   removeHullFootprint?.();
   boat?.dispose();
   trail.dispose();
