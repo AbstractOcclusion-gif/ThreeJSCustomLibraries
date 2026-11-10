@@ -1,4 +1,5 @@
 import {makePool, reuploadAll} from './pool.js';
+import {CLEAR_NOON_SUN} from '../../core/lighting.js';
 import {createSoftDiscTexture} from './soft-disc.js';
 // The host supplies its renderer, surface, depth, lighting and impact bindings. dropletUrl is optional: without it the
 // droplet sprite is a generated soft disc.
@@ -29,7 +30,7 @@ export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, f
   const SPRAY_LANDING_EPSILON = 0.005, SPRAY_LANDING_KEEP = 0.4, KIND_SURFACE = 0, KIND_SPRAY = 1, CAPACITY = 4096;
 
   const tDrop = dropletUrl ? (loadTexture ?? (url => new THREE.TextureLoader().load(url)))(dropletUrl) : createSoftDiscTexture(THREE); tDrop.anisotropy = 4;
-  const LIT_U = { uSunCol: { value: new THREE.Color(1, 0.96, 0.9) }, uAmb: { value: new THREE.Color(0.35, 0.45, 0.55) }, uLight: { value: new THREE.Vector3(0, 1, 0) } };
+  const LIT_U = { uSunCol: { value: new THREE.Color(...CLEAR_NOON_SUN) }, uAmb: { value: new THREE.Color(0.35, 0.45, 0.55) }, uLight: { value: new THREE.Vector3(0, 1, 0) } };
 
   // ---- pool: position (x, height above local surface, z), velocity, (age, life), (size, seed, kind, opacity)
   const pos = new Float32Array(CAPACITY * 3), vel = new Float32Array(CAPACITY * 3), life = new Float32Array(CAPACITY * 2), misc = new Float32Array(CAPACITY * 4);
@@ -96,7 +97,7 @@ export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, f
     let count = THREE.MathUtils.clamp(Math.round(strength * S.maxParticlesPerBurst), MIN_BURST_COUNT, S.maxParticlesPerBurst); count = Math.max(1, Math.round(count * amountScale));
     const sizeScale = appearance?.size ?? 1, heightScale = appearance?.height ?? 1;
     const upSpeed = S.upwardBias * heightScale * (UP_STRENGTH_FLOOR + UP_STRENGTH_GAIN * strength), outSpeed = radius * S.outwardSpread * Math.max(MIN_OUTWARD_STRENGTH, strength);
-    const petalAngle = petal && petal.x * petal.x + petal.z * petal.z >= 1e-8 ? Math.atan2(petal.z, petal.x) : null, arcHalf = 0.5 * arcDegrees * Math.PI / 180, elevation = elevationDegrees * Math.PI / 180;
+    const petalAngle = petal && petal.x * petal.x + petal.z * petal.z >= 1e-8 ? Math.atan2(petal.z, petal.x) : null, arcHalf = 0.5 * THREE.MathUtils.degToRad(arcDegrees), elevation = THREE.MathUtils.degToRad(elevationDegrees);
     const opacity = THREE.MathUtils.clamp((ALPHA_STRENGTH_FLOOR + ALPHA_STRENGTH_GAIN * strength) * S.dropletOpacity, 0, 1);
     if (splashHook) splashHook(x, surfaceY, z, strength, radius, sizeScale);
     for (let i = 0; i < count; i++) {

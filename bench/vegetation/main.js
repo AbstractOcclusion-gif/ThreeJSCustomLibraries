@@ -9,7 +9,10 @@ import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS, valueNoise} from '../../src/terrain/index.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {hash2, seededRandom} from '../../src/core/hash.js';
-import {benchRenderer, createBenchWeather, mountWeatherControls, presetsFolder, detectAssets} from '../shared.js';
+import {benchRenderer, onLeave, bindResize} from '../kit/page.js';
+import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
+import {presetsFolder} from '../kit/controls.js';
+import {detectAssets} from '../kit/assets.js';
 import {loadTerrainTextures} from '../terrain/textures.js';
 import {grassCoverageAt, grassDensityControls, terrainControls} from '../terrain/controls.js';
 import {createRollingBodies} from './ball.js';
@@ -166,8 +169,7 @@ presetsFolder(gui, {bundled: import.meta.glob('../../presets/vegetation/*.json')
     gui.controllersRecursive().forEach(c => c.updateDisplay());
   }});
 
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
-addEventListener('resize', resize);
+const unbindResize = bindResize(renderer, camera);
 let last = null, lastUI = 0;
 renderer.setAnimationLoop(now => {
   if (document.hidden) { last = null; return; }
@@ -184,4 +186,9 @@ renderer.setAnimationLoop(now => {
   if (now - lastUI > 250) { lastUI = now; wf.sync(); const s = grass.stats; $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + (weather.assetBaseUrl === 'bundled' ? ' · bundled sky textures' : '') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\n${w.dominant} · ${weather.hourLabel(weather.system.day.hour)} · wind ${w.wind.toFixed(1)} m/s`; }
 });
 document.body.dataset.ready = 'true';
+onLeave(() => {
+  renderer.setAnimationLoop(null); unbindResize();
+  grass?.dispose(); trees.dispose(); bushes.dispose(); free.grassGeometries.forEach(geometry => geometry.dispose()); free.dispose();
+  tracks.dispose(); field.dispose(); groundMaterial.dispose(); weather.view.dispose(); wf.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
+});
 window.vegetationBench = {get grass() { return grass; }, trees, bushes, rollBall, bodies: balls, weather, scene, camera, renderer, pack};

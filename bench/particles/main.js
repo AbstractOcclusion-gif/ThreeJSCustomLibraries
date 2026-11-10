@@ -4,6 +4,8 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createChips, createParticlePrefab, createPuffs, createParticleDepthBinding, createWaterSpray, OCEAN_SHEET_FILES} from '../../src/particles/index.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
+import {detectAssets} from '../kit/assets.js';
+import {onLeave, bindResize} from '../kit/page.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
@@ -36,10 +38,8 @@ const blit = new T.Mesh(new T.PlaneGeometry(2, 2), new T.MeshBasicMaterial({map:
 const fxScene = new T.Scene();
 const depth = createParticleDepthBinding({THREE: T, camera, depthTexture: target.depthTexture, viewport, softDistance: .2, waterPlane: new T.Vector4(0, 1, 0, -WATER_Y)});
 
-async function detectSheets() {
-  try { const r = await fetch(import.meta.env.BASE_URL + 'water/' + OCEAN_SHEET_FILES['mist (8x8)'], {method: 'HEAD'}); return r.ok && (r.headers.get('content-type') || '').startsWith('image') ? import.meta.env.BASE_URL + 'water/' : undefined; } catch { return undefined; }
-}
-const assetBaseUrl = await detectSheets();
+const sheetsUrl = import.meta.env.BASE_URL + 'water/';
+const assetBaseUrl = await detectAssets(sheetsUrl + OCEAN_SHEET_FILES['mist (8x8)'], sheetsUrl);
 // No `lighting` passed: the spray owns its default light, which the optional environment below may drive.
 const spray = createWaterSpray({THREE: T, scene: fxScene, renderer, depth, assets: {assetBaseUrl},
   surface: {glsl: `uniform float uOceanAmplitude; float surfaceHeightAt(vec2 xz) { return ${WATER_Y.toFixed(2)}; }`, uniforms: {uOceanAmplitude: {value: 1}}},
@@ -77,8 +77,7 @@ const fx = {
 const gui = createBenchPanel('Particles');
 particleControls(gui, {state, fx, depth, spray, applyEnvironment});
 
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); target.dispose(); target = makeTarget(); blit.material.map = target.texture; depth.uniforms.tFxDepth.value = target.depthTexture; viewport.set(target.width, target.height); }
-addEventListener('resize', resize);
+const unbindResize = bindResize(renderer, camera, () => { target.dispose(); target = makeTarget(); blit.material.map = target.texture; depth.uniforms.tFxDepth.value = target.depthTexture; viewport.set(target.width, target.height); });
 let previous = null, loopTimer = 0, lastUI = 0;
 renderer.setAnimationLoop(now => {
   const dt = previous === null ? 0 : Math.min((now - previous) / 1000, .05); previous = now; controls.update();
@@ -90,4 +89,5 @@ renderer.setAnimationLoop(now => {
   if (now - lastUI > 250) { lastUI = now; $('status').textContent = (assetBaseUrl ? 'Water spray: local sheets' : 'Water spray: generated soft disc') + `\npuffs ${puffs.active + prefabs.reduce((n, p) => n + p.active, 0)} · chips ${chips.active} · fragments ${fragments.active} · mist ${spray.active.mist} · droplets ${spray.active.droplets}`; }
 });
 document.body.dataset.ready = 'true';
+onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); puffs.dispose(); prefabs.forEach(prefab => prefab.dispose()); chips.dispose(); fragments.dispose(); fragmentMaterial.dispose(); fragmentGeometry.dispose(); spray.dispose(); target.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });
 window.particlesBench = {scene, fxScene, spray, puffs, chips, fragments, prefabs, renderer, camera};

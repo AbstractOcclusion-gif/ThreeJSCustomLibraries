@@ -132,7 +132,7 @@ export class Boat {
     this.helmSeat = new THREE.Vector3().fromArray(helm.seat);
     this.tillerGrip = new THREE.Group(); this.tillerGrip.name = 'Tiller grip anchor';
     this.tillerGrip.position.fromArray(helm.grip).sub(pivot); this.outboard.add(this.tillerGrip);
-    this.maxSteer = helm.maxSteerDeg * Math.PI / 180;
+    this.maxSteer = THREE.MathUtils.degToRad(helm.maxSteerDeg);
   }
   // Frame start: pick up the finished readback.
   collectSamples() { if (this.ready) this.buoyancy.probes.collect(); }

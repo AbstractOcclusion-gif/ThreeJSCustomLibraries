@@ -7,6 +7,7 @@ import {createLightning} from './lightning.js';
 import {createCloudShadows} from './cloud-shadows.js';
 import {resolveVisualConfig} from './settings.js';
 import {createEnvironment,setEnvironmentWind} from '../../core/environment.js';
+import {assertFrameTime} from '../../core/validate.js';
 export {SKY_FIELDS,APPEARANCE_FIELDS,PRECIPITATION_FIELDS,resolveVisualConfig} from './settings.js';
 
 export {DYNAMIC_SKY_DEFAULTS,CLOUD_QUALITY};
@@ -90,7 +91,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    scene.fog=look.fog?fogObject:saved.fog;dynamic.key=null;return view;
   },
   update(dt){
-   if(disposed)return;if(!Number.isFinite(dt)||dt<0)throw Error('Visual weather dt must be finite and non-negative');dt=system.paused?0:dt;
+   if(disposed)return;assertFrameTime(dt,'Visual weather');dt=system.paused?0:dt;
    const w=system.weather,d=system.day;camera.getWorldPosition(worldPosition);sunDir.copy(d.sunDir);nightColor.set(d.settings.nightColor);sunTint.setRGB(d.sunTint.r,d.sunTint.g,d.sunTint.b);
    bridge.s.auto=d.settings.auto;bridge.s.hour=d.hour;bridge.daylight=d.daylight;bridge.moonDir.copy(d.moonDir);bridge.moonPhase=d.moonPhase;
    uniforms.uNightBlend.value=d.night;uniforms.uDaylight.value=d.daylight;uniforms.uSkySunDir.value.copy(sunDir);uniforms.uSky.value=d.daylight<.05?3:w.sunlight<.3?2:0;

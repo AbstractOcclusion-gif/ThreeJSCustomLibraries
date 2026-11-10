@@ -9,6 +9,11 @@ export const LIGHTING_DEFAULTS = Object.freeze({
   sunColor: 0xfff1dc, hemiSky: 0xb8cfe6, hemiGround: 0x4a4636, fogColor: 0xc9d6d4, fogNear: 450, fogFar: 1600,
 });
 
+// Shared by every default (lighting hook, environment, sky, stage, spray): the direction toward the sun and the sky
+// shader's clear-noon sun colour (linear RGB).
+export const DEFAULT_SUN_DIRECTION = Object.freeze([0.3, 0.8, 0.5]);
+export const CLEAR_NOON_SUN = Object.freeze([1, 0.96, 0.9]);
+
 export const LIGHT_GLSL = /* glsl */`
 uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uHemiSky; uniform vec3 uHemiGround;
 uniform vec3 uFogColor; uniform vec2 uFogRange;
@@ -34,7 +39,7 @@ float valueNoise(vec3 p) {
 export function createLightingUniforms(options = {}) {
   const o = {...LIGHTING_DEFAULTS, ...options};
   return {
-    uSunDir: {value: new THREE.Vector3(0.3, 0.8, 0.5).normalize()},
+    uSunDir: {value: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize()},
     uSunColor: {value: new THREE.Color(o.sunColor)},
     uHemiSky: {value: new THREE.Color(o.hemiSky)},
     uHemiGround: {value: new THREE.Color(o.hemiGround)},

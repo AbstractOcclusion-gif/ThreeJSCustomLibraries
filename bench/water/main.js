@@ -3,10 +3,12 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createChannel, createChannelSurface, createRipples, createFlowBake, skyFromWeather} from '../../src/water/index.js';
 import {createSurfaceWeather, createWeatherSurfaceMaterial} from '../../src/surface/index.js';
-import {benchRenderer, createBenchWeather, mountWeatherControls} from '../shared.js';
+import {benchRenderer, bindResize} from '../kit/page.js';
+import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {channelControls, inlandOpticsDefaults} from './controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
+import {aimRay} from '../kit/input.js';
 
 const $ = id => document.getElementById(id);
 const renderer = benchRenderer();
@@ -83,8 +85,8 @@ const banks = channelControls(gui, {settings: P, bankWeather, rebuild, toggleUnd
 });
 
 // Pointer interaction on the water surface.
-const canvas = renderer.domElement, pointer = new THREE.Vector2(), ray = new THREE.Raycaster(); let lastEdit = 0;
-function pick(e) { const b = canvas.getBoundingClientRect(); pointer.set((e.clientX - b.left) / b.width * 2 - 1, 1 - (e.clientY - b.top) / b.height * 2); ray.setFromCamera(pointer, camera); return ray.intersectObject(water.surface)[0]?.point; }
+const canvas = renderer.domElement, ray = new THREE.Raycaster(); let lastEdit = 0;
+function pick(e) { aimRay(ray, e, canvas, camera); return ray.intersectObject(water.surface)[0]?.point; }
 const disturb = (p, k = 1) => { const a = P.interact.rippleStrength * k; if (a > 0) ripples.splash(p.x, p.z, a); };
 const rippleGesture = bindRippleGesture(canvas, controls, e => {
   if (diving || P.interact.mode === 'rock' || P.interact.rippleStrength <= 0) return;
@@ -100,8 +102,7 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('pointermove', e => { if (dragged < 0 || P.interact.mode !== 'rock' || !canvas.hasPointerCapture(e.pointerId) || e.timeStamp - lastEdit < 60) return; const p = pick(e); if (p) moveRock(dragged, p); lastEdit = e.timeStamp; });
 canvas.addEventListener('lostpointercapture', () => { dragged = -1; });
 
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
-addEventListener('resize', resize);
+const unbindResize = bindResize(renderer, camera);
 let last = null, lastUI = 0;
 renderer.setAnimationLoop(now => {
   if (document.hidden) { last = null; return; }

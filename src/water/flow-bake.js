@@ -1,8 +1,8 @@
-import {DataTexture, LinearFilter, RGBAFormat, Vector4} from 'three';
+import {DataTexture, LinearFilter, MathUtils, RGBAFormat, Vector4} from 'three';
 
 // Reduced browser adaptation of WebGPUWater's River Fluid pressure projection.
 // Face fluxes enforce solid walls and leave the first and last cross sections open.
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const clamp = MathUtils.clamp;
 
 // Steady flow field baked from a channel (sectionAt) and rock obstacles [x, z, radius, _]. origin = [left, bottom] (m),
 // size = [width, height] cells, cell (m). rgb = velocity (0.5 centred, ±10 m/s), b = shear foam, a = wet.

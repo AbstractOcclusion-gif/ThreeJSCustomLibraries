@@ -1,12 +1,14 @@
 import {createOceanSheets, SOFT_DISC} from './ocean-sheets.js';
 import {createOceanSprites} from './ocean-sprites.js';
 import {createOceanSplash} from './ocean-splash.js';
+import {CLEAR_NOON_SUN, DEFAULT_SUN_DIRECTION} from '../../core/lighting.js';
+import {assertFrameTime} from '../../core/validate.js';
 
 // Airborne water effects (mist sprites + ballistic droplets). The caller schedules the target scene after its composite.
 // assets: {assetBaseUrl, sheets, dropletUrl, loadTexture} — all optional; without them the generated soft disc is used.
 // lighting: {uniforms: {uSunCol, uFxAmbient}, direction, ambient} - optional; without it the spray owns a clear-noon set
 // that setEnvironment() (core/environment.js contract) keeps in step with the scene light.
-const SPRAY_SUN = [1, .96, .9], SPRAY_AMBIENT = [.35, .45, .55], SPRAY_SUN_DIRECTION = [.3, .8, .5];
+const SPRAY_AMBIENT = [.35, .45, .55];
 export function createWaterSpray({
  THREE, scene, renderer, depth, surface, lighting, onDeposit = null, assets = {},
 }) {
@@ -16,8 +18,8 @@ export function createWaterSpray({
  const ownsLighting = !lighting;
  if (ownsLighting) {
   const ambient = new THREE.Color(...SPRAY_AMBIENT);
-  lighting = {uniforms: {uSunCol: {value: new THREE.Color(...SPRAY_SUN)}, uFxAmbient: {value: ambient}},
-   direction: new THREE.Vector3(...SPRAY_SUN_DIRECTION).normalize(), ambient};
+  lighting = {uniforms: {uSunCol: {value: new THREE.Color(...CLEAR_NOON_SUN)}, uFxAmbient: {value: ambient}},
+   direction: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize(), ambient};
  }
  const sheets = createOceanSheets({THREE, assetBaseUrl: assets.assetBaseUrl, sheets: assets.sheets, loadTexture: assets.loadTexture});
  const mistSheet = sheets.SHEETS['mist (8x8)'] ? 'mist (8x8)' : SOFT_DISC;
@@ -49,13 +51,13 @@ export function createWaterSpray({
   // Follow a shared environment. Only applies to the spray's own lighting: a host that passed `lighting` drives it itself.
   setEnvironment(environment) {
    if (disposed || !ownsLighting || !environment) return;
-   lighting.uniforms.uSunCol.value.setRGB(...SPRAY_SUN).multiply(environment.light);
+   lighting.uniforms.uSunCol.value.setRGB(...CLEAR_NOON_SUN).multiply(environment.light);
    lighting.uniforms.uFxAmbient.value.setRGB(...SPRAY_AMBIENT).multiply(environment.light);
    lighting.direction.copy(environment.sun.direction);
   },
   update(dt, simWindow = null) {
    if (disposed) return;
-   if (!Number.isFinite(dt) || dt < 0) throw Error('Water spray dt must be finite and non-negative');
+   assertFrameTime(dt, 'Water spray');
    depth.update();
    mist.update(dt);
    splash.updateSplash(dt);

@@ -8,15 +8,13 @@ import {createSurfaceWeather, createTrackMask, createWeatherSurfaceMaterial} fro
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
 import '../bench.css';
 import '../ui-demo.js';
+import {detectAssets} from '../kit/assets.js';
+import {bindResize} from '../kit/page.js';
+import {aimRay} from '../kit/input.js';
 
 const $ = id => document.getElementById(id), errors = [], events = [];
 function showError(error) { errors.push(String(error)); $('error').hidden = false; $('error').textContent = String(error); console.error(error); }
 
-// Optional licensed textures live in private-assets/weather/ (served at /weather/). Probe once; fall back to the procedural sky.
-async function detectAssets() {
-  try { const r = await fetch(import.meta.env.BASE_URL + 'weather/cirrus.png', {method: 'HEAD'}); return r.ok && (r.headers.get('content-type') || '').startsWith('image') ? import.meta.env.BASE_URL + 'weather/' : undefined; }
-  catch { return undefined; }
-}
 
 const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
@@ -44,7 +42,9 @@ const system = createWeatherSystem({
   onEvent: event => { events.unshift(event); events.length = Math.min(events.length, 8); $('events').textContent = events.map(e => JSON.stringify(e)).join('\n'); },
 });
 
-const privateBase = await detectAssets();
+// Optional licensed textures live in private-assets/weather/ (served at /weather/). Probe once; fall back to the bundled set.
+const weatherUrl = import.meta.env.BASE_URL + 'weather/';
+const privateBase = await detectAssets(weatherUrl + 'cirrus.png', weatherUrl);
 const assetBaseUrl = privateBase ?? 'bundled';
 const raycaster = new THREE.Raycaster();
 const down = new THREE.Vector3(0, -1, 0), rayOrigin = new THREE.Vector3();
@@ -104,13 +104,11 @@ function strikeAt(x, z, objects) {
 }
 $('strike-block').onclick = () => strikeAt(0, -12, [blocks[3]]);
 $('strike-ground').onclick = () => strikeAt(12, 18, [terrain]);
-const canvas = renderer.domElement, trackEvents = new AbortController(), trackPointer = new THREE.Vector2();
+const canvas = renderer.domElement, trackEvents = new AbortController();
 let lastTrackPoint;
 function paintTrack(event) {
   if (!$('paint-tracks').checked || !(event.buttons & 1)) { lastTrackPoint = undefined; return; }
-  const rect = canvas.getBoundingClientRect();
-  trackPointer.set((event.clientX - rect.left) * 2 / rect.width - 1, 1 - (event.clientY - rect.top) * 2 / rect.height);
-  raycaster.setFromCamera(trackPointer, camera);
+  aimRay(raycaster, event, canvas, camera);
   const hit = raycaster.intersectObject(terrain)[0]?.point;
   if (hit) tracks.stamp(lastTrackPoint ?? hit, hit, .65);
   lastTrackPoint = hit;
@@ -185,8 +183,7 @@ $('preset').onchange = async () => { const path = $('preset').value; if (!path) 
 $('save').onclick = () => downloadJson('weather-preset.json', devPanel.getPreset());
 $('load').onchange = async () => { try { const file = $('load').files[0]; if (file) devPanel.loadPreset(await readJsonFile(file)); } catch (error) { showError(error); } finally { $('load').value = ''; } };
 
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
-addEventListener('resize', resize);
+const unbindResize = bindResize(renderer, camera);
 let last = null, lastUI = 0;
 renderer.setAnimationLoop(now => {
   if (document.hidden) { last = null; return; }
@@ -209,5 +206,5 @@ renderer.setAnimationLoop(now => {
     syncControls(); if ($('developer').open) devPanel.refresh(); lastUI = now;
   }
 });
-addEventListener('pagehide', () => { renderer.setAnimationLoop(null); removeEventListener('resize', resize); trackEvents.abort(); devPanel.dispose(); view.dispose(); controls.dispose(); geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); tracks.dispose(); soilMap.dispose(); renderer.dispose(); }, {once: true});
+addEventListener('pagehide', () => { renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort(); devPanel.dispose(); view.dispose(); controls.dispose(); geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); tracks.dispose(); soilMap.dispose(); renderer.dispose(); }, {once: true});
 window.weatherBench = {system, view, devPanel, renderer, scene, camera, events, errors};

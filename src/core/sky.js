@@ -12,6 +12,7 @@
 // its HDR's four weather endpoints, day tint, env rotation and procedural night (off: the pond's panorama with its sky mask + veil);
 // SKY_HOST_UNIFORMS the host already declares uSunCol / uAmb / uSky (the pond's GLSL_COMMON).
 import * as THREE from 'three';
+import {CLEAR_NOON_SUN} from './lighting.js';
 
 const HDR_MAX_RADIANCE = 24.0;   // clamps HDR fireflies in reflections (both pages)
 export const SKY_GLSL = /* glsl */`
@@ -225,7 +226,7 @@ export function skyDefines({ dynamic = false, celestial = false, water = false, 
 // sunDir: the page's live sun direction. uSkyMode is JS-side state for the ocean's GUI / presets (0 procedural, 1 hdr, 2 dynamic);
 // the shader reads uSky / uSkyDyn, which the page derives from it.
 export function createSkyUniforms(sunDir) {
-  return { uSunDir: { value: sunDir }, uSkySun: { value: sunDir }, uSkySunDir: { value: sunDir.clone() }, uSunCol: { value: new THREE.Color(1, 0.96, 0.9) }, uAmb: { value: new THREE.Color(0.3, 0.3, 0.3) },
+  return { uSunDir: { value: sunDir }, uSkySun: { value: sunDir }, uSkySunDir: { value: sunDir.clone() }, uSunCol: { value: new THREE.Color(...CLEAR_NOON_SUN) }, uAmb: { value: new THREE.Color(0.3, 0.3, 0.3) },
     uSkyMode: { value: 0 }, uSky: { value: 0 }, uSkyDyn: { value: 0 }, uDaylight: { value: 1 }, tEnv: { value: null }, tEnvB: { value: null },
     tDynamicSky: { value: null }, tDynamicSkyPrev: { value: null }, uDynamicSkyBlend: { value: 1 },
     tMoon: { value: null }, tStars: { value: null }, tGalaxy: { value: null }, uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoonOn: { value: 1 }, uMoonPhase: { value: 0.5 }, uMoonRadius: { value: 0.026 },

@@ -6,8 +6,10 @@ import {createBenchPanel} from '../panel.js';
 import {createBoundaries, validateLayout, layout, makeRun, distance} from '../../src/boundaries/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
-import {benchRenderer, stageControls} from '../shared.js';
+import {benchRenderer, onLeave, bindResize} from '../kit/page.js';
+import {stageControls} from '../kit/controls.js';
 import '../bench.css';
+import {aimRay} from '../kit/input.js';
 
 const $ = id => document.getElementById(id), LIMIT = 40;
 const renderer = benchRenderer(); renderer.shadowMap.enabled = true;
@@ -53,8 +55,7 @@ const ray = new T.Raycaster(), ground = new T.Plane(new T.Vector3(0, 1, 0)); let
 renderer.domElement.addEventListener('pointerdown', e => { down = {x: e.clientX, y: e.clientY, id: e.pointerId}; });
 renderer.domElement.addEventListener('pointerup', e => {
   if (!down || e.pointerId !== down.id || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8 || e.button !== 0) { down = null; return; } down = null;
-  const r = renderer.domElement.getBoundingClientRect();
-  ray.setFromCamera(new T.Vector2((e.clientX - r.left) / r.width * 2 - 1, 1 - (e.clientY - r.top) / r.height * 2), camera);
+  aimRay(ray, e, renderer.domElement, camera);
   const hit = ray.ray.intersectPlane(ground, new T.Vector3()); if (!hit || Math.abs(hit.x) > LIMIT || Math.abs(hit.z) > LIMIT) return;
   const point = [Math.round(hit.x * 2) / 2, Math.round(hit.z * 2) / 2];
   if (points.length && distance(points.at(-1), point) < 1) return refresh('Place the next point at least 1 m away.');
@@ -64,8 +65,7 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 actions.sample();
 
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
-addEventListener('resize', resize);
+const unbindResize = bindResize(renderer, camera);
 let last = null, lastUI = 0;
 renderer.setAnimationLoop(now => {
   if (document.hidden) { last = null; return; }
@@ -75,4 +75,5 @@ renderer.setAnimationLoop(now => {
   if (now - lastUI > 250) { lastUI = now; $('status').textContent = `${message}\n${runs.length} runs · ${boundaries.hedges.count} hedge bushes`; }
 });
 document.body.dataset.ready = 'true';
+onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); boundaries.dispose(); stage.dispose(); markerMaterial.dispose(); markerGeometry.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });
 window.boundariesBench = {boundaries, get runs() { return runs; }, change, actions, scene, camera, renderer};

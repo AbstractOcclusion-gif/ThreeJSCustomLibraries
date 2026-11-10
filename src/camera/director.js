@@ -1,4 +1,5 @@
-import {PerspectiveCamera,Vector3,Quaternion} from 'three';
+import {PerspectiveCamera,Vector3,Quaternion,MathUtils} from 'three';
+const MIN_TIME_SCALE=.02;   // slowest slow motion: the simulation never fully stops
 // Owns the output camera and shot timing. Never advances a host simulation.
 export function createCameraDirector(camera,{timeTransition=.35}={}){
  const rigs=new Map(),from={position:new Vector3(),quaternion:new Quaternion(),fov:camera.fov};
@@ -8,14 +9,14 @@ export function createCameraDirector(camera,{timeTransition=.35}={}){
  return{
   camera,register(id,rig){rigs.set(id,rig);if(selected===null)selected=id;return this;},
   select(id,{duration=.4}={}){if(!rigs.has(id))throw Error('Unknown camera: '+id);capture();selected=id;transition=Math.max(0,duration);elapsed=0;},
-  setSlow(scale=1){manualScale=Math.max(.02,Math.min(1,scale));},
-  bullet({duration=2,scale=.2,shot='orbit',fov=45}={}){if(bulletLeft<=0)capture();bulletLeft=Math.max(0,duration);bulletScale=Math.max(.02,Math.min(1,scale));bulletShot=rigs.has(shot)?shot:null;bulletFov=fov;elapsed=0;transition=.3;},
+  setSlow(scale=1){manualScale=MathUtils.clamp(scale,MIN_TIME_SCALE,1);},
+  bullet({duration=2,scale=.2,shot='orbit',fov=45}={}){if(bulletLeft<=0)capture();bulletLeft=Math.max(0,duration);bulletScale=MathUtils.clamp(scale,MIN_TIME_SCALE,1);bulletShot=rigs.has(shot)?shot:null;bulletFov=fov;elapsed=0;transition=.3;},
   setCollision(resolver){collision=resolver;},setCinematic(value){cinematic=!!value;},get cinematic(){return cinematic;},
-  shake({strength=.15,duration=.25}={}){shakeLeft=shakeDuration=Math.max(.01,duration);shakeStrength=Math.max(0,Math.min(1,strength));},
+  shake({strength=.15,duration=.25}={}){shakeLeft=shakeDuration=Math.max(.01,duration);shakeStrength=MathUtils.clamp(strength,0,1);},
   tick(dt){dt=Math.max(0,dt);const was=bulletLeft>0;bulletLeft=Math.max(0,bulletLeft-dt);if(was&&!bulletLeft){capture();elapsed=0;transition=.4;}const target=Math.min(manualScale,bulletLeft>0?bulletScale:1);
-   if(target!==scaleTarget){scaleFrom=currentScale;scaleTarget=target;scaleElapsed=0;}scaleElapsed+=dt;let t=timeTransition>0?Math.min(1,scaleElapsed/timeTransition):1;t=t*t*(3-2*t);currentScale=scaleFrom+(scaleTarget-scaleFrom)*t;return currentScale;},
+   if(target!==scaleTarget){scaleFrom=currentScale;scaleTarget=target;scaleElapsed=0;}scaleElapsed+=dt;const t=MathUtils.smoothstep(timeTransition>0?scaleElapsed/timeTransition:1,0,1);currentScale=scaleFrom+(scaleTarget-scaleFrom)*t;return currentScale;},
   update(dt,data){const id=bulletLeft>0&&bulletShot?bulletShot:selected,rig=rigs.get(id);if(!rig)return;
-   const pose=rig({dt,data,camera});if(!pose)return;elapsed+=Math.max(0,dt);let a=transition?Math.min(1,elapsed/transition):1;a=a*a*(3-2*a);
+   const pose=rig({dt,data,camera});if(!pose)return;elapsed+=Math.max(0,dt);const a=MathUtils.smoothstep(transition?elapsed/transition:1,0,1);
    camera.position.lerpVectors(from.position,pose.position,a);camera.quaternion.slerpQuaternions(from.quaternion,pose.quaternion,a);camera.fov=from.fov+((bulletLeft>0?bulletFov:pose.fov??camera.fov)-from.fov)*a;
    clock+=dt;if(shakeLeft>0){shakeLeft=Math.max(0,shakeLeft-dt);const strength=shakeStrength*shakeLeft/shakeDuration;camera.position.x+=Math.sin(clock*87)*strength;camera.position.y+=Math.sin(clock*113)*strength;}
    if(collision&&data?.target)collision(data.target,camera.position,camera.position,dt);
@@ -31,5 +32,5 @@ export function createOrbitRig({radius=12,height=5,speed=.35}={}){
 }
 export function createFollowRig({offset=[8,5,-10],lookAhead=[0,0,0],smoothing=5,fov=55}={}){
  const pose=new PerspectiveCamera(),desired=new Vector3(),look=new Vector3();let initialized=false;
- const rig=({dt,data})=>{desired.fromArray(offset).multiplyScalar(data.distance??1).add(data.target);if(!initialized)pose.position.copy(desired);else pose.position.lerp(desired,1-Math.exp(-dt*smoothing));look.copy(data.target).add(new Vector3(...lookAhead));pose.lookAt(look);pose.fov=fov;initialized=true;return pose;};rig.reset=()=>initialized=false;return rig;
+ const rig=({dt,data})=>{desired.fromArray(offset).multiplyScalar(data.distance??1).add(data.target);if(!initialized)pose.position.copy(desired);else pose.position.lerp(desired,1-Math.exp(-dt*smoothing));look.fromArray(lookAhead).add(data.target);pose.lookAt(look);pose.fov=fov;initialized=true;return pose;};rig.reset=()=>initialized=false;return rig;
 }

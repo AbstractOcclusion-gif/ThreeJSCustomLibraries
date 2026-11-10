@@ -174,7 +174,7 @@ export class DynamicSky {
     const w = weather.on, p = weather.cloudProfile;
     u.uCloudCoverage.value = w ? THREE.MathUtils.lerp(s.clearCoverage, s.overcastCoverage, p[0]) : s.coverage;
     if (w) { u.uCloudScale.value = s.scale * p[1]; u.uCloudThickness.value = s.thickness * p[2]; u.uCloudDetail.value = Math.min(0.8, s.detail * p[3]); u.uCirrusOpacity.value = s.cirrusOpacity * (s.clearCoverage * (weather.weights[weather.names?.indexOf('clear')??0]??0) + p[4]); }
-    const speed = w ? weather.wind : s.windSpeed, heading = (w ? windHeading : s.windHeading) * Math.PI / 180;
+    const speed = w ? weather.wind : s.windSpeed, heading = THREE.MathUtils.degToRad(w ? windHeading : s.windHeading);
     u.uCloudOffset.value.x += Math.cos(heading) * speed * dt; u.uCloudOffset.value.y += Math.sin(heading) * speed * dt;
     u.uCloudDetailOffset.value.x += Math.cos(heading) * speed * CLOUD_DRIFT.detail * dt; u.uCloudDetailOffset.value.y += Math.sin(heading) * speed * CLOUD_DRIFT.detail * dt;
     u.uCloudLift.value += speed * CLOUD_DRIFT.lift * dt;
@@ -182,7 +182,7 @@ export class DynamicSky {
     // the moon: its phase runs with the simulated days; its direction is the day's (day.js: own orbit or opposite the sun)
     // Moon phase belongs to the simulation clock, never to rendering.
     sky.uMoonDir.value.copy(day.moonDir);
-    sky.uMoonOn.value = s.moon ? 1 : 0; sky.uMoonPhase.value = day.moonPhase; sky.uMoonRadius.value = s.moonRadiusDeg * Math.PI / 180;
+    sky.uMoonOn.value = s.moon ? 1 : 0; sky.uMoonPhase.value = day.moonPhase; sky.uMoonRadius.value = THREE.MathUtils.degToRad(s.moonRadiusDeg);
     sky.uMoonIntensity.value = s.moonIntensity; sky.uMoonEarthshine.value = s.moonEarthshine;
     sky.uStarIntensity.value = s.starIntensity; sky.uStarReflection.value = 1; sky.uGalaxyIntensity.value = s.galaxyIntensity; sky.uNightIntensity.value = s.nightIntensity;
     sky.uStarsRotation.value = day.s.hour / 24 * Math.PI * 2;

@@ -8,9 +8,7 @@
 //   light            relative scene light for unlit things (sprites): white at clear noon, dim and tinted at dusk or night
 //   daylight, rain, snow   0..1
 import * as THREE from 'three';
-import {LIGHTING_DEFAULTS} from './lighting.js';
-
-const DEFAULT_SUN_DIRECTION = [0.3, 0.8, 0.5];
+import {LIGHTING_DEFAULTS, DEFAULT_SUN_DIRECTION} from './lighting.js';
 
 export function createEnvironment() {
   return {

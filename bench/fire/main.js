@@ -4,10 +4,11 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createFireSystem} from '../../src/fire/index.js';
 import {createParticlePrefab} from '../../src/particles/index.js';
-import {benchRenderer} from '../shared.js';
+import {benchRenderer, bindResize} from '../kit/page.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
-import {environmentControls} from '../particles/controls.js';
+import {environmentControls} from '../kit/controls.js';
 import '../bench.css';
+import {aimRay} from '../kit/input.js';
 
 const renderer = benchRenderer();
 renderer.shadowMap.enabled = true;
@@ -90,7 +91,6 @@ function applyWind() {
 environmentControls(gui, {state: wind, apply: applyWind});
 
 const ray = new T.Raycaster();
-const pointer = new T.Vector2();
 let down;
 renderer.domElement.addEventListener('pointerdown', e => { if (e.button === 0) down = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointercancel', () => { down = null; });
@@ -98,17 +98,11 @@ renderer.domElement.addEventListener('pointerup', e => {
   const start = down;
   down = null;
   if (!start || Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 5) return;
-  const rect = renderer.domElement.getBoundingClientRect();
-  pointer.set(2 * (e.clientX - rect.left) / rect.width - 1, 1 - 2 * (e.clientY - rect.top) / rect.height);
-  ray.setFromCamera(pointer, camera);
+  aimRay(ray, e, renderer.domElement, camera);
   const hit = ray.intersectObjects(pickables, false)[0];
   if (hit) crates[hit.object.userData.crate].fire.ignite();
 });
-window.addEventListener('resize', () => {
-  renderer.setSize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-});
+bindResize(renderer, camera);
 let last, lastStatus = '';
 renderer.setAnimationLoop(now => {
   const dt = last === undefined ? 0 : Math.min(0.05, (now - last) / 1000);

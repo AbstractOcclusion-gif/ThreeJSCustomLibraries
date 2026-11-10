@@ -3,7 +3,7 @@
 // No weather and no terrain: a project that has those drives the same environment object from them instead.
 import * as THREE from 'three';
 import {createEnvironment, setEnvironmentWind} from '../core/environment.js';
-import {createLighting, syncLighting, LIGHTING_DEFAULTS} from '../core/lighting.js';
+import {createLighting, syncLighting, LIGHTING_DEFAULTS, CLEAR_NOON_SUN} from '../core/lighting.js';
 import {createSkyDome, createSkyUniforms} from '../core/sky.js';
 
 export const STAGE_DEFAULTS = Object.freeze({
@@ -11,7 +11,6 @@ export const STAGE_DEFAULTS = Object.freeze({
   groundSize: 80, groundColor: 0x617a4b, skyRadius: 100, shadowMapSize: 1024, shadowExtent: 30,
 });
 const SUN_DISTANCE = 100;          // metres from the light target, so the shadow camera sees the whole stage
-const SKY_SUN = [1, .96, .9];      // the sky shader's clear-noon sun colour (core/sky.js)
 
 // sky / ground: false leaves that part out (the host has its own). shadows: the sun casts, the ground receives.
 export function createBasicStage({scene, sky = true, ground = true, shadows = false, ...options} = {}) {
@@ -41,7 +40,7 @@ export function createBasicStage({scene, sky = true, ground = true, shadows = fa
     environment.sun.color.copy(sun.color).multiplyScalar(sun.intensity);
     environment.ambient.sky.copy(hemi.color).multiplyScalar(hemi.intensity); environment.ambient.ground.copy(hemi.groundColor).multiplyScalar(hemi.intensity);
     environment.light.setScalar(level); environment.daylight = level;
-    if (skyUniforms) { skyUniforms.uSkySunDir.value.copy(direction); skyUniforms.uSunCol.value.setRGB(...SKY_SUN).multiplyScalar(level); skyUniforms.uDaylight.value = level; }
+    if (skyUniforms) { skyUniforms.uSkySunDir.value.copy(direction); skyUniforms.uSunCol.value.setRGB(...CLEAR_NOON_SUN).multiplyScalar(level); skyUniforms.uDaylight.value = level; }
     syncLighting(lighting.uniforms, {sun, hemi, fog: scene.fog});
   }
   const stage = {

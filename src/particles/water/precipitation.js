@@ -34,8 +34,8 @@ export function createPrecipitation({THREE,group,count=512,radius=24,height=26,f
  return{update(dt,source,second,third){
   if (disposed) return;
   const legacy=third!==undefined,position=legacy?third:second,daylight=legacy?second.daylight:source.daylight;
-  const angle=legacy?source.windHeading*Math.PI/180:0,windX=legacy?Math.cos(angle)*source.wind:source.wind.x,windZ=legacy?Math.sin(angle)*source.wind:source.wind.z;
-  for(const p of parts){const amount=Math.max(0,Math.min(1,p.snow?source.snow:source.rain)),u=p.uniforms;p.mesh.visible=amount>.001;p.geometry.instanceCount=Math.round(count*amount);if(!p.mesh.visible)continue;
+  const angle=legacy?THREE.MathUtils.degToRad(source.windHeading):0,windX=legacy?Math.cos(angle)*source.wind:source.wind.x,windZ=legacy?Math.sin(angle)*source.wind:source.wind.z;
+  for(const p of parts){const amount=THREE.MathUtils.clamp(p.snow?source.snow:source.rain,0,1),u=p.uniforms;p.mesh.visible=amount>.001;p.geometry.instanceCount=Math.round(count*amount);if(!p.mesh.visible)continue;
    u.uCenter.value.copy(position);u.uVelocity.value.set(windX*.3,p.snow?-1.5:-22,windZ*.3);u.uOffset.value.addScaledVector(u.uVelocity.value,dt);const o=u.uOffset.value;o.x%=radius*2;o.y%=height;o.z%=radius*2;u.uTime.value+=dt;
    u.uColor.value.setRGB(p.snow?.85:.55,p.snow?.9:.65,p.snow?1:.75).multiplyScalar(.08+.92*daylight);
   }

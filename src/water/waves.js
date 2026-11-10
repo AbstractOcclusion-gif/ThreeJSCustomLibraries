@@ -48,7 +48,7 @@ function validate(s) {
 // WaterWaveBank.Generate, world units = metres.
 function generate(s, WIND_U) {
   const count = s.waveCount, peak = Math.max(s.waveLengthMeters, MIN_WAVELENGTH), omegaPeak = Math.sqrt(GRAVITY * TWO_PI / peak);
-  const wind = s.windFromDegrees * Math.PI / 180, wx = Math.cos(wind), wz = Math.sin(wind);
+  const wind = THREE.MathUtils.degToRad(s.windFromDegrees), wx = Math.cos(wind), wz = Math.sin(wind);
   const logLow = Math.log(peak * BAND_LOW), logHigh = Math.log(peak * BAND_HIGH), rng = mulberry32(GENERATION_SEED);
   let sumAmp2 = 0;
   for (let i = 0; i < count; i++) {

@@ -4,12 +4,15 @@ import {createBenchPanel} from '../panel.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createFishFlock} from '../../src/flocking/index.js';
 import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
-import {benchRenderer, createBenchWeather, detectAssets, mountWeatherControls} from '../shared.js';
+import {benchRenderer, bindResize} from '../kit/page.js';
+import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
+import {detectAssets} from '../kit/assets.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {valueNoise} from '../../src/terrain/terrain-noise.js';
 import {sprayControls} from '../particles/controls.js';
 import '../bench.css';
+import {aimRay} from '../kit/input.js';
 
 const renderer = benchRenderer();
 const scene = new THREE.Scene();
@@ -217,24 +220,17 @@ function toggleUnderwater() {
   controls.enabled = !diving;
 }
 const canvas = renderer.domElement;
-const pointer = new THREE.Vector2();
 const ray = new THREE.Raycaster();
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), ripplePoint = new THREE.Vector3();
 const rippleGesture = bindRippleGesture(canvas, controls, event => {
   if (diving || freeze.progress >= 1) return;
-  const bounds = canvas.getBoundingClientRect();
-  pointer.set(2 * (event.clientX - bounds.left) / bounds.width - 1, 1 - 2 * (event.clientY - bounds.top) / bounds.height);
-  ray.setFromCamera(pointer, camera);
+  aimRay(ray, event, canvas, camera);
   if (!ray.ray.intersectPlane(plane, ripplePoint)) return;
   if (Math.hypot(ripplePoint.x / radiusX, ripplePoint.z / radiusZ) < 1) return ripplePoint;
 }, ({x, z}, strength) => {
   if (freeze.progress < 1) ripples.splash(x, z, strength);
 });
-window.addEventListener('resize', () => {
-  renderer.setSize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-});
+bindResize(renderer, camera);
 
 let last, time = 0, fallTime = 0, nextImpact = 0;
 renderer.setAnimationLoop(now => {

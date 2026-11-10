@@ -1,9 +1,10 @@
 // Generated foam tiles (no licensed textures in the lib). Both are tileable value-noise DataTextures.
 import * as THREE from 'three';
+import {hash2} from '../core/hash.js';
 
 function noise2(size, scale, seed, octaves = 4) {
   const out = new Float32Array(size * size);
-  const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453; return s - Math.floor(s); };
+  const hash = (x, y) => hash2(x, y, seed);
   let amplitude = 1, total = 0;
   for (let o = 0; o < octaves; o++) {
     const cells = scale * 2 ** o;

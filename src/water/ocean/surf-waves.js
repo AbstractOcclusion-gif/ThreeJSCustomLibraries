@@ -254,7 +254,7 @@ export function applySurf(u, s, swellHeight, windHeadingRad, shore) {
   u.uSurfWindDirXZ.value.set(Math.cos(windHeadingRad), Math.sin(windHeadingRad));
   u.uSurfFoamStrength.value = s.foamStrength; u.uSurfFoamFeather.value = s.foamFeather; u.uSurfFoamTileSize.value = s.foamTileSize; u.uSurfFoamColor.value.set(s.foamColor); u.uSurfFoamOpacity.value = s.foamOpacity;
   u.uSurfFoamCrestCap.value = s.foamCrestCap; u.uSurfFoamBoreGain.value = s.foamBoreGain; u.uSurfFoamTrailGain.value = s.foamTrailGain; u.uSurfFoamTrailLength.value = s.foamTrailLength;
-  u.uSurfSwashAmplitude.value = s.swashAmplitude; u.uSurfSwashMaxSlopeTan.value = Math.min(Math.tan(s.swashMaxSlopeDeg * Math.PI / 180), SWASH_MAX_SLOPE_TAN_CEILING); u.uWetDryTimeSeconds.value = s.dryTimeSeconds;
+  u.uSurfSwashAmplitude.value = s.swashAmplitude; u.uSurfSwashMaxSlopeTan.value = Math.min(Math.tan(THREE.MathUtils.degToRad(s.swashMaxSlopeDeg)), SWASH_MAX_SLOPE_TAN_CEILING); u.uWetDryTimeSeconds.value = s.dryTimeSeconds;
   u.uSurfSwashFoam.value = s.swashFoam; u.uSurfSwashFoamWidth.value = s.swashFoamWidth; u.uSurfSwashFoamDissolve.value = s.swashFoamDissolve;
   return wavelength;
 }

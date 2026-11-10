@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {JERLOV_NAMES, OCEAN_PRESETS, OCEAN_DEFAULTS, OCEAN_REFLECTION_MODES, SEA_STATE_DEFAULTS} from '../../src/water/index.js';
 import {coastControls} from '../terrain/controls.js';
-import {presetsFolder} from '../shared.js';
+import {presetsFolder} from '../kit/controls.js';
 import {trailControls} from './trail-controls.js';
 
 export function oceanControls(gui, {boatSettings, launchBoat, applyBoatSettings, trail, ocean, sheetBase, float, camera, controls, rippleGesture, motes, coast, weather, bundled}) {

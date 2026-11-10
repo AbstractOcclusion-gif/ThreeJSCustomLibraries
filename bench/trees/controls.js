@@ -1,5 +1,5 @@
 import {resolveProfile} from '../../src/trees/index.js';
-import {presetsFolder} from '../shared.js';
+import {presetsFolder} from '../kit/controls.js';
 
 // Ranges from the original Trees profile editor, shared by both canopy shapes and hedges.
 const ranges = {

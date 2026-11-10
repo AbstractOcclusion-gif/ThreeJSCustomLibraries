@@ -7,8 +7,8 @@ import {createCable, createThreeCableView} from '../../src/cable/index.js';
 import {createBoundaries, makeRun} from '../../src/boundaries/index.js';
 import {createThreeStructureView} from '../../src/destruction/three.js';
 import {createDemolition} from '../destruction/physics.js';
+import {createFixedStep} from '../../src/core/fixed-step.js';
 
-const STEP = 1 / 120, MAX_STEPS_PER_FRAME = 6;   // fixed physics step; a slow frame never replays more than this
 // Metres, relative to the camp.
 const RUNS = Object.freeze([['fence', [[-8, -6], [1, -8.5], [10, -6]]], ['hedge', [[-11, 3], [-11, -4]]]]);
 const ROPE = Object.freeze({posts: [[-8, 6], [-1.5, 8]], height: 2.1, slack: 1.12, postRadius: .09, postColor: 0x6b4f35});
@@ -31,7 +31,8 @@ export function createDemoStructures({scene, ground, camp, bridge: [bridgeX, bri
     return {kind: 'fixed', position: [x, y + ROPE.height, z], post};
   });
   const span = Math.hypot(...endpoints[0].position.map((value, i) => value - endpoints[1].position[i]));
-  let cable, cableView, cableState, cableTime = 0;
+  let cable, cableView, cableState;
+  const cableClock = createFixedStep(), bridgeClock = createFixedStep();
   function hangRope() {
     cableView?.dispose(); cable?.dispose();
     cable = createCable({world, endpoints: endpoints.map(({kind, position}) => ({kind, position})), length: span * ROPE.slack, preset: 'rope'});
@@ -46,7 +47,7 @@ export function createDemoStructures({scene, ground, camp, bridge: [bridgeX, bri
   const ballGeometry = new THREE.SphereGeometry(BRIDGE.ball.radius, 20, 12), ballMaterial = new THREE.MeshStandardMaterial({color: BRIDGE.ball.color, metalness: .45, roughness: .32});
   const projectile = [{mass: BRIDGE.ball.mass, radius: BRIDGE.ball.radius, position: new THREE.Vector3()}], piers = new THREE.Group(), balls = new Map();
   bridgeGroup.add(piers);
-  let demolition, bridgeView, targetId, bridgeTime = 0;
+  let demolition, bridgeView, targetId;
   function buildBridge() {
     bridgeView?.dispose(); demolition?.dispose();
     for (const mesh of balls.values()) bridgeGroup.remove(mesh);
@@ -58,7 +59,7 @@ export function createDemoStructures({scene, ground, camp, bridge: [bridgeX, bri
       const pier = new THREE.Mesh(pierGeometry, pierMaterial), height = demolition.deckY - .25;
       pier.scale.set(2.4, height, demolition.width + 3); pier.position.set(x, height / 2, 0); pier.castShadow = true; piers.add(pier);
     }
-    bridgeTime = 0;
+    bridgeClock.reset();
   }
   buildBridge();
 
@@ -78,14 +79,10 @@ export function createDemoStructures({scene, ground, camp, bridge: [bridgeX, bri
     update(dt, camera) {
       if (disposed) return;
       boundaries.update(dt);
-      cableTime += dt;
-      for (let steps = 0; cableTime >= STEP && steps < MAX_STEPS_PER_FRAME; steps++, cableTime -= STEP) { cable.beforeStep(STEP); world.step(STEP); cable.afterStep(STEP); }
-      cableTime %= STEP;
+      cableClock.advance(dt, step => { cable.beforeStep(step); world.step(step); cable.afterStep(step); });
       cableView.update(camera);
       if (demolition.shots > 0) {   // the standing bridge is at rest: no physics until the first shot
-        bridgeTime += dt;
-        for (let steps = 0; bridgeTime >= STEP && steps < MAX_STEPS_PER_FRAME; steps++, bridgeTime -= STEP) demolition.step(STEP);
-        bridgeTime %= STEP;
+        bridgeClock.advance(dt, step => demolition.step(step));
         bridgeView.update();
         for (const [body, mesh] of balls) mesh.position.copy(body.position);
       }

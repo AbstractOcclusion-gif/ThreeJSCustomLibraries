@@ -3,9 +3,11 @@ import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createThreeStructureView} from '../../src/destruction/three.js';
-import {benchRenderer} from '../shared.js';
+import {benchRenderer, bindResize} from '../kit/page.js';
 import {createDemolition} from './physics.js';
+import {createFixedStep} from '../../src/core/fixed-step.js';
 import '../bench.css';
+import {aimRay} from '../kit/input.js';
 
 const renderer = benchRenderer();
 renderer.shadowMap.enabled = true;
@@ -39,7 +41,8 @@ const ballMaterial = new T.MeshStandardMaterial({color: 0xffa54a, metalness: .45
 scene.add(supports);
 
 const balls = new Map();
-let run, view, targetId, accumulator = 0, previous = null;
+let run, view, targetId, previous = null;
+const clock = createFixedStep(), SLOW_MOTION_SCALE = .22;
 function rebuild() {
   view?.dispose();
   run?.dispose();
@@ -56,7 +59,7 @@ function rebuild() {
     support.castShadow = support.receiveShadow = true;
     supports.add(support);
   }
-  accumulator = 0;
+  clock.reset();
 }
 
 const state = {
@@ -83,7 +86,6 @@ destructionControls(gui, state);
 rebuild();
 
 const raycaster = new T.Raycaster();
-const pointer = new T.Vector2();
 let down;
 renderer.domElement.addEventListener('pointerdown', e => { if (e.button === 0) down = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointercancel', () => { down = null; });
@@ -91,27 +93,17 @@ renderer.domElement.addEventListener('pointerup', e => {
   const start = down;
   down = null;
   if (!start || Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 5) return;
-  const bounds = renderer.domElement.getBoundingClientRect();
-  pointer.set((e.clientX - bounds.left) / bounds.width * 2 - 1, 1 - (e.clientY - bounds.top) / bounds.height * 2);
-  raycaster.setFromCamera(pointer, camera);
+  aimRay(raycaster, e, renderer.domElement, camera);
   const hit = raycaster.intersectObjects(view.members.filter(mesh => mesh.visible), true)[0];
   if (hit) targetId = hit.object.parent.userData.id;
 });
 
-window.addEventListener('resize', () => {
-  renderer.setSize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-});
+bindResize(renderer, camera);
 renderer.setAnimationLoop(now => {
   const dt = previous === null ? 0 : Math.min(.05, (now - previous) / 1000);
   previous = now;
   if (document.hidden) return;
-  accumulator += dt * (state.slowMotion ? .22 : 1);
-  while (accumulator >= 1 / 120) {
-    run.step();
-    accumulator -= 1 / 120;
-  }
+  clock.advance(dt * (state.slowMotion ? SLOW_MOTION_SCALE : 1), step => run.step(step));
   const target = view.members[targetId];
   view.update({hover: target.visible ? target : null});
   for (const [body, mesh] of balls) mesh.position.copy(body.position);

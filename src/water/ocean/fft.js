@@ -419,7 +419,7 @@ export class OceanFft {
         }
       }
       const n = this.normalMat.uniforms;
-      n.uFoamDeltaTime.value = Math.min(Math.max(dt, 0), MAX_FOAM_DELTA_TIME); n.uFoamHistoryValid.value = this.foamHistoryValid ? 1 : 0;
+      n.uFoamDeltaTime.value = THREE.MathUtils.clamp(dt, 0, MAX_FOAM_DELTA_TIME); n.uFoamHistoryValid.value = this.foamHistoryValid ? 1 : 0;
       n.tFoamPrev.value = this.normal.read.texture; pass(this.normalMat, this.normal.write, c);
     }
     this.normal.swap(); this.h0Dirty = false; this.foamHistoryValid = true;

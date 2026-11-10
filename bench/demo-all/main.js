@@ -8,20 +8,22 @@ import {valueNoise} from '../../src/terrain/terrain-noise.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createChannelSurface, createFlowBake, createFreezeTexture, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
-import {benchRenderer, createBenchWeather, mountWeatherControls} from '../shared.js';
+import {benchRenderer, bindResize} from '../kit/page.js';
+import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
 import {createTerrainIce} from './ice.js';
 import {loadTerrainTextures, packTerrainLayers} from '../terrain/textures.js';
 import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from '../terrain/controls.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
-import {createCameraDirector, createOrbitRig} from '../../src/camera/director.js';
-import {createDemoLife} from '../demo-kit/life.js';
-import {createDemoStructures} from '../demo-kit/structures.js';
+import {createCameraShots} from '../kit/shots.js';
+import {createDemoLife} from '../kit/life.js';
+import {createDemoStructures} from '../kit/structures.js';
 import {grassControls} from '../vegetation/controls.js';
 import {sprayControls} from '../particles/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
+import {aimRay} from '../kit/input.js';
 
 const renderer = benchRenderer();
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
@@ -72,7 +74,7 @@ function tile(pixel, colorSpace = THREE.NoColorSpace) {
  return texture;
 }
 const layerColors = {grass: [99, 108, 62], rock: [118, 110, 100], snow: [204, 216, 219], mud: [108, 83, 62], forest: [64, 52, 39]};
-let layerArray, rockTexture, detail;
+let layerArray, rockTexture, detail, proceduralLayers = [];
 try {
  ({layerArray, rock: rockTexture, detail} = await loadTerrainTextures(renderer));
 } catch (error) {
@@ -84,6 +86,7 @@ try {
   const variation = .73 + h * .5 + .14 * grain + strata;
   return [...rgb.map(channel => channel * variation), h * 255];
  }, THREE.SRGBColorSpace)]));
+ proceduralLayers = Object.values(layers);
  layerArray = packTerrainLayers(layers);
  rockTexture = layers.rock;
  detail = tile((u, v) => {
@@ -175,13 +178,11 @@ let diving = false;
 const aboveWater = new THREE.Vector3();
 const diveX = -8, diveZ = 4;
 const diveTargetX = -4, diveTargetZ = 5;
-const pondRay = new THREE.Raycaster(), pointer = new THREE.Vector2();
+const pondRay = new THREE.Raycaster();
 const wetAt = (x, z) => (field.heightAt(x, z) ?? Infinity) < appearance.waterLevel.value;
 const rippleGesture = bindRippleGesture(renderer.domElement, controls, event => {
  if (diving || !pond.surface.visible || freeze.progress === 1) return;
- const rect = renderer.domElement.getBoundingClientRect();
- pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2);
- pondRay.setFromCamera(pointer, camera);
+ aimRay(pondRay, event, renderer.domElement, camera);
  const hit = pondRay.intersectObject(pond.surface)[0]?.point;
  return hit && wetAt(hit.x, hit.z) ? hit : undefined;
 }, ({x, z}, strength) => {
@@ -250,28 +251,18 @@ const life = await createDemoLife({scene, ground: groundAt, centre: [0, 0], envi
     surfaceHeight: () => appearance.waterLevel.value - FISH_DEPTH}});
 const structures = createDemoStructures({scene, ground: groundAt, camp: life.camp, bridge: [BRIDGE.x, BRIDGE.ground, BRIDGE.z, BRIDGE.yaw], environment, lighting: demoLighting});
 weather.view.sun.shadow.needsUpdate = true;
-// Camera shots: 'free' is the orbit controls; the others are director rigs circling a subject.
-const director = createCameraDirector(camera);
-const SHOTS = {
-  scene: {rig: createOrbitRig({radius: 50, height: 24, speed: .1}), target: new THREE.Vector3(0, 2, 0)},
-  camp: {rig: createOrbitRig({radius: 17, height: 7, speed: .22}), target: new THREE.Vector3(life.camp.x + 2, groundAt(life.camp.x, life.camp.z) + 1, life.camp.z)},
-  bridge: {rig: createOrbitRig({radius: 58, height: 12, speed: .15}), target: structures.bridgeCentre},
-};
-for (const [id, {rig}] of Object.entries(SHOTS)) director.register(id, rig);
-const shot = {id: 'free'};
-function selectShot(id) {
-  const directed = id !== 'free';
-  if (directed) director.select(id, {duration: 1.5});
-  else { controls.target.copy(SHOTS[director.selected].target); controls.update(); }
-  controls.enabled = !directed && !diving;
-}
+const shots = createCameraShots({camera, controls, canFree: () => !diving, shots: {
+  scene: {radius: 50, height: 24, speed: .1, target: new THREE.Vector3(0, 2, 0)},
+  camp: {radius: 17, height: 7, speed: .22, target: new THREE.Vector3(life.camp.x + 2, groundAt(life.camp.x, life.camp.z) + 1, life.camp.z)},
+  bridge: {radius: 58, height: 12, speed: .15, target: structures.bridgeCentre},
+}});
 demoActions.add(life, 'ignite').name('Light the camp fire');
 demoActions.add(life, 'resetFire').name('Reset the camp');
 demoActions.add(structures, 'cutRope').name('Cut the rope');
 demoActions.add(structures, 'hangRope').name('Hang a new rope');
 demoActions.add(structures, 'fireAtBridge').name('Fire at the bridge');
 demoActions.add(structures, 'buildBridge').name('Rebuild the bridge');
-demoActions.add(shot, 'id', ['free', ...Object.keys(SHOTS)]).name('Camera').onChange(selectShot);
+shots.addTo(demoActions);
 grassDensityControls(gui, {cover, defaults: defaultCover, stats: coverStats, rebuild: rebuildGrass});
 grassControls(gui, {settings: grassSettings, rebuild: rebuildGrass});
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
@@ -312,7 +303,7 @@ const {diveControl, diveHeight} = inlandWaterControls(waterControls, {
 function setDiving(enabled) {
  rippleGesture.cancel();
  diving = enabled;
- controls.enabled = !enabled && shot.id === 'free';
+ controls.enabled = !enabled && !shots.directed;
  if (enabled) aboveWater.copy(camera.position);
  else { camera.position.copy(aboveWater); controls.update(); }
  diveHeight.enable(enabled);
@@ -348,8 +339,7 @@ profiling.add({run() {
 }}, 'run').name('Run 5-second benchmark');
 profiling.close();
 
-function resize() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }
-addEventListener('resize', resize);
+const unbindResize = bindResize(renderer, camera);
 const frameRate = document.getElementById('frame-rate');
 let last, measuredSince, frames = 0;
 const lastSun = new THREE.Vector3(Infinity, Infinity, Infinity);
@@ -382,8 +372,7 @@ renderer.setAnimationLoop(now => {
  const dt = last === undefined ? 0 : Math.min(.05, (now - last) / 1000);
  last = now;
  if (diving) { /* the dive view places the camera below */ }
- else if (shot.id !== 'free') director.update(dt, {target: SHOTS[shot.id].target});
- else controls.update();
+ else if (!shots.update(dt)) controls.update();
  weather.system.update(dt);
  weather.view.update(dt);
  weatherUI.sync();
@@ -442,11 +431,11 @@ renderer.setAnimationLoop(now => {
  }
 });
 document.body.dataset.ready = 'true';
-window.allToolsDemo = {scene, camera, renderer, controls, weather, life, structures, shot, selectShot};
+window.allToolsDemo = {scene, camera, renderer, controls, weather, life, structures, shots};
 addEventListener('pagehide', event => {
  if (event.persisted) return;
  renderer.setAnimationLoop(null);
- removeEventListener('resize', resize);
+ unbindResize();
  weather.view.dispose();
  rippleGesture.dispose();
  controls.dispose();
@@ -467,6 +456,6 @@ addEventListener('pagehide', event => {
  meadow.grassGeometries.forEach(geometry => geometry.dispose());
  meadow.dispose();
  tracks.dispose();
- for (const resource of [...Object.values(layers), detail, groundMaterial, rockMaterial, plainRock, rockGeometry]) resource.dispose();
+ for (const resource of [...proceduralLayers, detail, groundMaterial, rockMaterial, plainRock, rockGeometry]) resource.dispose();
  renderer.dispose();
 }, {once: true});

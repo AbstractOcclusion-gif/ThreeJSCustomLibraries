@@ -1,4 +1,4 @@
-import {presetsFolder} from '../shared.js';
+import {presetsFolder} from '../kit/controls.js';
 import {POND_REFLECTION_DEFAULTS} from '../../src/water/surface.js';
 
 // Match createChannelSurface.render defaults for the settings both render modes use.

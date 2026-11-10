@@ -6,14 +6,18 @@ import {OceanCoastTerrain} from '../../src/terrain/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createParticleDepthBinding, createWaterSpray, Motes} from '../../src/particles/water/index.js';
 import {createOceanFloat} from './float.js';
-import {createDemoLife} from '../demo-kit/life.js';
-import {createDemoStructures} from '../demo-kit/structures.js';
-import {createCameraDirector, createOrbitRig} from '../../src/camera/director.js';
-import {benchRenderer, createBenchWeather, detectAssets, mountWeatherControls} from '../shared.js';
+import {createDemoLife} from '../kit/life.js';
+import {createDemoStructures} from '../kit/structures.js';
+import {createCameraShots} from '../kit/shots.js';
+import {createFixedStep} from '../../src/core/fixed-step.js';
+import {benchRenderer, bindResize} from '../kit/page.js';
+import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
+import {detectAssets} from '../kit/assets.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {oceanControls} from './controls.js';
 import {sprayControls} from '../particles/controls.js';
 import '../bench.css';
+import {aimRay} from '../kit/input.js';
 
 const $ = id => document.getElementById(id);
 const renderer = benchRenderer();
@@ -28,7 +32,7 @@ const sheetsUrl = new URL('library/ocean/textures/', aquariumAssets).href;
 const sheetBase = await detectAssets(sheetsUrl + 'foam_lace.png', sheetsUrl);
 const foamUrl = sheetBase ? sheetBase + 'foam_lace.png' : import.meta.env.BASE_URL + 'webaquarium-water/foam_lace.png';
 const laceTexture = await detectAssets(foamUrl, foamUrl)
-  ? await new THREE.TextureLoader().loadAsync(foamUrl).catch(() => undefined) : undefined;
+  ? await new THREE.TextureLoader().loadAsync(foamUrl).catch(error => { console.warn('Foam lace texture failed to load; the ocean uses its generated one.', error); }) : undefined;
 const ocean = createOceanSurface({renderer, sky: skyFromWeather(weather.view), caustics: {}, wake: {}, exclusion: true, laceTexture});
 const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);
@@ -48,21 +52,11 @@ const island = await createDemoLife({scene, ground: groundAt, centre: ISLAND_CEN
     counts: {roach: 24, rudd: 12, perch: 6}, size: 1, surfaceHeight: () => FISH_CEILING}});
 // The bridge stands in the shallows; its physics ground is the seabed there, so wreckage sinks.
 const structures = createDemoStructures({scene, ground: groundAt, camp: island.camp, bridge: [islandX - 78, -6, islandZ + 96], environment, lighting: terrainLighting});
-// Camera shots: 'free' is the orbit controls; the others are director rigs circling a subject.
-const director = createCameraDirector(camera);
-const SHOTS = {
-  island: {rig: createOrbitRig({radius: 135, height: 42, speed: .1}), target: new THREE.Vector3(ISLAND_CENTRE[0], 8, ISLAND_CENTRE[1])},
-  camp: {rig: createOrbitRig({radius: 19, height: 7, speed: .22}), target: new THREE.Vector3(island.camp.x + 2, groundAt(island.camp.x, island.camp.z) + 1, island.camp.z)},
-  bridge: {rig: createOrbitRig({radius: 62, height: 14, speed: .15}), target: structures.bridgeCentre},
-};
-for (const [id, {rig}] of Object.entries(SHOTS)) director.register(id, rig);
-const shot = {id: 'free'};
-function selectShot(id) {
-  const directed = id !== 'free';
-  if (directed) director.select(id, {duration: 1.5});
-  else { controls.target.copy(SHOTS[director.selected].target); controls.update(); }
-  controls.enabled = !directed;
-}
+const shots = createCameraShots({camera, controls, shots: {
+  island: {radius: 135, height: 42, speed: .1, target: new THREE.Vector3(ISLAND_CENTRE[0], 8, ISLAND_CENTRE[1])},
+  camp: {radius: 19, height: 7, speed: .22, target: new THREE.Vector3(island.camp.x + 2, groundAt(island.camp.x, island.camp.z) + 1, island.camp.z)},
+  bridge: {radius: 62, height: 14, speed: .15, target: structures.bridgeCentre},
+}});
 const probes = new SurfaceProbes(ocean.fft, 3, {wake: ocean.wake}), probeStep = 2;
 const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics});
 const postColor = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthBuffer: false});
@@ -83,7 +77,8 @@ const trail = new FoamTrail({renderer, scene: fxScene, surface: ocean.shoreBindi
   skyUniforms: {uSunCol: skyLight.uSunCol, uFxAmbient: skyLight.uAmb}, sunDir: skyLight.uSkySun.value,
   foamTexture: ocean.uniforms.tWhitecap.value});
 const boatSettings = {excludeHulls: true, wakeMode: 'footprint', drive: false, follow: true, ...BUOYANCY_DEFAULTS, ...BOAT_DEFAULTS};
-let boat, launching = false, disposed = false, boatAccumulator = 0, removeHullFootprint;
+let boat, launching = false, disposed = false, removeHullFootprint;
+const boatClock = createFixedStep({step: 1 / 60, maxSteps: 3});   // the boat's own rate; at most the 0.05 s a frame may carry
 const boatDelta = new THREE.Vector3(), boatFocus = new THREE.Vector3();
 function applyBoatSettings() {
  if (!boat?.ready) return;
@@ -119,8 +114,7 @@ function stepBoat(dt) {
  if (!boat?.ready) return;
  boat.collectSamples();
  boat.controller.stick.y = boatSettings.drive ? .75 : 0;
- boatAccumulator += dt;
- while (boatAccumulator >= 1 / 60) { boat.step(1 / 60); boatAccumulator -= 1 / 60; }
+ boatClock.advance(dt, step => boat.step(step));
  if (boatSettings.wakeMode === 'footprint') {
   removeHullFootprint ??= ocean.obstacles.add(boat.exclusionShell.geometry, boat.exclusionShell, () => boat.waterlineY);
  } else if (removeHullFootprint) { removeHullFootprint(); removeHullFootprint = undefined; }
@@ -131,13 +125,11 @@ function stepBoat(dt) {
  if (boatSettings.follow && !view.waterline) { camera.position.add(boatDelta); controls.target.add(boatDelta); }
 }
 const float = createOceanFloat(scene, ocean, spray.emitSplash);
-const ray = new THREE.Raycaster(), pointer = new THREE.Vector2(), impact = new THREE.Vector3();
+const ray = new THREE.Raycaster(), impact = new THREE.Vector3();
 const meanSea = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const rippleGesture = bindRippleGesture(renderer.domElement, controls, event => {
   if (view.waterline) return;
-  const bounds = renderer.domElement.getBoundingClientRect();
-  pointer.set(2 * (event.clientX - bounds.left) / bounds.width - 1, 1 - 2 * (event.clientY - bounds.top) / bounds.height);
-  ray.setFromCamera(pointer, camera);
+  aimRay(ray, event, renderer.domElement, camera);
   if (!ray.ray.intersectPlane(meanSea, impact)) return;
   const {center, halfSize} = ocean.wake;
   if (Math.abs(impact.x - center.x) >= halfSize || Math.abs(impact.z - center.y) >= halfSize) return;
@@ -152,7 +144,7 @@ islandActions.add(structures, 'cutRope').name('Cut the rope');
 islandActions.add(structures, 'hangRope').name('Hang a new rope');
 islandActions.add(structures, 'fireAtBridge').name('Fire at the bridge');
 islandActions.add(structures, 'buildBridge').name('Rebuild the bridge');
-islandActions.add(shot, 'id', ['free', ...Object.keys(SHOTS)]).name('Camera').onChange(selectShot);
+shots.addTo(islandActions);
 sprayControls(gui, {spray, depth: fxDepth}).close();
 const wf = mountWeatherControls(weather);
 const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanControls(gui, {
@@ -160,8 +152,7 @@ const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanControls(g
   bundled: import.meta.glob('../../presets/ocean/*.json'),
 });
 
-function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
-addEventListener('resize', resize);
+const unbindResize = bindResize(renderer, camera);
 let last = null, lastUI = 0, time = 0;
 renderer.setAnimationLoop(now => {
   if (document.hidden) { last = null; return; }
@@ -170,8 +161,7 @@ renderer.setAnimationLoop(now => {
   if (view.waterline) {
     camera.position.set(orbitPosition.x, view.eyeHeight, orbitPosition.z);
     camera.lookAt(controls.target.x, view.eyeHeight, controls.target.z);
-  } else if (shot.id !== 'free') director.update(dt, {target: SHOTS[shot.id].target});
-  else controls.update();
+  } else if (!shots.update(dt)) controls.update();
   weather.system.update(dt); weather.view.update(dt);
   const light = weather.view.uniforms;
   syncLighting(terrainLighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});   // island lit and fogged like the rest
@@ -235,12 +225,12 @@ Surface at camera ${a.valid ? a.height.toFixed(2) + ' m' : 'sampling…'}${float
   }
 });
 document.body.dataset.ready = 'true';
-window.oceanBench = {ocean, weather, scene, camera, renderer, probes, island, structures, controls, shot, selectShot};
+window.oceanBench = {ocean, weather, scene, camera, renderer, probes, island, structures, controls, shots};
 addEventListener('pagehide', event => {
   if (event.persisted) return;
   disposed = true;
   renderer.setAnimationLoop(null);
-  removeEventListener('resize', resize);
+  unbindResize();
   rippleGesture.dispose();
   probes.dispose();
   float.dispose();
