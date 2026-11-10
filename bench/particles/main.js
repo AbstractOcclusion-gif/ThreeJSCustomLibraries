@@ -5,7 +5,7 @@ import {createBenchPanel} from '../panel.js';
 import {createChips, createParticlePrefab, createPuffs, createParticleDepthBinding, createWaterSpray, OCEAN_SHEET_FILES} from '../../src/particles/index.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import {detectAssets} from '../kit/assets.js';
-import {onLeave, bindResize} from '../kit/page.js';
+import {onLeave, bindResize, startFrameLoop} from '../kit/page.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
@@ -78,9 +78,9 @@ const gui = createBenchPanel('Particles');
 particleControls(gui, {state, fx, depth, spray, applyEnvironment});
 
 const unbindResize = bindResize(renderer, camera, () => { target.dispose(); target = makeTarget(); blit.material.map = target.texture; depth.uniforms.tFxDepth.value = target.depthTexture; viewport.set(target.width, target.height); });
-let previous = null, loopTimer = 0, lastUI = 0;
-renderer.setAnimationLoop(now => {
-  const dt = previous === null ? 0 : Math.min((now - previous) / 1000, .05); previous = now; controls.update();
+let loopTimer = 0, lastUI = 0;
+startFrameLoop(renderer, (dt, now) => {
+  controls.update();
   if (state.sprayLoop) { loopTimer -= dt; if (loopTimer <= 0) { loopTimer = .35; fx.mist(); if (Math.random() < .5) fx.splash(); } }
   puffs.update(dt); prefabs.forEach(p => p.update(dt)); chips.update(dt); fragments.update(dt);
   renderer.setRenderTarget(target); renderer.render(scene, camera);

@@ -3,7 +3,7 @@ import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createThreeStructureView} from '../../src/destruction/three.js';
-import {benchRenderer, bindResize} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
 import {createDemolition} from './physics.js';
 import {createFixedStep} from '../../src/core/fixed-step.js';
 import '../bench.css';
@@ -41,7 +41,7 @@ const ballMaterial = new T.MeshStandardMaterial({color: 0xffa54a, metalness: .45
 scene.add(supports);
 
 const balls = new Map();
-let run, view, targetId, previous = null;
+let run, view, targetId;
 const clock = createFixedStep(), SLOW_MOTION_SCALE = .22;
 function rebuild() {
   view?.dispose();
@@ -99,10 +99,7 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 
 bindResize(renderer, camera);
-renderer.setAnimationLoop(now => {
-  const dt = previous === null ? 0 : Math.min(.05, (now - previous) / 1000);
-  previous = now;
-  if (document.hidden) return;
+startFrameLoop(renderer, dt => {
   clock.advance(dt * (state.slowMotion ? SLOW_MOTION_SCALE : 1), step => run.step(step));
   const target = view.members[targetId];
   view.update({hover: target.visible ? target : null});

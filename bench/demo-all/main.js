@@ -8,7 +8,7 @@ import {valueNoise} from '../../src/core/value-noise.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createChannelSurface, createFlowBake, createFreezeTexture, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
-import {benchRenderer, bindResize} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
@@ -341,15 +341,10 @@ profiling.close();
 
 const unbindResize = bindResize(renderer, camera);
 const frameRate = document.getElementById('frame-rate');
-let last, measuredSince, frames = 0;
+let previousNow, measuredSince, frames = 0;   // previousNow: raw frame time for the benchmark
 const lastSun = new THREE.Vector3(Infinity, Infinity, Infinity);
 let wasMoving = false;
-renderer.setAnimationLoop(now => {
- if (document.hidden) {
-  last = measuredSince = undefined; frames = 0;
-  if (benchmark) { benchmark = undefined; benchmarkResult.textContent = 'Benchmark canceled when the tab was hidden.'; }
-  return;
- }
+startFrameLoop(renderer, (dt, now) => {
  measuredSince ??= now;
  if (now - measuredSince >= 1000) {
   const frameTime = (now - measuredSince) / frames;
@@ -360,7 +355,7 @@ renderer.setAnimationLoop(now => {
  frames++;
  if (benchmark) {
   if (benchmark.start === undefined) benchmark.start = now;
-  else if (last !== undefined) benchmark.frames.push(now - last);
+  else if (previousNow !== undefined) benchmark.frames.push(now - previousNow);
   if (now - benchmark.start >= 5000) {
    const sorted = benchmark.frames.sort((a, b) => a - b);
    const p95 = sorted[Math.ceil(sorted.length * .95) - 1];
@@ -369,8 +364,7 @@ renderer.setAnimationLoop(now => {
    benchmark = undefined;
   }
  }
- const dt = last === undefined ? 0 : Math.min(.05, (now - last) / 1000);
- last = now;
+ previousNow = now;
  if (diving) { /* the dive view places the camera below */ }
  else if (!shots.update(dt)) controls.update();
  weather.system.update(dt);
@@ -429,7 +423,10 @@ renderer.setAnimationLoop(now => {
   try { renderer.render(sprayScene, camera); }
   finally { renderer.autoClear = autoClear; }
  }
-});
+}, {onHidden() {
+ previousNow = measuredSince = undefined; frames = 0;
+ if (benchmark) { benchmark = undefined; benchmarkResult.textContent = 'Benchmark canceled when the tab was hidden.'; }
+}});
 document.body.dataset.ready = 'true';
 window.allToolsDemo = {scene, camera, renderer, controls, weather, life, structures, shots};
 addEventListener('pagehide', event => {

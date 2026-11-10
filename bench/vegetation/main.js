@@ -8,7 +8,7 @@ import {LeavedTrees, TREE_PROFILE} from '../../src/trees/index.js';
 import {valueNoise} from '../../src/core/value-noise.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {hash2, seededRandom} from '../../src/core/hash.js';
-import {benchRenderer, onLeave, bindResize} from '../kit/page.js';
+import {benchRenderer, onLeave, bindResize, startFrameLoop} from '../kit/page.js';
 import {presetsFolder, stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {createRollingBodies} from './ball.js';
@@ -138,10 +138,8 @@ presetsFolder(gui, {bundled: import.meta.glob('../../presets/vegetation/*.json')
   }});
 
 const unbindResize = bindResize(renderer, camera);
-let last = null, lastUI = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = null; return; }
-  const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
+let lastUI = 0;
+startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   const environment = stage.environment; environment.wind.gust = P.plants.gust;
   trees.setEnvironment(environment); bushes.setEnvironment(environment);

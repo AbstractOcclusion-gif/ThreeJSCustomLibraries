@@ -4,7 +4,7 @@ import {createBenchPanel} from '../panel.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial} from '../../src/terrain/index.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize, onLeave} from '../kit/page.js';
+import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
@@ -63,10 +63,8 @@ for (const type of ['pointerdown', 'pointermove']) canvas.addEventListener(type,
 for (const type of ['pointerup', 'pointerleave', 'pointercancel']) canvas.addEventListener(type, () => { lastTrackPoint = undefined; }, {signal: trackEvents.signal});
 
 const unbindResize = bindResize(renderer, camera);
-let last = null, lastUI = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = null; return; }
-  const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
+let lastUI = 0;
+startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   surfaceWeather.update(dt, null);   // null: keeps the manual levels, still animates the rain streaks
   renderer.render(scene, camera);

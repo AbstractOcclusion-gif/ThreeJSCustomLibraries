@@ -6,7 +6,7 @@ import {createBenchPanel} from '../panel.js';
 import {createBoundaries, validateLayout, layout, makeRun, distance} from '../../src/boundaries/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
-import {benchRenderer, onLeave, bindResize} from '../kit/page.js';
+import {benchRenderer, onLeave, bindResize, startFrameLoop} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
@@ -66,10 +66,8 @@ renderer.domElement.addEventListener('pointerup', e => {
 actions.sample();
 
 const unbindResize = bindResize(renderer, camera);
-let last = null, lastUI = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = null; return; }
-  const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
+let lastUI = 0;
+startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   boundaries.update(dt); renderer.render(scene, camera);
   if (now - lastUI > 250) { lastUI = now; $('status').textContent = `${message}\n${runs.length} runs · ${boundaries.hedges.count} hedge bushes`; }

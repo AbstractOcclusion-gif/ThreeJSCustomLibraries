@@ -4,7 +4,7 @@ import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createCable, createThreeCableView} from '../../src/cable/index.js';
-import {benchRenderer, bindResize} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import {environmentControls} from '../kit/controls.js';
 import {onLeave} from '../kit/page.js';
@@ -21,7 +21,7 @@ const world = new C.World({gravity: new C.Vec3(0, -9.82, 0)}); world.solver.iter
 const clock = createFixedStep();
 const S = {preset: 'rope', span: 8, slack: 1.1, breakStrength: 1e6, segments: 16};
 const markers = [-1, 1].map(() => { const m = new T.Mesh(new T.SphereGeometry(.13), new T.MeshBasicMaterial({color: 0x66d6e5})); scene.add(m); return m; });
-let cable, view, state, previous = null, lastUI = 0;
+let cable, view, state, lastUI = 0;
 // Optional wind: off = the cable hangs still, as before.
 const wind = {environment: false, windSpeed: 10, windHeading: 90, gust: .5}, environment = createEnvironment();
 function applyWind() { setEnvironmentWind(environment, wind.windSpeed, wind.windHeading); environment.wind.gust = wind.gust; cable.setEnvironment(wind.environment ? environment : null); }
@@ -40,8 +40,7 @@ cableControls(gui, {settings: S, reset, cut: () => cable.breakAt(Math.floor(cabl
 environmentControls(gui, {state: wind, apply: applyWind});
 
 const unbindResize = bindResize(renderer, camera);
-renderer.setAnimationLoop(now => {
-  const dt = previous === null ? 0 : Math.min((now - previous) / 1000, .05); previous = now;
+startFrameLoop(renderer, (dt, now) => {
   clock.advance(dt, step => { cable.beforeStep(step); world.step(step); cable.afterStep(step); });
   controls.update(); view.update(camera); renderer.render(scene, camera);
   if (now - lastUI > 250) { lastUI = now; $('status').textContent = `${S.preset} · sections ${state.sections.length} · attached ends ${state.attachments.filter(Boolean).length} · peak tension ${Math.round(Math.max(0, ...cable.joints.map(j => j.tension ?? 0)))} N · ${view.vertexCount} indices`; }

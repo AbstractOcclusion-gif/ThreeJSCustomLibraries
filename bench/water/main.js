@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createChannel, createChannelSurface, createRipples, createFlowBake, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {channelControls, inlandOpticsDefaults} from './controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -103,10 +103,8 @@ canvas.addEventListener('pointermove', e => { if (dragged < 0 || P.interact.mode
 canvas.addEventListener('lostpointercapture', () => { dragged = -1; });
 
 const unbindResize = bindResize(renderer, camera);
-let last = null, lastUI = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = null; return; }
-  const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
+let lastUI = 0;
+startFrameLoop(renderer, (dt, now) => {
   flowTime += dt * P.water.speed; waveTime += dt * P.waves.speed;
   if (!diving) controls.update(); stage.update(camera);
   markers.visible = P.interact.markers;

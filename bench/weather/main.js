@@ -8,7 +8,7 @@ import {downloadJson, readJsonFile} from '../../src/core/presets.js';
 import '../bench.css';
 import '../ui-demo.js';
 import {detectAssets} from '../kit/assets.js';
-import {bindResize} from '../kit/page.js';
+import {bindResize, startFrameLoop} from '../kit/page.js';
 
 const $ = id => document.getElementById(id), errors = [], events = [];
 function showError(error) { errors.push(String(error)); $('error').hidden = false; $('error').textContent = String(error); console.error(error); }
@@ -157,10 +157,9 @@ $('save').onclick = () => downloadJson('weather-preset.json', devPanel.getPreset
 $('load').onchange = async () => { try { const file = $('load').files[0]; if (file) devPanel.loadPreset(await readJsonFile(file)); } catch (error) { showError(error); } finally { $('load').value = ''; } };
 
 const unbindResize = bindResize(renderer, camera);
-let last = null, lastUI = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = null; return; }
-  const dt = last === null ? 0 : Math.max(0, Math.min(.05, (now - last) / 1000)); last = now; controls.update(); system.update(dt);
+let lastUI = 0;
+startFrameLoop(renderer, (dt, now) => {
+  controls.update(); system.update(dt);
   wakeProbe.visible = $('fog-wake').checked;
   if (wakeProbe.visible) {
     if (!system.paused) wakeTime += dt;

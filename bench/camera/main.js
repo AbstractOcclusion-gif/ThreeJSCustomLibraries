@@ -6,7 +6,7 @@ import {createCameraCollision} from '../../src/camera/collision.js';
 import {createCameraPanel} from '../../src/camera/panel.js';
 import '../../src/camera/panel.css';
 import '../ui-demo.js';
-import {bindResize} from '../kit/page.js';
+import {bindResize, startFrameLoop} from '../kit/page.js';
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;document.body.append(renderer.domElement);
 const scene=new T.Scene();scene.background=new T.Color('#a7c3c9');scene.add(new T.HemisphereLight(0xffffff,0x617451,2));const sun=new T.DirectionalLight(0xffe6c2,2.5);sun.position.set(6,12,8);scene.add(sun);
 const camera=new T.PerspectiveCamera(55,innerWidth/innerHeight,.1,300);camera.position.set(12,8,-14);
@@ -24,7 +24,7 @@ replay.bind([subject]);
 const panel=createCameraPanel({director,replay,post,shots:['auto','side','behind','orbit','recorded'],floating:true,
  onReplay(){if(!replay.begin(camera))return;previous=director.selected;replayPose=replay.seek(0);director.reset();director.select('recorded',{duration:0});},
  onExit(){replay.end(camera);director.reset();director.select(previous,{duration:0});},onSeek:p=>replayPose=p});panel.root.open=true;
-const clock=new T.Clock();renderer.setAnimationLoop(()=>{const dt=Math.min(.05,clock.getDelta());if(document.hidden)return;
+startFrameLoop(renderer,dt=>{
  if(replay.active){replayPose=replay.update(dt*director.tick(dt));director.update(dt,{target:replayPose.target});}
  else{time+=dt*director.tick(dt);subject.position.set(Math.sin(time*.5)*8,1+Math.abs(Math.sin(time*1.3))*3,Math.cos(time*.5)*8);subject.rotation.y=time;target.copy(subject.position);director.update(dt,{target});for(const [id,rig]of Object.entries(recordRigs)){const pose=rig({dt,data:{target}}),out=recordCameras[id]??=camera.clone();out.copy(pose);clearance[id](target,pose.position,out.position,dt);out.position.y=Math.max(.4,out.position.y);out.lookAt(target);}replay.capture(time,camera,target,recordCameras);}
  scene.updateMatrixWorld(true);post.render(scene,camera,dt);panel.update();

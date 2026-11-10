@@ -10,7 +10,7 @@ import {createDemoLife} from '../kit/life.js';
 import {createDemoStructures} from '../kit/structures.js';
 import {createCameraShots} from '../kit/shots.js';
 import {createFixedStep} from '../../src/core/fixed-step.js';
-import {benchRenderer, bindResize} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {detectAssets} from '../kit/assets.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -153,10 +153,8 @@ const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanDemoContro
 });
 
 const unbindResize = bindResize(renderer, camera);
-let last = null, lastUI = 0, time = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = null; return; }
-  const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
+let lastUI = 0, time = 0;
+startFrameLoop(renderer, (dt, now) => {
   probes.collect();
   if (view.waterline) {
     camera.position.set(orbitPosition.x, view.eyeHeight, orbitPosition.z);

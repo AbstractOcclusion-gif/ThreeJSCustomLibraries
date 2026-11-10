@@ -4,7 +4,7 @@ import {createBenchPanel} from '../panel.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
@@ -217,11 +217,8 @@ const rippleGesture = bindRippleGesture(canvas, controls, event => {
 });
 bindResize(renderer, camera);
 
-let last, time = 0, fallTime = 0, nextImpact = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = undefined; return; }
-  const dt = last === undefined ? 0 : Math.min(0.05, (now - last) / 1000);
-  last = now;
+let time = 0, fallTime = 0, nextImpact = 0;
+startFrameLoop(renderer, (dt, now) => {
   time += dt;
   if (!diving) controls.update();
   stage.update(camera);

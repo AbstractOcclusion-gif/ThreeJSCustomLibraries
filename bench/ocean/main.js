@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createOceanSurface, createWaterlineComposite, proceduralSky, SurfaceProbes} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize, onLeave} from '../kit/page.js';
+import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {aimRay} from '../kit/input.js';
@@ -54,10 +54,8 @@ Object.assign(stageUI.state, {windSpeed: START_WIND, windHeading: s.heading});
 stageUI.folder.controllersRecursive().forEach(c => c.updateDisplay()); stageUI.apply();
 
 const unbindResize = bindResize(renderer, camera);
-let last = null, lastUI = 0, time = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = null; return; }
-  const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
+let lastUI = 0, time = 0;
+startFrameLoop(renderer, (dt, now) => {
   probes.collect();
   if (view.waterline) {
     camera.position.set(orbitPosition.x, view.eyeHeight, orbitPosition.z);

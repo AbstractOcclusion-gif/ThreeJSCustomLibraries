@@ -4,7 +4,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createFireSystem} from '../../src/fire/index.js';
 import {createParticlePrefab} from '../../src/particles/index.js';
-import {benchRenderer, bindResize} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import {environmentControls} from '../kit/controls.js';
 import '../bench.css';
@@ -103,10 +103,8 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (hit) crates[hit.object.userData.crate].fire.ignite();
 });
 bindResize(renderer, camera);
-let last, lastStatus = '';
-renderer.setAnimationLoop(now => {
-  const dt = last === undefined ? 0 : Math.min(0.05, (now - last) / 1000);
-  last = now;
+let lastStatus = '';
+startFrameLoop(renderer, (dt, now) => {
   system.update(dt);
   let burning = 0, burned = 0;
   for (const [index, crate] of crates.entries()) {

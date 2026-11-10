@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {BUNDLED_FISH_MODELS_URL, FISH_SPECIES, createFishFlock} from '../../src/flocking/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize, onLeave} from '../kit/page.js';
+import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import '../bench.css';
 
@@ -46,10 +46,8 @@ schoolFolder.add(boundsHelper, 'visible').name('show swim volume');
 await rebuild();
 
 const unbindResize = bindResize(renderer, camera);
-let last = null, lastUI = 0;
-renderer.setAnimationLoop(now => {
-  if (document.hidden) { last = null; return; }
-  const dt = last === null ? 0 : Math.min(.05, (now - last) / 1000); last = now;
+let lastUI = 0;
+startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   flock?.update(dt);
   renderer.render(scene, camera);
