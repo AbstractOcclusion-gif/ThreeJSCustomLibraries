@@ -1,4 +1,5 @@
 import * as T from 'three';
+const STRESS_COLOR=new T.Color(0xf25438);
 
 export function createThreeStructureView({system,scene}){
  const geometry=new T.BoxGeometry(1,1,1),roots=[],debris=[],materials=[],baseColors={chord:0x67b1bd,vertical:0x67b1bd,endpost:0xd6a15e,diagonal:0xc2ccd1,brace:0x65818e,floor:0x476673,bar:0x67b1bd};
@@ -17,7 +18,7 @@ export function createThreeStructureView({system,scene}){
  }
  let disposed=false;
  function update({hover=null}={}){if(disposed)return;
-  for(const m of system.members){const group=roots[m.id];group.position.copy(m.body.position);group.quaternion.copy(m.body.quaternion);group.userData.steel.color.copy(group.userData.baseColor).lerp(new T.Color(0xf25438),m.failed?1:Math.min(1,m.load)*.8);group.userData.steel.emissive.setHex(group===hover?0x664422:0);
+  for(const m of system.members){const group=roots[m.id];group.position.copy(m.body.position);group.quaternion.copy(m.body.quaternion);group.userData.steel.color.copy(group.userData.baseColor).lerp(STRESS_COLOR,m.failed?1:Math.min(1,m.load)*.8);group.userData.steel.emissive.setHex(group===hover?0x664422:0);
    if(m.fragments&&!group.userData.fractureDrawn){group.userData.fractureDrawn=true;group.visible=false;for(const f of m.fragments){const view=new T.Group();view.userData.body=f.body;steel(view,m,f.length,group.userData.steel);scene.add(view);debris.push(view);}}
   }
   for(const view of debris){view.position.copy(view.userData.body.position);view.quaternion.copy(view.userData.body.quaternion);}

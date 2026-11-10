@@ -61,5 +61,7 @@ function load(tool, push = true) {
 links.forEach(a => a.addEventListener('click', e => { e.preventDefault(); load(a.dataset.tool); }));
 document.getElementById('restart').onclick = () => current && load(current, false);
 const initial = new URLSearchParams(location.search).get('tool'); if (initial) load(initial, false);
+// Entries with data-scene open an app served from private-assets/ (never deployed): show them only when it answers.
+for (const a of links.filter(a => a.dataset.scene)) fetch(import.meta.env.BASE_URL + 'webaquarium/' + a.dataset.scene.split('?')[0], {method: 'HEAD'}).then(r => { if (!r.ok || !(r.headers.get('content-type') || '').includes('html')) a.remove(); }).catch(() => a.remove());
 </script>
 </body></html>

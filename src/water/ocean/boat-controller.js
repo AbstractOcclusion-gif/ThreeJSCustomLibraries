@@ -17,7 +17,7 @@ const moveTowards = (a, b, maxDelta) => Math.abs(b - a) <= maxDelta ? b : a + Ma
 
 export class BoatController {
   // body: RigidBody; sternOffset: local point the propeller pushes from; wetnessAt(i): sample of extra probe 0 (stern) / 1 (hull)
-  constructor(body, sternOffset, settings = {}) {
+  constructor(body, sternOffset, settings = {}, {input} = {}) {
     this.body = body; this.sternOffset = sternOffset.clone(); this.s = { ...BOAT_DEFAULTS, ...settings };
     this.rawThrottle = 0; this.rawSteer = 0; this.throttle = 0; this.steer = 0; this.inputEnabled = true;
     this.keys = new Set(); this.stick = new THREE.Vector2();
@@ -26,8 +26,9 @@ export class BoatController {
       if (e.type === 'keyup') this.keys.delete(k);
       else if (!e.target.closest?.('input, select, textarea, [contenteditable]')) this.keys.add(k); };
     this.onBlur = () => this.keys.clear();
-    addEventListener('keydown', this.onKey); addEventListener('keyup', this.onKey);
-    addEventListener('blur', this.onBlur);
+    // Keyboard input is optional and injected: pass {input: window} (or any EventTarget) to listen; none = drive via setAxes().
+    this.input = input ?? null;
+    if (this.input) { this.input.addEventListener('keydown', this.onKey); this.input.addEventListener('keyup', this.onKey); this.input.addEventListener('blur', this.onBlur); }
 
   }
   // Update(): poll input into the raw axes.
@@ -60,7 +61,7 @@ export class BoatController {
     const yawRate = body.angularVelocity.dot(up);
     body.addTorque(tmpL.copy(up).multiplyScalar(-yawRate * s.yawDamping * hullWetness));
   }
-  dispose() { removeEventListener('keydown', this.onKey); removeEventListener('keyup', this.onKey); removeEventListener('blur', this.onBlur); }
+  dispose() { if (!this.input) return; this.input.removeEventListener('keydown', this.onKey); this.input.removeEventListener('keyup', this.onKey); this.input.removeEventListener('blur', this.onBlur); this.input = null; }
 }
 // 1 while the point is submerged, easing to 0 as it rises depthScale metres clear of the surface (BoatController.Wetness).
 function wetness(pointY, sample, depthScale) {

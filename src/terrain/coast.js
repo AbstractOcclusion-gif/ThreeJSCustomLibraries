@@ -1,27 +1,27 @@
-// world/terrain.js -- the test island and sea floor: a heightfield (beach -> slope plunging to the abyss) on a 2 m grid around the
-// island, and a flat abyss plane under everything else. Shaded here (sun Lambert + sky/ground hemisphere, sand / rock / grass by
-// height and slope, hashed detail), with hooks for the underwater batch: depth darkening and caustics read the shared UNDER_U.
+// Test island and sea floor for the ocean: a heightfield (beach -> slope plunging to the abyss) on a 2 m grid around the island,
+// and a flat abyss plane under everything else. Shaded through the core `lighting` hook (shade() + applyFog()); sand / rock /
+// grass by height and slope, hashed detail; optional water bindings for shore depth and caustics.
 // Wet sand (port of WaterWetness.hlsl + the WaterTerrain.shader wetness block): ground touched by water darkens (albedo^2, the
 // porous-wet term), and gets a mirror-flat sheen; WHERE it is wet comes from the band above the live surface and the swash's wet line.
 import * as THREE from 'three';
+import {createLighting} from '../core/lighting.js';
+import {valueNoise} from './terrain-noise.js';
 
 export const TERRAIN_DEFAULTS = Object.freeze({ on: true, centerX: 0, centerZ: 220, peakHeight: 18, hillRadius: 70, beachRadius: 85, slopeEndRadius: 330, abyssDepth: 100, noiseAmp: 5, noiseScale: 55, seed: 7 });
 const ISLAND_EXTENT = 400, CELL = 2, ABYSS_EXTENT = 20000;   // island mesh half-size (m), grid cell (m), abyss plane half-size (m)
 // WaterTerrain.shader wetness defaults: _WetStrength 1, _WetBandHeight .25, _WetSwashStrength 1, _BeachWetDarken .85, _BeachWetSmoothness .85.
 export const WET_DEFAULTS = Object.freeze({ strength: 1, bandHeight: 0.25, swashStrength: 1, darken: 0.85, smoothness: 0.85 });
 
-// value-noise fbm (deterministic, seeded) for the heightfield
+// 5-octave fbm over the shared terrain value noise (terrain-noise.js), deterministic per seed
 function makeNoise(seed) {
-  const hash = (x, y) => { let h = Math.sin(x * 127.1 + y * 311.7 + seed * 73.3) * 43758.5453; return h - Math.floor(h); };
-  const smooth = t => t * t * (3 - 2 * t);
-  const value = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), fx = smooth(x - xi), fy = smooth(y - yi);
-    return THREE.MathUtils.lerp(THREE.MathUtils.lerp(hash(xi, yi), hash(xi + 1, yi), fx), THREE.MathUtils.lerp(hash(xi, yi + 1), hash(xi + 1, yi + 1), fx), fy) * 2 - 1; };
+  const value = valueNoise(seed);
   return (x, y) => { let a = 0, w = 0.5, f = 1; for (let o = 0; o < 5; o++) { a += value(x * f, y * f) * w; w *= 0.5; f *= 2.1; } return a; };
 }
 const smooth01 = (a, b, x) => { const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
 export class OceanCoastTerrain {
-  constructor({scene, settings, water, onHeightField} = {}) {
+  constructor({scene, settings, water, onHeightField, lighting = createLighting()} = {}) {
+    this.lighting = lighting;
     this.scene = scene;
     this.water = water;
     this.onHeightField = onHeightField;
@@ -57,7 +57,7 @@ export class OceanCoastTerrain {
     const n = Math.round(2 * ISLAND_EXTENT / CELL), geo = new THREE.PlaneGeometry(2 * ISLAND_EXTENT, 2 * ISLAND_EXTENT, n, n); geo.rotateX(-Math.PI / 2);
     const p = geo.attributes.position; for (let i = 0; i < p.count; i++) { const x = p.getX(i) + s.centerX, z = p.getZ(i) + s.centerZ; p.setX(i, x); p.setZ(i, z); p.setY(i, this.heightAt(x, z)); }
     geo.computeVertexNormals(); geo.computeBoundingSphere();
-    this.material = terrainMaterial(this.water, this.wetUniforms);
+    this.material = terrainMaterial(this.water, this.wetUniforms, this.lighting);
     this.island = new THREE.Mesh(geo, this.material); this.island.frustumCulled = true; this.island.castShadow = true; this.group.add(this.island);
     const abyss = new THREE.Mesh(new THREE.PlaneGeometry(2 * ABYSS_EXTENT, 2 * ABYSS_EXTENT, 1, 1).rotateX(-Math.PI / 2), this.material); abyss.position.y = -s.abyssDepth; abyss.frustumCulled = false; this.abyss = abyss; this.group.add(abyss);
     this.group.visible = s.on; this.bakeBed();
@@ -70,12 +70,13 @@ export class OceanCoastTerrain {
   }
   applySettings(settings) { const rebuild = ['centerX', 'centerZ', 'peakHeight', 'hillRadius', 'beachRadius', 'slopeEndRadius', 'abyssDepth', 'noiseAmp', 'noiseScale', 'seed'].some(k => k in settings && settings[k] !== this.s[k]);
     Object.assign(this.s, settings); if (rebuild) this.build(); else if ('on' in settings) this.bakeBed(); this.group.visible = this.s.on; }
-  update({sunDirection, sunColor, skyColor, groundColor}) {
-    const u = this.material.uniforms;
-    u.uSunDir.value.copy(sunDirection);
-    u.uSunCol.value.copy(sunColor);
-    u.uSkyCol.value.copy(skyColor);
-    u.uGroundCol.value.copy(groundColor);
+  // Lighting comes from the shared `lighting` uniforms (drive them with syncLighting or by hand); this stays for convenience.
+  update({sunDirection, sunColor, skyColor, groundColor} = {}) {
+    const u = this.lighting.uniforms;
+    if (sunDirection) u.uSunDir.value.copy(sunDirection);
+    if (sunColor) u.uSunColor.value.copy(sunColor);
+    if (skyColor) u.uHemiSky.value.copy(skyColor);
+    if (groundColor) u.uHemiGround.value.copy(groundColor);
   }
   applyWet(w) { const u = this.wetUniforms; u.uWetStrength.value = w.strength; u.uWetBandHeight.value = w.bandHeight; u.uWetSwashStrength.value = w.swashStrength; u.uWetDarken.value = w.darken; u.uWetSmoothness.value = w.smoothness; }
   dispose(all = true) { for (const m of [this.island, this.abyss]) if (m) { this.group.remove(m); m.geometry.dispose(); } if (this.material) this.material.dispose(); if (all) this.group.removeFromParent(); }
@@ -83,18 +84,13 @@ export class OceanCoastTerrain {
 
 // Shared underwater uniforms hook: depth darkening (downwelling) and caustics are filled in by the underwater batch; defaults = none.
 const createWetUniforms = () => ({ uWetStrength: { value: 1 }, uWetBandHeight: { value: 0.25 }, uWetSwashStrength: { value: 1 }, uWetDarken: { value: 0.85 }, uWetSmoothness: { value: 0.85 } });
-function terrainMaterial(water, wet) {
-  const light = {
-    uSunDir: {value: new THREE.Vector3(.4, .6, .3).normalize()},
-    uSunCol: {value: new THREE.Color(1, .95, .85)},
-    uSkyCol: {value: new THREE.Color(.6, .75, 1)},
-    uGroundCol: {value: new THREE.Color(.1, .12, .1)},
-  };
+function terrainMaterial(water, wet, lighting) {
   return new THREE.ShaderMaterial({
-    uniforms: {...light, ...wet, ...water?.uniforms},
+    uniforms: {...lighting.uniforms, ...wet, ...water?.uniforms},
     defines: water ? {COAST_WATER: 1} : {},
     vertexShader: /* glsl */`varying vec3 vWorld, vNormal; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; vNormal = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: /* glsl */`uniform vec3 uSunDir, uSunCol, uSkyCol, uGroundCol; varying vec3 vWorld, vNormal;
+    fragmentShader: /* glsl */`${lighting.glsl}
+      varying vec3 vWorld, vNormal;
       ${water?.glsl ?? ''}
       // ---- wetness model (WaterWetness.hlsl): HOW wet looks; where it is wet is decided in main() from the band + the swash
       #define WET_POROUS_SQUARE_GAIN 1.0
@@ -135,11 +131,10 @@ function terrainMaterial(water, wet) {
         #ifdef COAST_CAUSTICS
         focus = causticLight(vWorld);
         #endif
-        vec3 light = uSunCol * max(dot(n, uSunDir), 0.0) * focus + mix(uGroundCol, uSkyCol, n.y * 0.5 + 0.5);
-        vec3 color = albedo * ripple * light;
+        vec3 color = shade(albedo * ripple, n, focus, 1.0, 0.0);
         if (wet > 0.0) { vec3 V = normalize(cameraPosition - vWorld), H = normalize(V + uSunDir);   // the film's mirror-flat sheen
-          color += uSunCol * pow(max(dot(n, H), 0.0), waterSpecularExponent(min(uWetSmoothness, WET_SMOOTHNESS_CEILING))) * (wet * WET_SHEEN_STRENGTH); }
-        gl_FragColor = vec4(color, 1.0);
+          color += uSunColor * pow(max(dot(n, H), 0.0), waterSpecularExponent(min(uWetSmoothness, WET_SMOOTHNESS_CEILING))) * (wet * WET_SHEEN_STRENGTH); }
+        gl_FragColor = vec4(applyFog(color, distance(vWorld, cameraPosition)), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }` });

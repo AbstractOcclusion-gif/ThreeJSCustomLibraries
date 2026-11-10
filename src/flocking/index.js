@@ -4,7 +4,8 @@ import {createFishMesh} from './fish-mesh.js';
 import {FISH_SPECIES} from './species.js';
 
 export {FISH_SPECIES};
-const modelUrl = new URL('../../assets/fish/webaquarium-species.json', import.meta.url);
+// Bundled species (assets/fish/README.md). Override with `modelsUrl` or a parsed `models` object.
+export const BUNDLED_FISH_MODELS_URL = new URL('../../assets/fish/webaquarium-species.json', import.meta.url).href;
 const LVREF = [1, 1.5, 1.5, .8, .6, 1], SKIN = .08;
 const UP = new THREE.Vector3(0, 1, 0), ZERO = new THREE.Vector3();
 const clamp = THREE.MathUtils.clamp;
@@ -16,6 +17,7 @@ function noise(seed, time) {
 }
 
 export async function createFishFlock({
+ modelsUrl = BUNDLED_FISH_MODELS_URL, models: givenModels = null,
  bounds, counts = {roach: 10, rudd: 6, perch: 4}, size = .7, random = Math.random,
  surfaceHeight = () => bounds.max.y, floorHeight = () => bounds.min.y, signal,
 } = {}) {
@@ -24,9 +26,12 @@ export async function createFishFlock({
  for (const [key, count] of species) {
   if (!Object.hasOwn(FISH_SPECIES, key) || !Number.isInteger(count) || count > 300) throw new RangeError(`Invalid flock count for ${key}`);
  }
- const response = await fetch(modelUrl, {signal});
- if (!response.ok) throw new Error(`Could not load fish models (${response.status})`);
- const models = await response.json();
+ let models = givenModels;
+ if (!models) {
+  const response = await fetch(modelsUrl, {signal});
+  if (!response.ok) throw new Error(`Could not load fish models (${response.status})`);
+  models = await response.json();
+ }
  const clock = {value: 0};
  const loaded = await Promise.allSettled(species.map(([key, count]) => createFishMesh(models[key], FISH_SPECIES[key], count, clock)));
  const failure = loaded.find(result => result.status === 'rejected');
@@ -57,7 +62,7 @@ export async function createFishFlock({
   speciesTraits: true, fishSchool: 1, fishSeparation: 1};
  const FT = Object.fromEntries(['al', 'co', 'se', 'd', 'al2'].map(key => [key, new THREE.Vector3()]));
  FT.lv = LVREF.map(() => new THREE.Vector3());
- const ARB = {on: false}, NEAR = [], PRED = [], grid = new Map();
+ const ARB = {on: false}, NEAR = [], PRED = [], grid = new Map(), freeBuckets = [];
  const lvl = (index, acceleration) => ARB.on ? FT.lv[index] : acceleration;
  const maxSize = Math.max(1, ...profiles.map(sp => sp.size)) * 1.15;
  const maxSpace = Math.max(1, ...profiles.map(sp => sp.space));
@@ -99,12 +104,17 @@ export async function createFishFlock({
   clock.value += dt;
   if (!dt) return;
   frame++;
-  for (const bucket of grid.values()) bucket.length = 0;
+  // Reuse arrays while keeping only currently occupied cells in the grid.
+  for (const bucket of grid.values()) {
+   bucket.length = 0;
+   freeBuckets.push(bucket);
+  }
+  grid.clear();
   PRED.length = 0;
   fish.forEach((f, i) => {
    const key = `${Math.floor(f.p.x / cell)}/${Math.floor(f.p.z / cell)}`;
    let bucket = grid.get(key);
-   if (!bucket) grid.set(key, bucket = []);
+   if (!bucket) grid.set(key, bucket = freeBuckets.pop() ?? []);
    bucket.push(i);
    if (profiles[f.sp].pred) PRED.push(i);
   });
@@ -120,10 +130,8 @@ export async function createFishFlock({
    lvl(5, acceleration).addScaledVector(wander, .8 * cruise * sp.wander);
    lvl(4, acceleration).y += (THREE.MathUtils.lerp(top, bottom, -sp.depth) - f.p.y) * sp.depthK * 2;
    const boundary = lvl(0, acceleration), margin = Math.max(.12, L * 2);
-   for (const axis of ['x', 'z']) {
-    boundary[axis] += 3 * (Math.max(0, bounds.min[axis] + margin - f.p[axis]) -
-     Math.max(0, f.p[axis] - bounds.max[axis] + margin)) / margin;
-   }
+   boundary.x += 3 * (Math.max(0, bounds.min.x + margin - f.p.x) - Math.max(0, f.p.x - bounds.max.x + margin)) / margin;
+   boundary.z += 3 * (Math.max(0, bounds.min.z + margin - f.p.z) - Math.max(0, f.p.z - bounds.max.z + margin)) / margin;
    boundary.y += 3 * (Math.max(0, bottom + .12 - f.p.y) - Math.max(0, f.p.y - top + .1));
    let budget = 1;
    FT.lv.forEach((force, index) => {

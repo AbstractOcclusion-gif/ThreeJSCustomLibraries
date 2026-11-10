@@ -43,7 +43,7 @@
     "build": "vite build",
     "stage:webaquarium": "node scripts/stage-webaquarium.mjs",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test tests/**/*.test.js",
+    "test": "node --test \"tests/**/*.test.js\"",
     "test:weather": "node --test tests/weather/weather.test.js tests/weather/lifecycle.test.js",
     "test:particles": "node --test tests/particles/water.test.js",
     "test:water": "node --test tests/water/water.test.js",
@@ -52,7 +52,12 @@
     "test:boundaries": "node --test tests/boundaries/boundaries.test.js",
     "test:cable": "node --test tests/cable/cable.test.js",
     "test:camera": "node --test tests/camera/camera.test.js",
-    "assets:weather": "node scripts/make-weather-assets.mjs"
+    "assets:weather": "node scripts/make-weather-assets.mjs",
+    "test:fire": "node --test tests/fire/fire.test.js",
+    "test:destruction": "node --test tests/destruction/structures.test.js",
+    "test:terrain": "node --test tests/terrain/terrain.test.js",
+    "test:surface": "node --test tests/surface/surface.test.js",
+    "test:flocking": "node --test tests/flocking/flocking.test.js"
   },
   "peerDependencies": {
     "three": "^0.180.0",

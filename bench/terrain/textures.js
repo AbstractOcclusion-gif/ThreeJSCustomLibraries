@@ -1,13 +1,19 @@
 import * as THREE from 'three';
 
-const files = import.meta.glob('../../assets/terrain/*/*.jpg', {eager: true, query: '?url', import: 'default'});
+const files = import.meta.glob([
+ '../../assets/terrain/*/{color,height}.jpg',
+ '../../assets/terrain/rock_wall_02/normal.jpg',
+], {eager: true, query: '?url', import: 'default'});
 const sets = {grass: 'sparse_grass', rock: 'rock_wall_02', snow: 'snow_02', mud: 'mud_forest'};
 
 export async function loadTerrainTextures(renderer) {
  const loader = new THREE.ImageLoader();
  const load = (set, map) => loader.loadAsync(files[`../../assets/terrain/${set}/${map}.jpg`]);
- const images = await Promise.all(Object.entries(sets).map(async ([layer, set]) => [layer, await load(set, 'color'), await load(set, 'height')]));
- const rockNormal = await load(sets.rock, 'normal');
+ const [images, rockNormal] = await Promise.all([
+  Promise.all(Object.entries(sets).map(([layer, set]) =>
+   Promise.all([layer, load(set, 'color'), load(set, 'height')]))),
+  load(sets.rock, 'normal'),
+ ]);
  const canvas = document.createElement('canvas');
  const context = canvas.getContext('2d', {willReadFrequently: true});
  const anisotropy = Math.min(2, renderer.capabilities.getMaxAnisotropy());

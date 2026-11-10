@@ -65,11 +65,11 @@ export function createStructureSystem({world,definition,canDamage=body=>body.str
   update(dt=1/120){if(disposed)return;time+=dt;
    for(const m of pending)fracture(m);pending.clear();
    for(const m of members)if(!m.removed&&!m.failed){
-    m.load=Math.max(0,...m.joints.filter(j=>!j.demolitionDetached).map(j=>Math.hypot(...j.equations.map(e=>e.multiplier))))/m.capacity;
+    let peak=0;for(const j of m.joints){if(j.demolitionDetached)continue;let q=0;for(const e of j.equations)q+=e.multiplier*e.multiplier;if(q>peak)peak=q;}m.load=Math.sqrt(peak)/m.capacity;
     m.overload=m.load>1?m.overload+dt:Math.max(0,m.overload-dt);
     if(m.overload>.05){m.failed=true;broken++;disconnect(m);emit({type:"member:detached",memberId:m.id,time});}
    }
   },
-  get fallen(){return members.filter(m=>!m.removed&&m.body.position.distanceTo(m.start)>1.5).length;}
+  get fallen(){let n=0;for(const m of members)if(!m.removed&&m.body.position.distanceTo(m.start)>1.5)n++;return n;}
  };
 }

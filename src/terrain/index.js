@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import {createWeatherSurfaceMaterial} from '../surface/index.js';
 export {createTerrainField} from './field.js';
-export {TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS} from './terrain-rules.js';
+export {TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
+export {valueNoise} from './terrain-noise.js';
 export {OceanCoastTerrain, TERRAIN_DEFAULTS as OCEAN_COAST_DEFAULTS, WET_DEFAULTS as OCEAN_COAST_WET_DEFAULTS} from './coast.js';
 
 export function createTerrainAppearance() {

@@ -3,6 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 import {BOAT_DEFAULTS, BUOYANCY_DEFAULTS, FoamTrail, createOceanSurface, createWaterlineComposite, JERLOV_NAMES, SurfaceProbes, skyFromWeather, OCEAN_PRESETS, OCEAN_DEFAULTS, OCEAN_REFLECTION_MODES, SEA_STATE_DEFAULTS} from '../../src/water/index.js';
 import {OceanCoastTerrain, OCEAN_COAST_WET_DEFAULTS} from '../../src/terrain/index.js';
+import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createParticleDepthBinding, createWaterSpray, Motes} from '../../src/particles/water/index.js';
 import {createOceanFloat} from './float.js';
 import {benchRenderer, createBenchWeather, detectAssets, weatherFolder, presetsFolder} from '../shared.js';
@@ -27,7 +28,8 @@ const laceTexture = await detectAssets(foamUrl, foamUrl)
 const ocean = createOceanSurface({renderer, sky: skyFromWeather(weather.view), caustics: {}, wake: {}, exclusion: true, laceTexture});
 const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);
-const coast = new OceanCoastTerrain({scene, settings: {centerZ: -220}, water: ocean.shoreBinding, onHeightField: ocean.setShore});
+const terrainLighting = createLighting();
+const coast = new OceanCoastTerrain({scene, settings: {centerZ: -220}, water: ocean.shoreBinding, onHeightField: ocean.setShore, lighting: terrainLighting});
 const probes = new SurfaceProbes(ocean.fft, 3, {wake: ocean.wake}), probeStep = 2;
 const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics});
 const postColor = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthBuffer: false});
@@ -62,7 +64,7 @@ async function launchBoat() {
  try {
   const {Boat} = await import('../../src/water/ocean/boat.js');
   if (disposed) return;
-  boat = new Boat({ocean, assetBaseUrl: aquariumAssets, emitSplash: spray.emitSplash,
+  boat = new Boat({ocean, assetBaseUrl: aquariumAssets, input: window, emitSplash: spray.emitSplash,
    groundHeightAt: (x, z) => coast.collisionHeightAt(x, z)});
   await boat.load(renderer);
   if (!boat.ready) return;
@@ -214,8 +216,7 @@ renderer.setAnimationLoop(now => {
   } else controls.update();
   weather.system.update(dt); weather.view.update(dt);
   const light = weather.view.uniforms;
-  coast.update({sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value,
-    skyColor: weather.view.hemi.color, groundColor: weather.view.hemi.groundColor});
+  syncLighting(terrainLighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});   // island lit and fogged like the rest
   const wind = weather.system.weather;
   float.step(dt);
   stepBoat(dt);

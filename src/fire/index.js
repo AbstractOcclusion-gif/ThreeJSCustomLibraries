@@ -4,7 +4,8 @@ function positive(value, name) {
   if (!Number.isFinite(value) || value <= 0) throw new RangeError(`${name} must be positive`);
 }
 
-export function createFireSystem({spreadRadius = 3, cooling = 0.3} = {}) {
+// maxCatchUp: the most simulated seconds one tick() may advance (a tab resume never replays minutes of O(N²) steps); Infinity disables the cap.
+export function createFireSystem({spreadRadius = 3, cooling = 0.3, maxCatchUp = 2} = {}) {
   positive(spreadRadius, 'Spread radius');
   if (!Number.isFinite(cooling) || cooling < 0) throw new RangeError('Cooling must be nonnegative');
   const objects = new Map();
@@ -65,7 +66,7 @@ export function createFireSystem({spreadRadius = 3, cooling = 0.3} = {}) {
     remove(object) { return objects.delete(object); },
     tick(dt) {
       if (!Number.isFinite(dt) || dt <= 0) return;
-      elapsed += dt;
+      elapsed = Math.min(elapsed + dt, maxCatchUp);
       while (elapsed + 1e-12 >= STEP) {
         elapsed -= STEP;
         step();

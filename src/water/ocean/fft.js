@@ -6,7 +6,7 @@
 // shared memory with f16-packed uints; here each butterfly stage is one fragment pass and the three Hermitian spectra ride ONE
 // RGBA16F texel as two complex channels -- P = H + i*Sx (its inverse transform's real part is the height, imaginary part the X
 // displacement, both real-valued fields) and Q = Sz. Also: no readback bake (buoyancy is a later batch), no fetch field, no
-// current drift, no direction map (see aperiodic.js), and the normal array has no mip chain (three r160 cannot mip array targets),
+// current drift, no direction map (see aperiodic.js), and the normal array has no mip chain (array render targets are not mipmapped),
 // so far-field slope is tamed by the cascade distance fade + far slope floor only.
 import * as THREE from 'three';
 import { QV, createPass, createTargetScope, pingPong } from './passes.js';

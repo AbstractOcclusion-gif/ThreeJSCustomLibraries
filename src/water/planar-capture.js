@@ -6,7 +6,7 @@ import {createTargetScope} from './ocean/passes.js';
 export function createPlanarCapture(renderer) {
  const matrix = new THREE.Matrix4(), inverse = new THREE.Matrix4();
  const scoped = createTargetScope(renderer);
- let reflector, lastCapture = -Infinity, lastHeight, lastBelow;
+ let reflector, lastCapture = -Infinity, lastHeight, lastBelow, stale = true;
  return {
   matrix,
   get texture() { return reflector?.getRenderTarget().texture ?? null; },
@@ -22,7 +22,9 @@ export function createPlanarCapture(renderer) {
     lastCapture = -Infinity;
    }
    const now = performance.now();
-   if (height === lastHeight && below === lastBelow && now - lastCapture < 1000 / hz) return;
+   if (height !== lastHeight || below !== lastBelow) stale = true;
+   if (!stale && now - lastCapture < 1000 / hz) return;
+   stale = false;
    reflector.rotation.x = (below ? 1 : -1) * Math.PI / 2;
    reflector.position.y = height;
    reflector.updateMatrixWorld(true);

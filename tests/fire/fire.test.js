@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createFireSystem} from '../../src/fire/index.js';
 
 test('fire spreads one step at a time, runs out of fuel, and leaves distant objects alone', () => {
-  const system = createFireSystem({spreadRadius: 2});
+  const system = createFireSystem({spreadRadius: 2, maxCatchUp: Infinity});
   const position = x => ({x, y: 0, z: 0});
   const first = system.add({position: position(0), burnSeconds: 1, heatOutput: 8});
   const middle = system.add({position: position(1.5), ignitionHeat: 0.01});

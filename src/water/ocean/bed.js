@@ -10,6 +10,7 @@ import * as THREE from 'three';
 
 // Unity BedDepthSettings defaults: shoreShoalDepth 4, shoreRefraction .7, shoreCompression .6, shoreGreens 1.35. The compression
 // reach is 2 x the surf front wavelength (SURF_WARP_REACH_SPACINGS, published by applySurf) -- one curve for swell and fronts.
+let lastBake = null;   // last shore bake stats {size, sdf, ms}
 export const SHORE_DEFAULTS = Object.freeze({ on: true, resolution: 512, shoalDepth: 4, refraction: 0.7, compression: 0.6, greens: 1.35, debug: 'off' });
 export const SHORE_DEBUG_MODES = Object.freeze(['off', 'depth', 'sdf']);
 const SHOAL_BAND_SIGNIFICANT_HEIGHT_MULTIPLE = 2;        // WaterVolume.ShoreShoalDepthEffective: a big sea starts flattening further out
@@ -102,7 +103,7 @@ export function createOceanShore(renderer) {
   t.needsUpdate = true;
   SHORE_U.tShore.value = t; SHORE_U.uShoreCenter.value.set(centerX, centerZ); SHORE_U.uShoreHalf.value = half; SHORE_U.uShoreOffFieldDepth.value = offFieldDepth;
   shoreSdfBaked = hasSdf; applyShore(s);
-  console.info(`shore bake ${n}²: ${hasSdf ? 'depth + SDF' : 'depth only (no waterline in the field)'} in ${(performance.now() - started).toFixed(0)} ms`);
+  lastBake = {size: n, sdf: hasSdf, ms: performance.now() - started};
 }
 // warpReach: compression e-folding reach (m), 2 x the surf front wavelength. The attenuation band is floored at 2 x the live Hs
 // (setShoreSeaState, per frame); the Green band stays on the authored coastal profile, as in the package.
@@ -114,7 +115,7 @@ function applyShore(s, warpReach = SHORE_U.uShoreWarpReach.value) {
   u.uShoreDebug.value = SHORE_DEBUG_MODES.indexOf(s.debug);
 }
 function setShoreSeaState(significantHeight) { SHORE_U.uShoreShoalDepth.value = Math.max(authoredShoalDepth, SHOAL_BAND_SIGNIFICANT_HEIGHT_MULTIPLE * significantHeight); }
- return {uniforms: SHORE_U, bake: bakeShore, apply: applyShore, setSeaState: setShoreSeaState,
+ return {uniforms: SHORE_U, bake: bakeShore, apply: applyShore, setSeaState: setShoreSeaState, get lastBake() { return lastBake; },
   dispose() {
    SHORE_U.tShore.value?.dispose();
    SHORE_U.tShore.value = null;

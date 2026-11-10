@@ -1,6 +1,5 @@
-// ocean/readback.js -- copied from WebAquarium src/water/readback.js: the async GPU->CPU readback (WebGL2 PBO ring + fences) that
-// was measured and tuned on Bert's PC (STREAM_COPY usage, lazy allocation, fence polled with clientWaitSync(0), see the aquarium
-// file for the history). Generalised: one ring reads ONE float RGBA row of `width` texels; the caller issues the pass that fills
+// ocean/readback.js -- async GPU->CPU readback (WebGL2 PBO ring + fences): STREAM_COPY usage, lazy allocation, fence polled with
+// clientWaitSync(0). Generalised: one ring reads ONE float RGBA row of `width` texels; the caller issues the pass that fills
 // the target and gets the samples 1-2 frames later through `collect()`.
 const RING_SIZE = 3, MIN_FENCE_AGE = 2;   // ring slots; frames a fence must be old before it is polled
 

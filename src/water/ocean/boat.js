@@ -35,7 +35,8 @@ const SPRAY_LAYOUT = [{ x: 0.9, z: 0.84, out: [0.42, 0.9], boost: 1 }, { x: 1, z
 const Z_UP_TO_Y_UP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);   // authored +Z -> +Y, +Y -> -Z... bow lands on +Z (checked)
 
 export class Boat {
-  constructor({ocean, assetBaseUrl, emitSplash, groundHeightAt}) {
+  constructor({ocean, assetBaseUrl, emitSplash, groundHeightAt, input = null}) {
+    this.input = input;
     this.group = new THREE.Group(); this.ready = false; this.body = null; this.length = 0;
     this.ocean = ocean; this.assetBaseUrl = assetBaseUrl; this.emitSplash = emitSplash; this.groundHeightAt = groundHeightAt;
     this.owned = new Set(); this.removeVolumes = [];
@@ -95,7 +96,7 @@ export class Boat {
     this.buoyancy = new Buoyancy(this.body, hullCenter, hullSize, {}, PROBE_SPRAY + this.sprayProbes.length, count => new SurfaceProbes(this.ocean.fft, count, {wake: this.ocean.wake}));
     this.spray = new SprayPump(this.body, this.sprayProbes, {}, this.emitSplash);
     const stern = new THREE.Vector3(0, hullSize.y * (0.5 - STERN_DEPTH_FRACTION), -size.z * STERN_FRACTION);
-    this.controller = new BoatController(this.body, stern);
+    this.controller = new BoatController(this.body, stern, {}, {input: this.input});
     // wake: the demo prefab's single small interactor sphere forward of the hull centre (WaterSphereInteractor)
     this.interactor = new SphereInteractor(this.group, new THREE.Vector3(0, hullCenter.y, size.z * WAKE_SPHERE_FRACTION), hullSize.clone().multiplyScalar(0.5));
     // wake ridge: WaterInteractable drops from the whole renderer bounds (origin sits on the keel line, so bounds min y = 0)
@@ -104,7 +105,7 @@ export class Boat {
     if (exclusion) this.removeVolumes.push(exclusion.add(lid.geometry, lid, {back: false}),
       exclusion.add(shell.geometry, shell, {front: false}));
     this.ready = true;
-    console.info(`boat loaded: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)} m, ${this.buoyancy.localPoints.length} probes, sphere r ${this.buoyancy.sphereRadius.toFixed(2)} m`);
+    this.info = {size: size.clone(), probes: this.buoyancy.localPoints.length, sphereRadius: this.buoyancy.sphereRadius};
     return this;
   }
   // The outboard is one material group of the hull mesh: move its triangles into their own mesh pivoting on the transom
@@ -145,7 +146,7 @@ export class Boat {
     this.body.integrate(dt); this.body.applyTo(this.group);
     this.outboard.rotation.y = this.controller.steer * this.maxSteer;   // steer > 0 (turn right) swings the tiller to port (+X)
   }
-  // Grounding (Oct 2026): keel points against the island / sea floor height (groundHeightAt, set by main.js): a stiff damped
+  // Grounding: keel points against the island / sea floor height (groundHeightAt, set by main.js): a stiff damped
   // spring along the ground normal plus Coulomb friction, applied as ForceMode.Acceleration at each touching point, so the hull
   // stops, scrapes and can sit beached; a deep penetration (teleport, big wave) is lifted out at once.
   groundContact(dt) {
