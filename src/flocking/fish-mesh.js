@@ -1,8 +1,17 @@
 import * as THREE from 'three';
 
+const FIN_WEIGHT = 0.45 * 255;     // a vertex belongs to a fin above 45 % of its byte rig weight
+const FIN_SPLIT_PASSES = 8;        // 2-means passes splitting each side's paired fins into pectoral and ventral
+const FIN_ROOT_SHIFT = 2;          // a paired fin's root = the nearest quarter (length >> this) of its cluster to the midline
+const TEXTURE_ANISOTROPY = 4;
+// The packed model format (assets/fish/README.md): int16 positions x scale, int8 normals, uint16 uvs.
+const PACKED = Object.freeze({position: 32767, normal: 127, uv: 65535});
+// WebAquarium's skin values, toned for MeshStandardMaterial: rougher, and a fifth of the metalness.
+const SKIN = Object.freeze({extraRoughness: .15, metalnessShare: .2});
+
 // WebAquarium fin pivots and the instanced body / fin deformation.
 function finPivots(g) {
-  const p = g.attributes.position.array, w = g.attributes.aW.array, n = p.length / 3, out = new Float32Array(n * 4), T = 0.45 * 255;
+  const p = g.attributes.position.array, w = g.attributes.aW.array, n = p.length / 3, out = new Float32Array(n * 4), T = FIN_WEIGHT;
   const idx = c => { const a = []; for (let i = 0; i < n; i++) if (w[i * 4 + c] > T) a.push(i); return a; };
   const mean = (a, f) => a.reduce((s, i) => s + f(i), 0) / Math.max(1, a.length);
   let cy = 0; for (let i = 0; i < n; i++) cy += p[i * 3 + 1]; cy /= n;
@@ -15,10 +24,10 @@ function finPivots(g) {
   const pr = idx(2);
   for (const sd of [1, -1]) { const a = pr.filter(i => Math.sign(p[i * 3] || 1e-6) === sd); if (!a.length) continue;
     const zs = a.map(i => p[i * 3 + 2]); let c0 = Math.max(...zs), c1 = Math.min(...zs), lab = [];
-    for (let it = 0; it < 8; it++) { lab = a.map(i => Math.abs(p[i * 3 + 2] - c0) <= Math.abs(p[i * 3 + 2] - c1) ? 0 : 1);
+    for (let it = 0; it < FIN_SPLIT_PASSES; it++) { lab = a.map(i => Math.abs(p[i * 3 + 2] - c0) <= Math.abs(p[i * 3 + 2] - c1) ? 0 : 1);
       const m0 = a.filter((_, k) => !lab[k]), m1 = a.filter((_, k) => lab[k]); if (m0.length) c0 = mean(m0, i => p[i * 3 + 2]); if (m1.length) c1 = mean(m1, i => p[i * 3 + 2]); }
     for (const L of [0, 1]) { const cl = a.filter((_, k) => lab[k] === L); if (!cl.length) continue;
-      const root = [...cl].sort((x, y) => Math.abs(p[x * 3]) - Math.abs(p[y * 3])).slice(0, Math.max(1, cl.length >> 2));
+      const root = [...cl].sort((x, y) => Math.abs(p[x * 3]) - Math.abs(p[y * 3])).slice(0, Math.max(1, cl.length >> FIN_ROOT_SHIFT));
       const px = mean(root, i => p[i * 3]), py = mean(root, i => p[i * 3 + 1]), pz = mean(root, i => p[i * 3 + 2]);
       for (const i of cl) { out[i * 4] = px; out[i * 4 + 1] = py; out[i * 4 + 2] = pz; out[i * 4 + 3] = 2; } } }
   // jaw: hinge at the back (min z) and top (max y) of the jaw verts
@@ -56,11 +65,11 @@ const FISH_HEADER = `attribute vec4 aSwim, aW, aFP;
 export async function createFishMesh(data, species, count, clock) {
  const texture = await new THREE.TextureLoader().loadAsync(data.tex);
  texture.colorSpace = THREE.SRGBColorSpace;
- texture.anisotropy = 4;
+ texture.anisotropy = TEXTURE_ANISOTROPY;
  const geometry = new THREE.BufferGeometry();
- geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(new Int16Array(bytes(data.pos).buffer), v => v / 32767 * data.scale), 3));
- geometry.setAttribute('normal', new THREE.BufferAttribute(Float32Array.from(new Int8Array(bytes(data.nrm).buffer), v => v / 127), 3));
- geometry.setAttribute('uv', new THREE.BufferAttribute(Float32Array.from(new Uint16Array(bytes(data.uv).buffer), v => v / 65535), 2));
+ geometry.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(new Int16Array(bytes(data.pos).buffer), v => v / PACKED.position * data.scale), 3));
+ geometry.setAttribute('normal', new THREE.BufferAttribute(Float32Array.from(new Int8Array(bytes(data.nrm).buffer), v => v / PACKED.normal), 3));
+ geometry.setAttribute('uv', new THREE.BufferAttribute(Float32Array.from(new Uint16Array(bytes(data.uv).buffer), v => v / PACKED.uv), 2));
  geometry.setAttribute('aW', new THREE.BufferAttribute(bytes(data.w), 4, true));
  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array(bytes(data.idx).buffer), 1));
  geometry.setAttribute('aFP', data.fp ? new THREE.BufferAttribute(new Float32Array(bytes(data.fp).buffer), 4) : finPivots(geometry));
@@ -68,7 +77,7 @@ export async function createFishMesh(data, species, count, clock) {
  geometry.setAttribute('aSwim', swim);
  geometry.setAttribute('aLook', new THREE.InstancedBufferAttribute(new Float32Array(count), 1));
  const material = new THREE.MeshStandardMaterial({
-  map: texture, roughness: Math.min(1, species.rough + .15), metalness: species.metal * .2,
+  map: texture, roughness: Math.min(1, species.rough + SKIN.extraRoughness), metalness: species.metal * SKIN.metalnessShare,
  });
  const wave = {value: new THREE.Vector4(...species.wave)}, turn = {value: new THREE.Vector4(species.curl, species.pivot, 0, 0)};
  material.onBeforeCompile = shader => {

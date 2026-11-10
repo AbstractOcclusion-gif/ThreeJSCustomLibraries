@@ -2,6 +2,16 @@
 import * as THREE from 'three';
 import {hash2} from '../core/hash.js';
 
+const OCTAVE_FALLOFF = .5;   // each octave's amplitude relative to the previous one
+const BYTE = 255;            // 8-bit channel scale
+// Inland foam film. cells: noise cells across the tile for the coverage and fleck layers. coverage: threshold =
+// (noise - from) x gain. red / alpha: [base, gain per fleck]; green: fleck share.
+const FOAM_FILM = Object.freeze({cells: [6, 11], fleckOctaves: 3, coverage: {from: .25, gain: 1.6}, fleckPower: 1.6,
+  red: [.35, .9], green: .5, alpha: [.55, .45]});
+// Whitecap lace: thin bright rims where the noise crosses its middle. contrast scales |noise - .5|; gamma thins the rims.
+const LACE = Object.freeze({cells: 5, octaves: 5, contrast: 2.6, gamma: .7});
+const FREEZE_CELLS = 5;
+
 function noise2(size, scale, seed, octaves = 4) {
   const out = new Float32Array(size * size);
   const hash = (x, y) => hash2(x, y, seed);
@@ -14,7 +24,7 @@ function noise2(size, scale, seed, octaves = 4) {
       const n = (w(i, j) * (1 - su) + w(i + 1, j) * su) * (1 - sv) + (w(i, j + 1) * (1 - su) + w(i + 1, j + 1) * su) * sv;
       out[y * size + x] += n * amplitude;
     }
-    total += amplitude; amplitude *= .5;
+    total += amplitude; amplitude *= OCTAVE_FALLOFF;
   }
   for (let i = 0; i < out.length; i++) out[i] /= total;
   return out;
@@ -23,25 +33,25 @@ const toTexture = (data, size) => { const t = new THREE.DataTexture(data, size, 
 
 // Inland foam film: r/g brightness detail, b density threshold (where the film appears as coverage rises), a coverage.
 export function createFoamTexture(size = 256, seed = 3) {
-  const a = noise2(size, 6, seed), b = noise2(size, 11, seed + 1, 3), data = new Uint8Array(size * size * 4);
+  const F = FOAM_FILM, a = noise2(size, F.cells[0], seed), b = noise2(size, F.cells[1], seed + 1, F.fleckOctaves), data = new Uint8Array(size * size * 4);
   for (let i = 0; i < size * size; i++) {
-    const threshold = Math.min(1, Math.max(0, (a[i] - .25) * 1.6)), fleck = Math.pow(b[i], 1.6);
-    data[i * 4] = Math.round(255 * Math.min(1, .35 + fleck * .9)); data[i * 4 + 1] = Math.round(255 * fleck * .5);
-    data[i * 4 + 2] = Math.round(255 * threshold); data[i * 4 + 3] = Math.round(255 * Math.min(1, .55 + .45 * fleck));
+    const threshold = Math.min(1, Math.max(0, (a[i] - F.coverage.from) * F.coverage.gain)), fleck = Math.pow(b[i], F.fleckPower);
+    data[i * 4] = Math.round(BYTE * Math.min(1, F.red[0] + fleck * F.red[1])); data[i * 4 + 1] = Math.round(BYTE * fleck * F.green);
+    data[i * 4 + 2] = Math.round(BYTE * threshold); data[i * 4 + 3] = Math.round(BYTE * Math.min(1, F.alpha[0] + F.alpha[1] * fleck));
   }
   return toTexture(data, size);
 }
 // Ocean whitecap lace: a single pattern channel (r), thresholded against crest coverage in the ocean shader.
 export function createLaceTexture(size = 256, seed = 7) {
-  const n = noise2(size, 5, seed, 5), data = new Uint8Array(size * size * 4);
-  for (let i = 0; i < size * size; i++) { const v = Math.round(255 * Math.pow(Math.min(1, Math.abs(n[i] - .5) * 2.6), .7)); data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = v; data[i * 4 + 3] = 255; }
+  const n = noise2(size, LACE.cells, seed, LACE.octaves), data = new Uint8Array(size * size * 4);
+  for (let i = 0; i < size * size; i++) { const v = Math.round(BYTE * Math.pow(Math.min(1, Math.abs(n[i] - .5) * LACE.contrast), LACE.gamma)); data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = v; data[i * 4 + 3] = BYTE; }
   return toTexture(data, size);
 }
 
 // Red encodes the order in which patches freeze. A pond can combine it with local water depth.
 export function createFreezeTexture(size = 128, seed = 31) {
- const noise = noise2(size, 5, seed);
- const data = Uint8Array.from(noise, value => Math.round(value * 255));
+ const noise = noise2(size, FREEZE_CELLS, seed);
+ const data = Uint8Array.from(noise, value => Math.round(value * BYTE));
  const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat);
  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
  texture.minFilter = texture.magFilter = THREE.LinearFilter;
