@@ -1,6 +1,6 @@
 import * as THREE from 'three';
+import {createTrackMask} from '../surface/tracks.js';
 
-const MAX_SWEEPS = 8;
 const RECOVERY_SECONDS = 0.9;
 const MAX_BEND = 0.38;
 
@@ -9,8 +9,9 @@ attribute float bendWeight;
 uniform float grassTime;
 uniform vec2 grassWind;
 uniform float grassGust;
-uniform vec4 grassSweeps[${MAX_SWEEPS}];
-uniform vec2 grassContact[${MAX_SWEEPS}];
+uniform sampler2D grassContact;
+uniform vec4 grassContactBounds;
+uniform bool grassContactActive;
 
 vec3 bendGrass(vec3 position) {
   mat4 placement = modelMatrix * instanceMatrix;
@@ -19,23 +20,14 @@ vec3 bendGrass(vec3 position) {
   float wave = sin(grassTime * 1.7 - dot(root, vec2(0.47, 0.32)));
   vec2 bend = grassWind * (0.48 + grassGust * wave * 0.32
                           + 0.12 * sin(grassTime * 4.1 + phase));
-  vec2 push = vec2(0.0);
-  for (int i = 0; i < ${MAX_SWEEPS}; i++) {
-    vec2 contact = grassContact[i];
-    if (contact.y <= 0.0) continue;
-    vec4 sweep = grassSweeps[i];
-    vec2 path = sweep.zw - sweep.xy;
-    float t = clamp(dot(root - sweep.xy, path) / max(dot(path, path), 0.00001), 0.0, 1.0);
-    vec2 delta = root - (sweep.xy + t * path);
-    float distanceToSweep = length(delta);
-    float strength = contact.y * (1.0 - smoothstep(0.0, contact.x, distanceToSweep));
-    vec2 direction = normalize(path + vec2(0.00001, 0.0));
-    vec2 candidate = (direction * 0.75 + delta / max(contact.x, 0.001) * 0.65) * strength;
-    if (dot(candidate, candidate) > dot(push, push)) push = candidate;
+  float contact = 0.0;
+  if (grassContactActive) {
+    vec2 uv = (root - grassContactBounds.xy) / grassContactBounds.zw;
+    contact = texture2D(grassContact, uv).r;
   }
-  bend += push;
   bend *= min(1.0, ${MAX_BEND} / max(length(bend), 0.001));
-  vec3 offset = vec3(bend.x, -dot(push, push) * 0.45, bend.y) * bendWeight;
+  vec3 offset = vec3(bend.x, 0.0, bend.y) * bendWeight;
+  position.y *= 1.0 - 0.85 * contact * bendWeight;
   // Placement has orthogonal axes (translation, yaw and uniform scale).
   vec3 x = placement[0].xyz, y = placement[1].xyz, z = placement[2].xyz;
   return position + vec3(dot(x, offset), dot(y, offset), dot(z, offset)) / dot(x, x);
@@ -83,10 +75,12 @@ export function createGrassField({scene, geometries, map, color, placements, til
     grassWind: {value: new THREE.Vector2()},
     grassGust: {value: 0},
     grassTransmission: {value: 0},
-    grassSweeps: {value: vectors(MAX_SWEEPS, THREE.Vector4)},
-    grassContact: {value: vectors(MAX_SWEEPS, THREE.Vector2)},
+    grassContact: {value: null},
+    grassContactBounds: {value: new THREE.Vector4()},
+    grassContactActive: {value: false},
   };
   const sweeps = [];
+  let contactMask;
   const cutout = {map, alphaTest: 0.5, side: THREE.DoubleSide};
   const material = new THREE.MeshStandardMaterial({...cutout, color, roughness: 1, flatShading: true});
   const depth = new THREE.MeshDepthMaterial({...cutout, depthPacking: THREE.RGBADepthPacking});
@@ -94,7 +88,10 @@ export function createGrassField({scene, geometries, map, color, placements, til
   patchMaterial(depth, uniforms, false);
 
   const cells = new Map();
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (const placement of placements) {
+    minX = Math.min(minX, placement.x); maxX = Math.max(maxX, placement.x);
+    minZ = Math.min(minZ, placement.z); maxZ = Math.max(maxZ, placement.z);
     const key = `${Math.floor(placement.x / tileSize)},${Math.floor(placement.z / tileSize)}`;
     if (!cells.has(key)) cells.set(key, []);
     cells.get(key).push(placement);
@@ -134,28 +131,42 @@ export function createGrassField({scene, geometries, map, color, placements, til
   return {
     stats,
     addSweep({fromX, fromZ, toX, toZ, radius}) {
-      sweeps.unshift({fromX, fromZ, toX, toZ, radius, age: 0});
-      if (sweeps.length > MAX_SWEEPS) sweeps.pop();
+      if (!Number.isFinite(minX) || ![fromX, fromZ, toX, toZ, radius].every(Number.isFinite) || radius <= 0) return;
+      if (!contactMask) {
+        contactMask = createTrackMask({origin: [minX - 1, minZ - 1], size: [maxX - minX + 2, maxZ - minZ + 2], resolution: 512});
+        uniforms.grassContact.value = contactMask.texture;
+        uniforms.grassContactBounds.value.copy(contactMask.bounds);
+      }
+      sweeps.push({from: {x: fromX, z: fromZ}, to: {x: toX, z: toZ}, radius, age: 0});
     },
     clear() {
       sweeps.length = 0;
+      uniforms.grassContactActive.value = false;
       uniforms.grassTime.value = 0;
     },
     setCutoff(value) {
       material.alphaTest = depth.alphaTest = value;
     },
-    update(dt, {camera, windX, windZ, gust, transmission, lodDistance, farDensity, shadowDistance, density}) {
+    update(dt, {camera, windX, windZ, gust, transmission, lodDistance, farDensity, shadowDistance, density, recoverySeconds = RECOVERY_SECONDS}) {
       uniforms.grassTime.value += dt;
       uniforms.grassWind.value.set(windX, windZ).multiplyScalar(0.035).clampLength(0, MAX_BEND);
       uniforms.grassGust.value = gust;
       uniforms.grassTransmission.value = transmission;
-      for (const sweep of sweeps) sweep.age += dt;
-      while (sweeps.at(-1)?.age >= RECOVERY_SECONDS) sweeps.pop();
-      for (let i = 0; i < MAX_SWEEPS; i++) {
-        const sweep = sweeps[i];
-        uniforms.grassContact.value[i].set(sweep?.radius ?? 1, sweep ? 0.48 * (1 - sweep.age / RECOVERY_SECONDS) ** 2 : 0);
-        if (sweep) uniforms.grassSweeps.value[i].set(sweep.fromX, sweep.fromZ, sweep.toX, sweep.toZ);
+      if (sweeps.length) {
+        const recovery = Math.max(.01, Number.isFinite(recoverySeconds) ? recoverySeconds : RECOVERY_SECONDS);
+        for (const sweep of sweeps) sweep.age += dt;
+        let expired = 0;
+        while (expired < sweeps.length && sweeps[expired].age >= recovery) expired++;
+        if (expired) sweeps.splice(0, expired);
+        if (sweeps.length) {
+          contactMask.clear();
+          for (const sweep of sweeps) {
+            const strength = 1 - THREE.MathUtils.smoothstep(sweep.age, 0, recovery);
+            contactMask.stamp(sweep.from, sweep.to, sweep.radius, strength);
+          }
+        }
       }
+      uniforms.grassContactActive.value = sweeps.length > 0;
       camera.updateMatrixWorld();
       frustum.setFromProjectionMatrix(projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
       stats.visibleTiles = stats.visibleClumps = stats.shadowTiles = 0;
@@ -180,6 +191,7 @@ export function createGrassField({scene, geometries, map, color, placements, til
         scene.remove(mesh);
         mesh.dispose();
       }
+      contactMask?.dispose();
       material.dispose();
       depth.dispose();
     },

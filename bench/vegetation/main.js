@@ -4,7 +4,7 @@ import GUI from 'lil-gui';
 import {createGrassField, createFreeVegetation, loadSyntyVegetation} from '../../src/vegetation/index.js';
 import {LeavedTrees, TREE_PROFILE} from '../../src/trees/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
-import {createTerrainAppearance, createTerrainField, createTerrainMaterial} from '../../src/terrain/index.js';
+import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS} from '../../src/terrain/index.js';
 import {createSurfaceWeather} from '../../src/surface/index.js';
 import {hash2, seededRandom} from '../../src/core/hash.js';
 import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder, detectAssets} from '../shared.js';
@@ -25,7 +25,8 @@ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
   const x = index % resolution - half, z = Math.floor(index / resolution) - half;
   return Math.sin(x * .11) * Math.cos(z * .09) * 1.6 + Math.sin(x * .031 + z * .05) * .8;
 });
-const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules: {mudBelow: -1.2}});
+const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights,
+  rules: {mudBelow: -.55, mudBlend: 1.2}});
 const {heightAt} = field;
 const {layers, detail} = await loadTerrainTextures(renderer);
 const appearance = createTerrainAppearance();
@@ -43,9 +44,9 @@ const free = createFreeVegetation();
 let pack = null; if (syntyBase) { try { pack = await loadSyntyVegetation({baseUrl: syntyBase}); } catch (e) { console.error(e); } }
 
 const P = {
-  grass: {clumps: 14000, radius: 45, color: '#7da24a', tintVariation: .25, density: 1, lodDistance: 26, farDensity: .45, shadowDistance: 18, transmission: .8},
+  grass: {clumps: 14000, radius: 45, color: '#7da24a', soilColor: '#aa965d', tintVariation: .45, density: 1, lodDistance: 26, farDensity: .45, shadowDistance: 18, transmission: .8},
   plants: {trees: 14, bushes: 24, gust: .4, treeWidth: 1, treeCrown: 1, asymmetry: .3},
-  interact: {ballSpeed: 6, ballRadius: 1.1},
+  interact: {ballSpeed: 6, ballRadius: 1.1, recoverySeconds: 3},
 };
 let grass;
 const lighting = createLighting();
@@ -54,18 +55,22 @@ const bushes = new LeavedTrees({scene, profile: 'bush', lighting, sampleGround: 
 const treeTint = new THREE.Color();
 const shade = new THREE.Color('#2f6b1f'), highlight = new THREE.Color('#779640');
 function placements() {
-  const random = seededRandom(7), out = [], base = new THREE.Color(P.grass.color);
+  const random = seededRandom(7), out = [];
+  const green = new THREE.Color(P.grass.color), muted = new THREE.Color(P.grass.soilColor), tint = new THREE.Color();
+  const soilLayer = TERRAIN_LAYERS.indexOf('mud');
   for (let i = 0; i < P.grass.clumps; i++) {
     const a = random() * Math.PI * 2, r = Math.sqrt(random()) * P.grass.radius, x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const t = 1 + (hash2(Math.floor(x / 6), Math.floor(z / 6), 3) - .5) * 2 * P.grass.tintVariation;
-    out.push({x, z, y: heightAt(x, z) - .02, yaw: random() * Math.PI * 2, scale: .7 + random() * .55, ...(P.grass.tintVariation > 0 ? {tint: [base.r * t, base.g * (2 - t) * .5 + base.g * .5, base.b * t]} : {})});
+    const soil = field.layerWeightAt(x, z, soilLayer);
+    const brightness = 1 + (hash2(x, z, 3) - .5) * P.grass.tintVariation * .5;
+    tint.lerpColors(green, muted, soil * P.grass.tintVariation).multiplyScalar(brightness);
+    out.push({x, z, y: heightAt(x, z) - .02, yaw: random() * Math.PI * 2, scale: .7 + random() * .55, tint: tint.toArray()});
   }
   return out;
 }
 function buildGrass() {
   grass?.dispose();
   const source = pack ?? free;
-  grass = createGrassField({scene, geometries: source.grassGeometries, map: source.atlas, color: pack ? 0xffffff : P.grass.color, placements: placements(), tileSize: 6, flatColorMix: pack ? .75 : 0});
+  grass = createGrassField({scene, geometries: source.grassGeometries, map: source.atlas, color: 0xffffff, placements: placements(), tileSize: 6, flatColorMix: pack ? .75 : 0});
 }
 function plantSites(count, seed) {
   const random = seededRandom(seed);
@@ -99,12 +104,19 @@ buildGrass(); placeTrees(); buildBushes();
 // Rolling ball: flattens grass along its path.
 const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshStandardMaterial({color: 0xd9b36a, roughness: .6})); ball.castShadow = true; ball.visible = false; scene.add(ball);
 let roll = null;
-const rollBall = () => { roll = {x: -P.grass.radius, z: 2, fromX: -P.grass.radius, elapsed: 0}; ball.visible = true; ball.scale.setScalar(P.interact.ballRadius); };
+const rollBall = () => {
+  const halfPath = Math.min(18, P.grass.radius);
+  roll = {x: -halfPath, endX: halfPath, z: 2, fromX: -halfPath, elapsed: 0};
+  ball.visible = true;
+};
 
 const gui = new GUI({title: 'Vegetation'});
 const wf = weatherFolder(gui, weather);
 const fg = gui.addFolder('Grass');
-fg.add(P.grass, 'clumps', 500, 60000, 500).onFinishChange(buildGrass); fg.add(P.grass, 'radius', 10, 60, 1).onFinishChange(buildGrass); fg.addColor(P.grass, 'color').onFinishChange(buildGrass); fg.add(P.grass, 'tintVariation', 0, .6, .01).name('per-instance tint').onFinishChange(buildGrass);
+fg.add(P.grass, 'clumps', 500, 60000, 500).onFinishChange(buildGrass); fg.add(P.grass, 'radius', 10, 60, 1).onFinishChange(buildGrass);
+fg.addColor(P.grass, 'color').name('Meadow color').onFinishChange(buildGrass);
+fg.addColor(P.grass, 'soilColor').name('Color over soil').onFinishChange(buildGrass);
+fg.add(P.grass, 'tintVariation', 0, 1, .01).name('Terrain color influence').onFinishChange(buildGrass);
 fg.add(P.grass, 'density', 0, 1, .01); fg.add(P.grass, 'lodDistance', 5, 80, 1); fg.add(P.grass, 'farDensity', 0, 1, .01); fg.add(P.grass, 'shadowDistance', 0, 60, 1); fg.add(P.grass, 'transmission', 0, 2, .01).name('backlight');
 const fp = gui.addFolder('Plants');
 fp.add(P.plants, 'trees', 0, 60, 1).onFinishChange(placeTrees); fp.add(P.plants, 'bushes', 0, 120, 1).onFinishChange(buildBushes); fp.add(P.plants, 'gust', 0, 1, .01);
@@ -112,6 +124,7 @@ fp.add(P.plants, 'treeWidth', .5, 1.8, .01).name('Crown width').onFinishChange(p
 fp.add(P.plants, 'treeCrown', .4, 1.6, .01).name('Crown depth').onFinishChange(shapeTrees);
 fp.add(P.plants, 'asymmetry', 0, 1, .01).name('Lobe spread').onFinishChange(shapeTrees);
 const fi = gui.addFolder('Interact'); fi.add(P.interact, 'ballSpeed', 1, 15, .5); fi.add(P.interact, 'ballRadius', .4, 2.5, .1); fi.add({rollBall}, 'rollBall').name('roll the ball');
+fi.add(P.interact, 'recoverySeconds', .25, 8, .25).name('Grass recovery · s');
 presetsFolder(gui, {bundled: import.meta.glob('../../presets/vegetation/*.json'), name: 'vegetation',
   getState: () => ({schema: 'three-kit.vegetation', version: 1, grass: {...P.grass}, plants: {...P.plants}}),
   apply: p => {
@@ -134,12 +147,13 @@ renderer.setAnimationLoop(now => {
   trees.setWind(wind); bushes.setWind(wind);
   trees.update(dt); bushes.update(dt);
   if (roll) {
-    roll.x = Math.min(P.grass.radius, roll.x + P.interact.ballSpeed * dt); roll.elapsed += dt;
-    if (roll.elapsed > .08 || roll.x === P.grass.radius) { grass.addSweep({fromX: roll.fromX, fromZ: roll.z, toX: roll.x, toZ: roll.z, radius: P.interact.ballRadius}); roll.fromX = roll.x; roll.elapsed = 0; }
+    roll.x = Math.min(roll.endX, roll.x + P.interact.ballSpeed * dt); roll.elapsed += dt;
+    if (roll.elapsed > .08 || roll.x === roll.endX) { grass.addSweep({fromX: roll.fromX, fromZ: roll.z, toX: roll.x, toZ: roll.z, radius: P.interact.ballRadius}); roll.fromX = roll.x; roll.elapsed = 0; }
+    ball.scale.setScalar(P.interact.ballRadius);
     ball.position.set(roll.x, heightAt(roll.x, roll.z) + P.interact.ballRadius, roll.z); ball.rotation.z -= P.interact.ballSpeed * dt / P.interact.ballRadius;
-    if (roll.x === P.grass.radius) { roll = null; ball.visible = false; }
+    if (roll.x === roll.endX) { roll = null; ball.visible = false; }
   }
-  grass.update(dt, {camera, windX, windZ, gust: P.plants.gust, transmission: P.grass.transmission * weather.system.day.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density});
+  grass.update(dt, {camera, windX, windZ, gust: P.plants.gust, transmission: P.grass.transmission * weather.system.day.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density, recoverySeconds: P.interact.recoverySeconds});
   weather.view.render();
   if (now - lastUI > 250) { lastUI = now; wf.sync(); const s = grass.stats; $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + (weather.assetBaseUrl === 'bundled' ? ' · bundled sky textures' : '') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\n${w.dominant} · ${weather.hourLabel(weather.system.day.hour)} · wind ${w.wind.toFixed(1)} m/s`; }
 });

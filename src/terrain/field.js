@@ -50,6 +50,17 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   const c = samples[(iz + 1) * nx + ix], d = samples[(iz + 1) * nx + ix + 1];
   return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
  }
+ // Match the shader's linear sampling of the baked layer map before texture height blending.
+ function layerWeightAt(x, z, layer) {
+  const gx = THREE.MathUtils.clamp((x - bounds.x) / stepX, 0, nx - 1);
+  const gz = THREE.MathUtils.clamp((z - bounds.y) / stepZ, 0, nz - 1);
+  const ix = Math.min(Math.floor(gx), nx - 2), iz = Math.min(Math.floor(gz), nz - 2);
+  const i = (iz * nx + ix) * 4 + layer;
+  const lerp = THREE.MathUtils.lerp;
+  const north = lerp(weights[i], weights[i + 4], gx - ix);
+  const south = lerp(weights[i + nx * 4], weights[i + nx * 4 + 4], gx - ix);
+  return lerp(north, south, gz - iz) / 255;
+ }
  let minX = nx, minZ = nz, maxX = -1, maxZ = -1;
  const soil = samples.slice();
  let snow, snowEnabled = false;
@@ -170,6 +181,6 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, snowMap, snowCover, heightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover,
+ return {geometry, bounds, heightMap, weightMap, snowMap, snowCover, heightAt, layerWeightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover,
   dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); snowMap.dispose(); }};
 }
