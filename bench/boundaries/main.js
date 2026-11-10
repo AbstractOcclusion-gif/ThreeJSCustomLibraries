@@ -6,7 +6,7 @@ import {createBenchPanel} from '../panel.js';
 import {createBoundaries, validateLayout, layout, makeRun, distance} from '../../src/boundaries/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
-import {benchRenderer, onLeave, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, onLeave, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
@@ -70,7 +70,7 @@ let lastUI = 0;
 startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   boundaries.update(dt); renderer.render(scene, camera);
-  if (now - lastUI > 250) { lastUI = now; $('status').textContent = `${message}\n${runs.length} runs · ${boundaries.hedges.count} hedge bushes`; }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${message}\n${runs.length} runs · ${boundaries.hedges.count} hedge bushes`; }
 });
 document.body.dataset.ready = 'true';
 onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); boundaries.dispose(); stage.dispose(); markerMaterial.dispose(); markerGeometry.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });

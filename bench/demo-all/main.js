@@ -177,6 +177,8 @@ pondSettings.planarReflection.on = false;
 let diving = false;
 const aboveWater = new THREE.Vector3();
 const diveX = -8, diveZ = 4;
+// Dive view: only over at least minDepth m of water; the eye stays floorClear m above the bed; the target sits under the surface.
+const DIVE = Object.freeze({minDepth: .55, floorClear: .3, targetBelowSurface: .2, targetAboveBed: .18});
 const diveTargetX = -4, diveTargetZ = 5;
 const pondRay = new THREE.Raycaster();
 const wetAt = (x, z) => (field.heightAt(x, z) ?? Infinity) < appearance.waterLevel.value;
@@ -265,13 +267,16 @@ demoActions.add(structures, 'buildBridge').name('Rebuild the bridge');
 shots.addTo(demoActions);
 grassDensityControls(gui, {cover, defaults: defaultCover, stats: coverStats, rebuild: rebuildGrass});
 grassControls(gui, {settings: grassSettings, rebuild: rebuildGrass});
+// An ice break throws water by the block's energy (J): strength = clamp(energy / energyForFull, min, 1).
+const ICE_SPLASH = Object.freeze({energyForFull: 2400, minStrength: .55, radius: 1.55, amount: 1.75, elevation: 8, crown: {size: 2.5, height: 3.3},
+  mistLift: .5, mistRadius: 1.25, rippleGain: 2});
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
  onIceBreak(x, y, z, energy) {
-  const strength = THREE.MathUtils.clamp(energy / 2400, .55, 1);
-  spray.emitSplash(x, y, z, strength, 1.55, 1.75, null, 360, 8, false, {size: 2.5, height: 3.3});
-  spray.mist(splashPosition.set(x, y + .5, z), strength, 1.25);
+  const S = ICE_SPLASH, strength = THREE.MathUtils.clamp(energy / S.energyForFull, S.minStrength, 1);
+  spray.emitSplash(x, y, z, strength, S.radius, S.amount, null, 360, S.elevation, false, S.crown);
+  spray.mist(splashPosition.set(x, y + S.mistLift, z), strength, S.mistRadius);
   if (!ripples.active) ripples.mask(wetAt);
-  ripples.splash(x, z, strength * 2);
+  ripples.splash(x, z, strength * S.rippleGain);
  }});
 const impactSettings = {surface: 'mud', preview: false};
 const impactControls = gui.addFolder('Rolling and impact');
@@ -339,6 +344,8 @@ profiling.add({run() {
 }}, 'run').name('Run 5-second benchmark');
 profiling.close();
 
+// Frame-rate readout every FPS_WINDOW_MS; the benchmark records BENCHMARK_MS of frames and reports the average and the 95th percentile.
+const FPS_WINDOW_MS = 1000, BENCHMARK_MS = 5000, BENCHMARK_PERCENTILE = .95;
 const unbindResize = bindResize(renderer, camera);
 const frameRate = document.getElementById('frame-rate');
 let previousNow, measuredSince, frames = 0;   // previousNow: raw frame time for the benchmark
@@ -346,7 +353,7 @@ const lastSun = new THREE.Vector3(Infinity, Infinity, Infinity);
 let wasMoving = false;
 startFrameLoop(renderer, (dt, now) => {
  measuredSince ??= now;
- if (now - measuredSince >= 1000) {
+ if (now - measuredSince >= FPS_WINDOW_MS) {
   const frameTime = (now - measuredSince) / frames;
   frameRate.textContent = `${Math.round(1000 / frameTime)} fps · ${frameTime.toFixed(1)} ms/frame`;
   measuredSince = now;
@@ -356,9 +363,9 @@ startFrameLoop(renderer, (dt, now) => {
  if (benchmark) {
   if (benchmark.start === undefined) benchmark.start = now;
   else if (previousNow !== undefined) benchmark.frames.push(now - previousNow);
-  if (now - benchmark.start >= 5000) {
+  if (now - benchmark.start >= BENCHMARK_MS) {
    const sorted = benchmark.frames.sort((a, b) => a - b);
-   const p95 = sorted[Math.ceil(sorted.length * .95) - 1];
+   const p95 = sorted[Math.ceil(sorted.length * BENCHMARK_PERCENTILE) - 1];
    const fps = sorted.length * 1000 / (now - benchmark.start);
    benchmarkResult.textContent = `${fps.toFixed(1)} fps average · ${p95.toFixed(1)} ms p95 · ${benchmark.ratio} pixel ratio`;
    benchmark = undefined;
@@ -396,13 +403,13 @@ startFrameLoop(renderer, (dt, now) => {
  const diveFloor = field.heightAt(diveX, diveZ);
  const waterLevel = pond.surface.position.y;
  waterPlane.w = -waterLevel;
- const canDive = pond.surface.visible && waterLevel - diveFloor > .55;
+ const canDive = pond.surface.visible && waterLevel - diveFloor > DIVE.minDepth;
  if (!canDive && diving) setDiving(false);
  diveControl.enable(canDive);
  if (diving) {
-  const eye = Math.max(diveFloor + .3, waterLevel + pondSettings.diveHeight);
+  const eye = Math.max(diveFloor + DIVE.floorClear, waterLevel + pondSettings.diveHeight);
   camera.position.set(diveX, eye, diveZ);
-  camera.lookAt(diveTargetX, Math.min(waterLevel - .2, field.heightAt(diveTargetX, diveTargetZ) + .18), diveTargetZ);
+  camera.lookAt(diveTargetX, Math.min(waterLevel - DIVE.targetBelowSurface, field.heightAt(diveTargetX, diveTargetZ) + DIVE.targetAboveBed), diveTargetZ);
  }
  if (!pond.surface.visible || freeze.progress >= 1) rippleGesture.cancel();
  rippleGesture.update(dt);

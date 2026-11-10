@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createOceanSurface, createWaterlineComposite, proceduralSky, SurfaceProbes} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {aimRay} from '../kit/input.js';
@@ -80,7 +80,7 @@ startFrameLoop(renderer, (dt, now) => {
   const light = sky.uniforms;
   waterline.renderLayers(opaque, water, camera, {height, slopeX, slopeZ, waterType: view.waterType, clarity: s.clarity, godRays: view.godRays,
     sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
-  if (now - lastUI > 250) {
+  if (now - lastUI > STATUS_REFRESH_MS) {
     lastUI = now;
     const {fft, clipmap} = ocean;
     $('status').textContent = `wind ${stageUI.state.windSpeed.toFixed(1)} m/s · waves ${fft.effective.significantHeight.toFixed(2)} m

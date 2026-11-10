@@ -5,12 +5,13 @@ import {createBenchPanel} from '../panel.js';
 import {createChips, createParticlePrefab, createPuffs, createParticleDepthBinding, createWaterSpray, OCEAN_SHEET_FILES} from '../../src/particles/index.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import {detectAssets} from '../kit/assets.js';
-import {onLeave, bindResize, startFrameLoop} from '../kit/page.js';
+import {onLeave, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
 const showError = error => { $('error').hidden = false; $('error').textContent = String(error); console.error(error); };
 
+const SPRAY_LOOP = Object.freeze({interval: .35, splashChance: .5});   // s between mists; share that also splash
 const renderer = new T.WebGLRenderer({antialias: true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
@@ -81,12 +82,12 @@ const unbindResize = bindResize(renderer, camera, () => { target.dispose(); targ
 let loopTimer = 0, lastUI = 0;
 startFrameLoop(renderer, (dt, now) => {
   controls.update();
-  if (state.sprayLoop) { loopTimer -= dt; if (loopTimer <= 0) { loopTimer = .35; fx.mist(); if (Math.random() < .5) fx.splash(); } }
+  if (state.sprayLoop) { loopTimer -= dt; if (loopTimer <= 0) { loopTimer = SPRAY_LOOP.interval; fx.mist(); if (Math.random() < SPRAY_LOOP.splashChance) fx.splash(); } }
   puffs.update(dt); prefabs.forEach(p => p.update(dt)); chips.update(dt); fragments.update(dt);
   renderer.setRenderTarget(target); renderer.render(scene, camera);
   renderer.setRenderTarget(null); renderer.render(blitScene, blitCamera);
   spray.update(dt); renderer.autoClear = false; renderer.render(fxScene, camera); renderer.autoClear = true;
-  if (now - lastUI > 250) { lastUI = now; $('status').textContent = (assetBaseUrl ? 'Water spray: local sheets' : 'Water spray: generated soft disc') + `\npuffs ${puffs.active + prefabs.reduce((n, p) => n + p.active, 0)} · chips ${chips.active} · fragments ${fragments.active} · mist ${spray.active.mist} · droplets ${spray.active.droplets}`; }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = (assetBaseUrl ? 'Water spray: local sheets' : 'Water spray: generated soft disc') + `\npuffs ${puffs.active + prefabs.reduce((n, p) => n + p.active, 0)} · chips ${chips.active} · fragments ${fragments.active} · mist ${spray.active.mist} · droplets ${spray.active.droplets}`; }
 });
 document.body.dataset.ready = 'true';
 onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); puffs.dispose(); prefabs.forEach(prefab => prefab.dispose()); chips.dispose(); fragments.dispose(); fragmentMaterial.dispose(); fragmentGeometry.dispose(); spray.dispose(); target.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });

@@ -10,7 +10,7 @@ import {createDemoLife} from '../kit/life.js';
 import {createDemoStructures} from '../kit/structures.js';
 import {createCameraShots} from '../kit/shots.js';
 import {createFixedStep} from '../../src/core/fixed-step.js';
-import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {detectAssets} from '../kit/assets.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -20,6 +20,8 @@ import '../bench.css';
 import {aimRay} from '../kit/input.js';
 
 const $ = id => document.getElementById(id);
+const CRUISE_THROTTLE = .75, FOCUS_HEIGHT = .2;   // stick share while cruising; m above sea level the camera follows
+const DRAG_RIPPLE = Object.freeze({radius: 3.2, strength: .65, spacing: 1.5});   // m, share of the gesture strength, m
 const renderer = benchRenderer();
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(53, innerWidth / innerHeight, .15, 9500);
 camera.position.set(18, 6.5, -108);
@@ -101,7 +103,7 @@ async function launchBoat() {
   boat.body.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
   boat.body.applyTo(boat.group);
   scene.add(boat.group);
-  boatFocus.set(boat.body.position.x, .2, boat.body.position.z);
+  boatFocus.set(boat.body.position.x, FOCUS_HEIGHT, boat.body.position.z);
   controls.target.copy(boatFocus);
   camera.position.copy(boatFocus).add(new THREE.Vector3(-12, 10, 9));
   controls.update();
@@ -113,14 +115,14 @@ async function launchBoat() {
 function stepBoat(dt) {
  if (!boat?.ready) return;
  boat.collectSamples();
- boat.controller.stick.y = boatSettings.drive ? .75 : 0;
+ boat.controller.stick.y = boatSettings.drive ? CRUISE_THROTTLE : 0;
  boatClock.advance(dt, step => boat.step(step));
  if (boatSettings.wakeMode === 'footprint') {
   removeHullFootprint ??= ocean.obstacles.add(boat.exclusionShell.geometry, boat.exclusionShell, () => boat.waterlineY);
  } else if (removeHullFootprint) { removeHullFootprint(); removeHullFootprint = undefined; }
  boat.updateWake(ocean.wake, dt, boatSettings.wakeMode);
  boat.updateSpray(dt);
- boatDelta.set(boat.body.position.x, .2, boat.body.position.z).sub(boatFocus);
+ boatDelta.set(boat.body.position.x, FOCUS_HEIGHT, boat.body.position.z).sub(boatFocus);
  boatFocus.add(boatDelta);
  if (boatSettings.follow && !view.waterline) { camera.position.add(boatDelta); controls.target.add(boatDelta); }
 }
@@ -134,7 +136,7 @@ const rippleGesture = bindRippleGesture(renderer.domElement, controls, event => 
   const {center, halfSize} = ocean.wake;
   if (Math.abs(impact.x - center.x) >= halfSize || Math.abs(impact.z - center.y) >= halfSize) return;
   if ((coast.collisionHeightAt(impact.x, impact.z) ?? -1) < 0) return impact;
-}, ({x, z}, strength) => ocean.wake.addDrop(x, z, 3.2, .65 * strength), {spacing: 1.5});
+}, ({x, z}, strength) => ocean.wake.addDrop(x, z, DRAG_RIPPLE.radius, DRAG_RIPPLE.strength * strength), {spacing: DRAG_RIPPLE.spacing});
 
 const gui = createBenchPanel('Ocean coast demo');
 const islandActions = gui.addFolder('Island');
@@ -212,7 +214,7 @@ startFrameLoop(renderer, (dt, now) => {
   } finally {
     renderer.autoClear = autoClear;
   }
-  if (now - lastUI > 250) {
+  if (now - lastUI > STATUS_REFRESH_MS) {
     lastUI = now; wf.sync();
     const {fft, clipmap} = ocean;
     $('status').textContent = `${weather.system.weather.dominant} · ${weather.hourLabel(weather.system.day.hour)}

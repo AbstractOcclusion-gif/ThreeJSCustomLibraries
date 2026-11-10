@@ -11,7 +11,7 @@ import {createPondShadow, POND_SHADOW_GLSL} from './pond-shadow.js';
 export const POND_REFLECTION_DEFAULTS = Object.freeze({on: true, mix: .75, distort: .08, resolution: 512, hz: 15, floor: .15});
 // What render(seconds, settings) uses for a setting the host leaves out. clarity drives the refraction; pondClarity is the
 // pond-optics clarity, read from the same settings.clarity but with its own default.
-const RENDER_DEFAULTS = Object.freeze({
+export const CHANNEL_RENDER_DEFAULTS = Object.freeze({
   clarity: 1, pondClarity: .93, haze: .25, depthDark: 1.2, bankFoam: 1, godRays: 0,
   f0: .02, fresnelPower: 5, sunGlint: .07, reflection: 1, rippleStrength: 1, microRipples: 0,
   caustics: 0, causticDepth: 2.4, causticFalloff: .35, causticFocus: .3, causticNormalScale: 1,
@@ -101,7 +101,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
  const ownsFoam = !foamTexture;
  const foamTile = foamTexture ?? createFoamTexture();
  foamTile.wrapS = foamTile.wrapT = THREE.RepeatWrapping;
- const R = RENDER_DEFAULTS;
+ const R = CHANNEL_RENDER_DEFAULTS;
  const uniforms = {
   ...shadow?.uniforms,
   ...sky.uniforms,

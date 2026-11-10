@@ -8,7 +8,7 @@ import {LeavedTrees, TREE_PROFILE} from '../../src/trees/index.js';
 import {valueNoise} from '../../src/core/value-noise.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {hash2, seededRandom} from '../../src/core/hash.js';
-import {benchRenderer, onLeave, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, onLeave, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {presetsFolder, stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {createRollingBodies} from './ball.js';
@@ -96,10 +96,13 @@ function buildBushes() {
 }
 buildGrass(); placeTrees(); buildBushes();
 
+// Grass flattening under a rolling ball: blades are bladeShare x clump size tall; a box sweeps at least minFootprint m wide.
+const CONTACT = Object.freeze({bladeShare: .35, minFootprint: .2});
+const BALL_LAUNCH = Object.freeze({ahead: 7, gap: .3, stress: 8});   // m before the nearest tree; m between lanes; balls
 const balls = createRollingBodies({scene, onContact(from, to, shape) {
-  const bladeHeight = .35 * P.grass.size;
+  const bladeHeight = CONTACT.bladeShare * P.grass.size;
   const height = shape instanceof Sphere ? Math.min(shape.radius, bladeHeight) : 0;
-  const footprint = height ? Math.sqrt(height * (2 * shape.radius - height)) : Math.max(.2, bladeHeight);
+  const footprint = height ? Math.sqrt(height * (2 * shape.radius - height)) : Math.max(CONTACT.minFootprint, bladeHeight);
   grass.addSweep({fromX: from.x, fromZ: from.z, toX: to.x, toZ: to.z, radius: footprint});
 }});
 function launchBalls(count, box = false) {
@@ -109,7 +112,7 @@ function launchBalls(count, box = false) {
   for (let i = 0; i < count; i++) {
     const radius = P.interact.ballRadius;
     const lane = i === 0 ? 0 : (i % 2 ? 1 : -1) * Math.ceil(i / 2);
-    balls.launch({x: (target?.x ?? 0) + 7, z: (target?.z ?? 2) + lane * (2 * radius + .3),
+    balls.launch({x: (target?.x ?? 0) + BALL_LAUNCH.ahead, z: (target?.z ?? 2) + lane * (2 * radius + BALL_LAUNCH.gap),
       radius, speed: P.interact.ballSpeed, box});
   }
 }
@@ -122,7 +125,7 @@ stageUI.folder.controllersRecursive().forEach(c => c.updateDisplay());
 stageUI.folder.controllers.find(c => c.property === 'gust').hide();   // Plants > gust drives it (saved in the presets)
 grassControls(gui, {settings: P.grass, rebuild: buildGrass});
 plantControls(gui, {plants: P.plants, interact: P.interact, placeTrees, buildBushes, shapeTrees, rollBall,
-  stress: () => launchBalls(8), slide: () => launchBalls(1, true)});
+  stress: () => launchBalls(BALL_LAUNCH.stress), slide: () => launchBalls(1, true)});
 const treeProfileUI = treeProfileControls(gui, {title: 'Tree profile', trees, onChange(profile) {
   P.plants.treeCrown = profile.crown.depth / TREE_PROFILE.crown.depth;
   P.plants.asymmetry = .3 + (profile.lobes.spread - 1) * 2;
@@ -147,7 +150,7 @@ startFrameLoop(renderer, (dt, now) => {
   balls.update(dt);
   grass.update(dt, {camera, environment, transmission: P.grass.transmission * environment.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density, recoverySeconds: P.interact.recoverySeconds});
   renderer.render(scene, camera);
-  if (now - lastUI > 250) { lastUI = now; const s = grass.stats; $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\nwind ${stageUI.state.windSpeed.toFixed(1)} m/s`; }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; const s = grass.stats; $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\nwind ${stageUI.state.windSpeed.toFixed(1)} m/s`; }
 });
 document.body.dataset.ready = 'true';
 onLeave(() => {

@@ -4,7 +4,7 @@ import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createCable, createThreeCableView} from '../../src/cable/index.js';
-import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import {environmentControls} from '../kit/controls.js';
 import {onLeave} from '../kit/page.js';
@@ -43,7 +43,7 @@ const unbindResize = bindResize(renderer, camera);
 startFrameLoop(renderer, (dt, now) => {
   clock.advance(dt, step => { cable.beforeStep(step); world.step(step); cable.afterStep(step); });
   controls.update(); view.update(camera); renderer.render(scene, camera);
-  if (now - lastUI > 250) { lastUI = now; $('status').textContent = `${S.preset} · sections ${state.sections.length} · attached ends ${state.attachments.filter(Boolean).length} · peak tension ${Math.round(Math.max(0, ...cable.joints.map(j => j.tension ?? 0)))} N · ${view.vertexCount} indices`; }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${S.preset} · sections ${state.sections.length} · attached ends ${state.attachments.filter(Boolean).length} · peak tension ${Math.round(Math.max(0, ...cable.joints.map(j => j.tension ?? 0)))} N · ${view.vertexCount} indices`; }
 });
 document.body.dataset.ready = 'true';
 onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); view.dispose(); cable.dispose(); for (const marker of markers) { marker.geometry.dispose(); marker.material.dispose(); } controls.dispose(); gui.destroy(); renderer.dispose(); });

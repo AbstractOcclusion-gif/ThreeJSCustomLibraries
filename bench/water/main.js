@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createChannel, createChannelSurface, createRipples, createFlowBake, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {channelControls, inlandOpticsDefaults} from './controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -11,6 +11,12 @@ import '../bench.css';
 import {aimRay} from '../kit/input.js';
 
 const $ = id => document.getElementById(id);
+// Rock mode: moving a rock splashes the old spot (rippleShare) and the new one (dropShare); a placed rock is radius m; drags
+// are taken at most every DRAG_INTERVAL_MS.
+const ROCK = Object.freeze({radius: .9, rippleShare: .4, dropShare: .55}), DRAG_INTERVAL_MS = 60;
+// Flow markers ride the baked field faster than MIN_MARKER_SPEED2 (m/s squared); they float lift m above the water.
+const MIN_MARKER_SPEED2 = .0025, MARKER_LIFT = .12;
+const UNDERWATER_LIGHT = Object.freeze({night: .22, day: .78});   // underwater fog brightness: night + day x daylight
 const renderer = benchRenderer();
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, .2, 800);
 camera.position.set(46, 39, 63);
@@ -93,13 +99,13 @@ const rippleGesture = bindRippleGesture(canvas, controls, e => {
   const p = pick(e);
   if (p && wetAt(p.x, p.z)) return p;
 }, disturb);
-function moveRock(i, p) { const r = obstacles[i]; if (r.z > 0) ripples.splash(r.x, r.y, P.interact.rippleStrength * .4); r.set(p.x, p.z, .9, 0); syncObstacles(); disturb(p, .55); }
+function moveRock(i, p) { const r = obstacles[i]; if (r.z > 0) ripples.splash(r.x, r.y, P.interact.rippleStrength * ROCK.rippleShare); r.set(p.x, p.z, ROCK.radius, 0); syncObstacles(); disturb(p, ROCK.dropShare); }
 canvas.addEventListener('pointerdown', e => {
   if (diving || P.interact.mode !== 'rock' || e.button !== 0) return; const p = pick(e);
   const hit = ray.intersectObjects(movableRocks.filter(m => m.visible))[0]; dragged = hit ? movableRocks.indexOf(hit.object) : obstacles.findIndex(r => r.z === 0); if (!hit && p && dragged >= 0) moveRock(dragged, p); else if (!hit) dragged = -1;
   canvas.setPointerCapture(e.pointerId); lastEdit = e.timeStamp;
 });
-canvas.addEventListener('pointermove', e => { if (dragged < 0 || P.interact.mode !== 'rock' || !canvas.hasPointerCapture(e.pointerId) || e.timeStamp - lastEdit < 60) return; const p = pick(e); if (p) moveRock(dragged, p); lastEdit = e.timeStamp; });
+canvas.addEventListener('pointermove', e => { if (dragged < 0 || P.interact.mode !== 'rock' || !canvas.hasPointerCapture(e.pointerId) || e.timeStamp - lastEdit < DRAG_INTERVAL_MS) return; const p = pick(e); if (p) moveRock(dragged, p); lastEdit = e.timeStamp; });
 canvas.addEventListener('lostpointercapture', () => { dragged = -1; });
 
 const unbindResize = bindResize(renderer, camera);
@@ -111,21 +117,21 @@ startFrameLoop(renderer, (dt, now) => {
   if (markers.visible) {
     pose.rotation.set(0, 0, 0); pose.scale.setScalar(1);
     for (let i = 0; i < markers.count; i++) {
-      if (flow.ready) { const m = markerPositions[i]; if (flow.sample(m.x, m.z, velocity) && velocity.lengthSq() > .0025) { m.x += velocity.x * dt * P.water.speed; m.z += velocity.y * dt * P.water.speed; } else channel.sample(.7 + i * .16, ((i % 7) - 3) * .12, m); m.y = channel.sectionAt(m.x)?.height ?? m.y; pose.position.copy(m); }
+      if (flow.ready) { const m = markerPositions[i]; if (flow.sample(m.x, m.z, velocity) && velocity.lengthSq() > MIN_MARKER_SPEED2) { m.x += velocity.x * dt * P.water.speed; m.z += velocity.y * dt * P.water.speed; } else channel.sample(.7 + i * .16, ((i % 7) - 3) * .12, m); m.y = channel.sectionAt(m.x)?.height ?? m.y; pose.position.copy(m); }
       else channel.sample(flowTime + channel.duration * i / markers.count, ((i % 5) - 2) * .26, pose.position);
-      pose.position.y += .12; pose.updateMatrix(); markers.setMatrixAt(i, pose.matrix);
+      pose.position.y += MARKER_LIFT; pose.updateMatrix(); markers.setMatrixAt(i, pose.matrix);
     }
     markers.instanceMatrix.needsUpdate = true;
   }
   rippleGesture.update(dt);
   ripples.update(dt);
-  const fog = scene.fog; if (diving) { underwaterFog.color.set(0x336c65).multiplyScalar(.22 + .78 * stage.environment.daylight); scene.fog = underwaterFog; }
+  const fog = scene.fog; if (diving) { underwaterFog.color.set(0x336c65).multiplyScalar(UNDERWATER_LIGHT.night + UNDERWATER_LIGHT.day * stage.environment.daylight); scene.fog = underwaterFog; }
   try {
     water.render(flowTime, {...P.water,
       waveTime, waveHeight: P.waves.height, wavelength: P.waves.wavelength, waveDirection: THREE.MathUtils.degToRad(stageUI.state.windHeading + P.waves.direction), waveSpread: THREE.MathUtils.degToRad(P.waves.spread)});
     renderer.render(scene, camera);
   } finally { scene.fog = fog; }
-  if (now - lastUI > 250) { lastUI = now; $('status').textContent = bakeStatus + (ripples.active ? '\nripples active' : ''); }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = bakeStatus + (ripples.active ? '\nripples active' : ''); }
 });
 document.body.dataset.ready = 'true';
 window.waterBench = {water, ripples, flow, obstacles, stage, scene, camera, renderer, bake, get channel() { return channel; }};

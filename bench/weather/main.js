@@ -8,7 +8,7 @@ import {downloadJson, readJsonFile} from '../../src/core/presets.js';
 import '../bench.css';
 import '../ui-demo.js';
 import {detectAssets} from '../kit/assets.js';
-import {bindResize, startFrameLoop} from '../kit/page.js';
+import {bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 
 const $ = id => document.getElementById(id), errors = [], events = [];
 function showError(error) { errors.push(String(error)); $('error').hidden = false; $('error').textContent = String(error); console.error(error); }
@@ -157,22 +157,25 @@ $('save').onclick = () => downloadJson('weather-preset.json', devPanel.getPreset
 $('load').onchange = async () => { try { const file = $('load').files[0]; if (file) devPanel.loadPreset(await readJsonFile(file)); } catch (error) { showError(error); } finally { $('load').value = ''; } };
 
 const unbindResize = bindResize(renderer, camera);
+// Fog wake demo: a sphere swings `swing` m at `rate` rad/s; its wake tail trails `lag` s behind, `radius` m wide.
+const FOG_WAKE_DEMO = Object.freeze({swing: 34, rate: .55, lag: 1.8, radius: 7});
 let lastUI = 0;
 startFrameLoop(renderer, (dt, now) => {
   controls.update(); system.update(dt);
   wakeProbe.visible = $('fog-wake').checked;
   if (wakeProbe.visible) {
     if (!system.paused) wakeTime += dt;
-    wakeProbe.position.x = 34 * Math.sin(wakeTime * .55);
+    const W = FOG_WAKE_DEMO;
+    wakeProbe.position.x = W.swing * Math.sin(wakeTime * W.rate);
     wakeTail.copy(wakeProbe.position);
-    wakeTail.x = 34 * Math.sin(Math.max(0, wakeTime - 1.8) * .55);
-    view.setFogWake(wakeProbe.position, wakeTail, 7);
+    wakeTail.x = W.swing * Math.sin(Math.max(0, wakeTime - W.lag) * W.rate);
+    view.setFogWake(wakeProbe.position, wakeTail, W.radius);
   } else {
     wakeTime = 0;
     view.setFogWake();
   }
   try { view.update(dt); view.render(); } catch (error) { showError(error); renderer.setAnimationLoop(null); }
-  if (now - lastUI > 250) {
+  if (now - lastUI > STATUS_REFRESH_MS) {
     $('status').textContent = (assetsReady ? '' : 'Loading sky assets…\n') + (privateBase ? '' : 'Bundled free sky textures\n') + system.weather.dominant + ' · ' + hourLabel(system.day.hour) + ' · ' + system.weather.temperature.toFixed(1) + ' °C\nWind ' + system.weather.wind.toFixed(1) + ' m/s · rain ' + Math.round(system.weather.rain * 100) + '% · snow ' + Math.round(system.weather.snow * 100) + '%';
     syncControls(); if ($('developer').open) devPanel.refresh(); lastUI = now;
   }

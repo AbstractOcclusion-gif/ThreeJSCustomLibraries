@@ -10,6 +10,8 @@ import {environmentControls} from '../kit/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
 
+// Crate glow: intensity x min(1, fuel x fuelGain), flickering by flicker at flickerRate rad/ms; charred trim is trimShade of the plank.
+const GLOW = Object.freeze({intensity: 2.8, fuelGain: 3, flicker: .1, flickerRate: .017}), TRIM_SHADE = .75;
 const renderer = benchRenderer();
 renderer.shadowMap.enabled = true;
 const scene = new T.Scene();
@@ -119,8 +121,8 @@ startFrameLoop(renderer, (dt, now) => {
     burned += Number(fire.phase === 'burned');
     fx.update(dt);
     plank.color.copy(wood).lerp(char, 1 - fire.fuel);
-    trim.color.copy(plank.color).multiplyScalar(0.75);
-    light.intensity = isBurning ? 2.8 * Math.min(1, fire.fuel * 3) * (0.9 + 0.1 * Math.sin(now * 0.017 + index)) : 0;
+    trim.color.copy(plank.color).multiplyScalar(TRIM_SHADE);
+    light.intensity = isBurning ? GLOW.intensity * Math.min(1, fire.fuel * GLOW.fuelGain) * ((1 - GLOW.flicker) + GLOW.flicker * Math.sin(now * GLOW.flickerRate + index)) : 0;
   }
   const summary = `${crates.length - burning - burned} unlit · ${burning} burning · ${burned} burned`;
   if (lastStatus !== summary) { status.textContent = summary; lastStatus = summary; }

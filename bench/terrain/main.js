@@ -4,7 +4,7 @@ import {createBenchPanel} from '../panel.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial} from '../../src/terrain/index.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
@@ -68,7 +68,7 @@ startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   surfaceWeather.update(dt, null);   // null: keeps the manual levels, still animates the rain streaks
   renderer.render(scene, camera);
-  if (now - lastUI > 250) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${surface.wetness.toFixed(2)} · snow ${surface.snow.toFixed(2)}`; }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${surface.wetness.toFixed(2)} · snow ${surface.snow.toFixed(2)}`; }
 });
 document.body.dataset.ready = 'true';
 window.terrainBench = {field, rules, appearance, surfaceWeather, tracks, stage, scene, camera, renderer};

@@ -1,10 +1,10 @@
 import {presetsFolder} from '../kit/controls.js';
-import {POND_REFLECTION_DEFAULTS} from '../../src/water/surface.js';
+import {POND_REFLECTION_DEFAULTS, CHANNEL_RENDER_DEFAULTS} from '../../src/water/surface.js';
 
-// Match createChannelSurface.render defaults for the settings both render modes use.
+// The channel surface's own render defaults for the optics settings both render modes use (one source: surface.js).
 export function inlandOpticsDefaults() {
-  return {f0: .02, fresnelPower: 5, sunGlint: .07, causticDepth: 2.4, causticFocus: .3,
-    causticFalloff: .35, causticNormalScale: 1, shaftLength: 4, godColor: '#bfeaff', godFalloff: .9, godSteps: 24};
+  const {f0, fresnelPower, sunGlint, causticDepth, causticFocus, causticFalloff, causticNormalScale, shaftLength, godColor, godFalloff, godSteps} = CHANNEL_RENDER_DEFAULTS;
+  return {f0, fresnelPower, sunGlint, causticDepth, causticFocus, causticFalloff, causticNormalScale, shaftLength, godColor, godFalloff, godSteps};
 }
 
 export function waterFreezeControls(folder, freeze) {

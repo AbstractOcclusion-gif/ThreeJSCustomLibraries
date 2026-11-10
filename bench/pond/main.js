@@ -14,6 +14,11 @@ import {sprayControls} from '../particles/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
 
+// Waterfall: the sheet scrolls at (base + flow) x time; every interval / max(minFlow, flow) s an impact lands somewhere
+// within spread m across, splashing the ripples at rippleShare x flow and throwing mist and droplets; impact foam = foamShare x flow.
+const FALL = Object.freeze({scrollBase: .5, interval: .18, minFlow: .25, spread: 3, rippleShare: .5, sprayHeight: .12,
+  mistRadius: .75, splashShare: .5, splashRadius: .18, foamShare: .75});
+const FLOW_TIME_SCALE = .12;   // the pond surface's foam / flow clock against real seconds
 const renderer = benchRenderer();
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.1, 500);
@@ -226,23 +231,23 @@ startFrameLoop(renderer, (dt, now) => {
   if (freezeProgress >= 1) rippleGesture.cancel();
   rippleGesture.update(dt);
   const discharge = state.discharge;
-  fallTime += dt * (0.5 + discharge);
+  fallTime += dt * (FALL.scrollBase + discharge);
   sheet.visible = discharge > 0;
   sheetMaterial.uniforms.time.value = fallTime;
   sheetMaterial.uniforms.discharge.value = discharge;
-  impact.w = Math.min(1, discharge * 0.75);
+  impact.w = Math.min(1, discharge * FALL.foamShare);
   if (discharge > 0 && time >= nextImpact) {
-    nextImpact = time + 0.18 / Math.max(0.25, discharge);
-    const x = (Math.random() - 0.5) * 3 * Math.min(1, discharge);
-    if (freezeProgress < 1) ripples.splash(x, impact.y, discharge * 0.5);
-    sprayPosition.set(x, 0.12, impact.y);
-    spray.mist(sprayPosition, Math.min(1, discharge), 0.75);
-    spray.splash(sprayPosition, Math.min(1, discharge * 0.5), 0.18);
+    nextImpact = time + FALL.interval / Math.max(FALL.minFlow, discharge);
+    const x = (Math.random() - 0.5) * FALL.spread * Math.min(1, discharge);
+    if (freezeProgress < 1) ripples.splash(x, impact.y, discharge * FALL.rippleShare);
+    sprayPosition.set(x, FALL.sprayHeight, impact.y);
+    spray.mist(sprayPosition, Math.min(1, discharge), FALL.mistRadius);
+    spray.splash(sprayPosition, Math.min(1, discharge * FALL.splashShare), FALL.splashRadius);
   }
   spray.update(dt);
   if (freezeProgress < 1) ripples.update(dt);
   canvas.dataset.ripples = ripples.active ? 'active' : 'still';
-  water.render(time * 0.12, {
+  water.render(time * FLOW_TIME_SCALE, {
     ...state, waveTime: time,
     impactFoam: impact,
     freezeProgress,

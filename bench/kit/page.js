@@ -20,6 +20,7 @@ export function bindResize(renderer, camera, after) {
   return () => removeEventListener('resize', resize);
 }
 
+export const STATUS_REFRESH_MS = 250;   // how often the pages rewrite their status text
 const MAX_FRAME_SECONDS = .05;   // a slow or resumed frame advances the scene at most this much: no jump after a hitch
 
 // The bench frame loop: frame(dt, now) runs on every visible frame. dt is in seconds, 0 on the first frame and on the first

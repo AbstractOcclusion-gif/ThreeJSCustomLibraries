@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {BUNDLED_FISH_MODELS_URL, FISH_SPECIES, createFishFlock} from '../../src/flocking/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import '../bench.css';
 
@@ -51,7 +51,7 @@ startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   flock?.update(dt);
   renderer.render(scene, camera);
-  if (now - lastUI > 250) { lastUI = now; $('status').textContent = `${flock?.fish.length ?? 0} fish`; }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${flock?.fish.length ?? 0} fish`; }
 });
 document.body.dataset.ready = 'true';
 window.flockingBench = {get flock() { return flock; }, counts, stage, scene, camera, renderer};

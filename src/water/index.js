@@ -2,7 +2,7 @@ export {createWaveBank, waveCount, WIND_WAVE_DEFAULTS} from './waves.js';
 export {createRipples} from './ripples.js';
 export {createFlowBake} from './flow-bake.js';
 export {createChannel, DEFAULT_SECTIONS} from './channel.js';
-export {createChannelSurface, POND_REFLECTION_DEFAULTS} from './surface.js';
+export {createChannelSurface, POND_REFLECTION_DEFAULTS, CHANNEL_RENDER_DEFAULTS} from './surface.js';
 export {createWaterFreeze} from './freeze.js';
 export {createWaterlineComposite} from './waterline.js';
 export {JERLOV, JERLOV_NAMES} from './jerlov.js';
