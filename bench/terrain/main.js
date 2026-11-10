@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import GUI from 'lil-gui';
+import {createBenchPanel} from '../panel.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS} from '../../src/terrain/index.js';
 import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
@@ -8,11 +8,14 @@ import {valueNoise} from '../../src/terrain/terrain-noise.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createChannelSurface, createFlowBake, createFreezeTexture, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
-import {benchRenderer, createBenchPondSettings, createBenchWeather, pondWindControls, waterFreezeControls, waterMaterialControls, weatherFolder} from '../shared.js';
+import {benchRenderer, createBenchWeather, mountWeatherControls} from '../shared.js';
+import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
 import {createTerrainIce} from './ice.js';
 import {loadTerrainTextures} from './textures.js';
-import {grassCoverageAt, grassDensityControls, terrainControls} from './controls.js';
+import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from './controls.js';
+import {grassControls} from '../vegetation/controls.js';
+import {sprayControls} from '../particles/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
 
@@ -150,9 +153,10 @@ const sprayScene = new THREE.Scene();
 const waterPlane = new THREE.Vector4(0, 1, 0, 0);
 const splashPosition = new THREE.Vector3();
 const light = weather.view.uniforms;
+const sprayDepth = createParticleDepthBinding({THREE, camera, depthTexture: pond.depthTexture, viewport: pond.viewport, waterPlane});
 const spray = createWaterSpray({
  THREE, scene: sprayScene, renderer,
- depth: createParticleDepthBinding({THREE, camera, depthTexture: pond.depthTexture, viewport: pond.viewport, waterPlane}),
+ depth: sprayDepth,
  surface: {
   glsl: 'uniform float uOceanAmplitude, uPondLevel; float surfaceHeightAt(vec2 xz) { return uPondLevel; }',
   uniforms: {uOceanAmplitude: {value: 1}, uPondLevel: appearance.waterLevel},
@@ -188,28 +192,37 @@ function stampDemo() {
   for (let i = 0; i < 28; i++) tracks.stamp(point(i), point(i + 1), .32);
  }
 }
-const gui = new GUI({title: 'Terrain material'});
+const gui = createBenchPanel('Terrain material');
+sprayControls(gui, {spray, depth: sprayDepth}).close();
 const controlsState = {blendObjects: true, water: true, wetPreview: false};
 const meadow = createFreeVegetation({meadowBlades: true});
 const defaultCover = {grass: 100, rock: 0, snow: 0, mud: 0, forest: 24, patchiness: .85, patchSize: 5};
 const cover = {...defaultCover};
 const coverStats = {clumps: 0};
+const grassSettings = {
+ clumps: 14000, radius: Math.ceil(Math.hypot(half, half)), size: 1, sizeVariation: 1,
+ color: '#50762e', soilColor: '#c2aa61', tintVariation: 1, density: 1,
+ lodDistance: 22, farDensity: .45, shadowDistance: 0, transmission: 1.45,
+};
 const patchNoise = valueNoise(23);
-const meadowGreen = new THREE.Color('#50762e'), meadowDry = new THREE.Color('#c2aa61'), meadowTint = new THREE.Color();
+const meadowTint = new THREE.Color();
 let terrainGrass, grassDirty = false;
 function rebuildGrass() {
  terrainGrass?.dispose();
  const random = seededRandom(41), placements = [];
- for (let i = 0; i < 14000; i++) {
+ const meadowGreen = new THREE.Color(grassSettings.color), meadowDry = new THREE.Color(grassSettings.soilColor);
+ for (let i = 0; i < grassSettings.clumps; i++) {
   const x = (random() - .5) * span, z = (random() - .5) * span;
   const chance = random(), yaw = random() * Math.PI * 2, variation = random();
+  if (Math.hypot(x, z) > grassSettings.radius) continue;
   const y = field.heightAt(x, z);
   if (controlsState.water && y < appearance.waterLevel.value + .06) continue;
   const patch = THREE.MathUtils.smoothstep(patchNoise(x / cover.patchSize, z / cover.patchSize), -.5, .5);
   if (chance >= grassCoverageAt(field, x, z, cover, patch)) continue;
   const dry = Math.max(patch, field.layerWeightAt(x, z, TERRAIN_LAYERS.indexOf('mud')));
-  meadowTint.lerpColors(meadowGreen, meadowDry, dry);
-  const scale = THREE.MathUtils.lerp(.4, 1.75, .7 * (1 - dry) + .3 * variation);
+  meadowTint.lerpColors(meadowGreen, meadowDry, dry * grassSettings.tintVariation);
+  const varied = THREE.MathUtils.lerp(.4, 1.75, .7 * (1 - dry) + .3 * variation);
+  const scale = grassSettings.size * THREE.MathUtils.lerp(1, varied, grassSettings.sizeVariation);
   placements.push({x, y: y - .02, z, yaw, scale, tint: meadowTint.toArray()});
  }
  terrainGrass = createGrassField({scene, geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff,
@@ -219,6 +232,7 @@ function rebuildGrass() {
 }
 rebuildGrass();
 grassDensityControls(gui, {cover, defaults: defaultCover, stats: coverStats, rebuild: rebuildGrass});
+grassControls(gui, {settings: grassSettings, rebuild: rebuildGrass});
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
  onIceBreak(x, y, z, energy) {
   const strength = THREE.MathUtils.clamp(energy / 2400, .55, 1);
@@ -251,13 +265,9 @@ terrainControls(gui, {rules, appearance, onLayersChanged() { field.updateRules(r
 const waterControls = gui.addFolder('Water');
 waterControls.add(controlsState, 'water').name('Show pond').onChange(rebuildGrass);
 waterControls.add(appearance.waterLevel, 'value', -2, maxWaterLevel, .05).name('Water level · m').onFinishChange(rebuildGrass);
-waterControls.add(pondSettings, 'foam', 0, 1, .05).name('Shore foam');
-waterControls.add(pondSettings, 'foamFeather', 0, 1, .05).name('Foam feather');
-pondWindControls(waterControls.addFolder('Wind ripples'), pondSettings.windWaves);
-waterMaterialControls(waterControls, pondSettings);
-const viewControls = waterControls.addFolder('View');
-const diveControl = viewControls.add({toggleUnderwater: () => setDiving(!diving)}, 'toggleUnderwater').name('Underwater view');
-const diveHeight = viewControls.add(pondSettings, 'diveHeight', -2.4, .25, .01).name('Eye above water · m').disable();
+const {diveControl, diveHeight} = inlandWaterControls(waterControls, {
+ settings: pondSettings, freeze, toggleUnderwater: () => setDiving(!diving),
+});
 function setDiving(enabled) {
  rippleGesture.cancel();
  diving = enabled;
@@ -267,7 +277,6 @@ function setDiving(enabled) {
  diveHeight.enable(enabled);
  diveControl.name(enabled ? 'Return above water' : 'Underwater view');
 }
-waterFreezeControls(waterControls.addFolder('Freeze and thaw'), freeze);
 const iceControls = waterControls.addFolder('Ice impacts');
 function dropOnIce(hard) {
  impacts.launch('box', impactSettings.surface, {hard, level: appearance.waterLevel.value});
@@ -280,12 +289,10 @@ iceLook.addColor(ice.material, 'color').name('Ice color');
 iceLook.add(ice.material, 'roughness', .05, 1, .01).name('Roughness');
 iceLook.add(ice.material, 'clearcoat', 0, 1, .01).name('Gloss coat');
 iceLook.add(ice.material, 'bumpScale', 0, .12, .005).name('Frost relief');
-const shoreline = gui.addFolder('Shoreline');
-shoreline.add(appearance.shoreWidth, 'value', 0, 2, .05).name('Wet band · m');
-shoreline.add(appearance.shoreWetness, 'value', 0, 1, .05).name('Water wetness');
+shorelineControls(gui, appearance);
 gui.add({stampDemo}, 'stampDemo').name('Lay tracks');
 gui.add(tracks, 'clear').name('Clear tracks');
-const weatherUI = weatherFolder(gui, weather);
+const weatherUI = mountWeatherControls(weather);
 const profiling = gui.addFolder('Performance');
 const performanceSettings = {skyInterval: 1.25, pixelRatio: renderer.getPixelRatio(), cloudShadows: true};
 profiling.add(performanceSettings, 'skyInterval', [.35, 1.25, 8]).name('Sky refresh · s').onChange(value => weather.view.configure({sky: {captureInterval: value}}));
@@ -349,7 +356,9 @@ renderer.setAnimationLoop(now => {
  if (grassDirty && !impacts.moving) rebuildGrass();
  const wind = weather.system.weather, heading = THREE.MathUtils.degToRad(wind.windHeading);
  terrainGrass.update(dt, {camera, windX: Math.cos(heading) * wind.wind, windZ: Math.sin(heading) * wind.wind,
-  gust: .4, transmission: 1.45 * weather.system.day.daylight, lodDistance: 22, farDensity: .45, shadowDistance: 0, density: 1});
+  gust: .4, transmission: grassSettings.transmission * weather.system.day.daylight,
+  lodDistance: grassSettings.lodDistance, farDensity: grassSettings.farDensity,
+  shadowDistance: grassSettings.shadowDistance, density: grassSettings.density});
  const moving = impacts.moving, sun = weather.view.sun;
  if (moving || wasMoving || !lastSun.equals(sun.position)) sun.shadow.needsUpdate = true;
  wasMoving = moving;
@@ -396,6 +405,7 @@ addEventListener('pagehide', event => {
  rippleGesture.dispose();
  controls.dispose();
  gui.destroy();
+ weatherUI.dispose();
  impacts.dispose();
  spray.dispose();
  pond.dispose();

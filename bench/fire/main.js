@@ -1,6 +1,7 @@
+import {fireControls} from './controls.js';
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
+import {createBenchPanel} from '../panel.js';
 import {createFireSystem} from '../../src/fire/index.js';
 import {createParticlePrefab} from '../../src/particles/index.js';
 import {benchRenderer} from '../shared.js';
@@ -75,9 +76,8 @@ const reset = () => {
     crate.fx.clear();
   }
 };
-const gui = new GUI({title: 'Fire'});
-gui.add({ignite: () => crates[0].fire.ignite()}, 'ignite').name('Ignite first crate');
-gui.add({reset}, 'reset').name('Reset crates');
+const gui = createBenchPanel('Fire');
+fireControls(gui, {ignite: () => crates[0].fire.ignite(), reset});
 
 const ray = new T.Raycaster();
 const pointer = new T.Vector2();

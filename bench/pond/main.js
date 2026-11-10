@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
+import {createBenchPanel} from '../panel.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createFishFlock} from '../../src/flocking/index.js';
 import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
-import {benchRenderer, createBenchPondSettings, createBenchWeather, detectAssets, pondWindControls, waterFreezeControls, waterMaterialControls, weatherFolder} from '../shared.js';
+import {benchRenderer, createBenchWeather, detectAssets, mountWeatherControls} from '../shared.js';
+import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {valueNoise} from '../../src/terrain/terrain-noise.js';
+import {sprayControls} from '../particles/controls.js';
 import '../bench.css';
 
 const renderer = benchRenderer();
@@ -165,15 +167,13 @@ const spray = createWaterSpray({
 
 
 
-const state = {...createBenchPondSettings(), discharge: 1, diveHeight: -2.1};
-const gui = new GUI({title: 'Pond & waterfall'});
+const state = {...createBenchPondSettings(), bankFoam: .12, discharge: 1, diveHeight: -2.1};
+const gui = createBenchPanel('Pond & waterfall');
+sprayControls(gui, {spray, depth}).close();
 gui.add(state, 'discharge', 0, 2, 0.05).name('Waterfall flow');
-gui.add(state, 'foam', 0, 1, 0.05).name('Foam');
-pondWindControls(gui.addFolder('Wind ripples'), state.windWaves);
-waterMaterialControls(gui.addFolder('Water'), state);
-const diveControl = gui.add({toggleUnderwater}, 'toggleUnderwater').name('Underwater view');
-const diveHeight = gui.add(state, 'diveHeight', -2.4, .25, .01).name('Eye above water · m')
- .onChange(positionDiveCamera).disable();
+const {diveControl, diveHeight} = inlandWaterControls(gui.addFolder('Water'), {
+ settings: state, freeze, toggleUnderwater, positionDiveCamera,
+});
 const fishState = {show: false};
 const fishLoad = new AbortController();
 let flock, loading;
@@ -193,8 +193,7 @@ gui.add(fishState, 'show').name('Show fish school').onChange(async enabled => {
   if (!fishLoad.signal.aborted) console.error(error);
  } finally { loading = false; }
 });
-waterFreezeControls(gui.addFolder('Freeze and thaw'), freeze);
-const weatherUI = weatherFolder(gui, weather);
+const weatherUI = mountWeatherControls(weather);
 
 let diving = false;
 const above = new THREE.Vector3();
@@ -269,7 +268,7 @@ renderer.setAnimationLoop(now => {
   if (freezeProgress < 1) ripples.update(dt);
   canvas.dataset.ripples = ripples.active ? 'active' : 'still';
   water.render(time * 0.12, {
-    ...state, bankFoam: .12, foamFeather: .7, speed: 1, waveTime: time,
+    ...state, waveTime: time,
     impactFoam: impact,
     freezeProgress,
   });
@@ -301,5 +300,6 @@ window.addEventListener('pagehide', event => {
   for (const resource of [bedGeometry, bedMaterial, cliff, stone, stoneMaterial, sheetGeometry, sheetMaterial, foamTile]) resource.dispose();
   controls.dispose();
   gui.destroy();
+  weatherUI.dispose();
   renderer.dispose();
 });

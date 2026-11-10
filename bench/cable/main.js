@@ -1,8 +1,9 @@
+import {cableControls} from './controls.js';
 import * as C from 'cannon-es';
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
-import {createCable, createThreeCableView, CABLE_PRESETS} from '../../src/cable/index.js';
+import {createBenchPanel} from '../panel.js';
+import {createCable, createThreeCableView} from '../../src/cable/index.js';
 import {benchRenderer} from '../shared.js';
 import '../bench.css';
 
@@ -27,10 +28,9 @@ function reset() {
   view = createThreeCableView({scene, cable: {links: cable.links, profile: cable.profile, get sections() { return state.sections; }}});
 }
 reset();
-const gui = new GUI({title: 'Cable'});
-gui.add(S, 'preset', Object.keys(CABLE_PRESETS)).onChange(reset); gui.add(S, 'span', 2, 14, .5).onFinishChange(reset); gui.add(S, 'slack', 1.01, 1.3, .01).name('length / span').onFinishChange(reset);
-gui.add(S, 'segments', 4, 24, 1).onFinishChange(reset); gui.add(S, 'breakStrength', 100, 1e6, 100).onFinishChange(reset);
-gui.add({cut: () => cable.breakAt(Math.floor(cable.joints.length / 2))}, 'cut').name('cut at centre'); gui.add({release: () => cable.release(0)}, 'release').name('release left anchor'); gui.add({reset}, 'reset');
+const gui = createBenchPanel('Cable');
+cableControls(gui, {settings: S, reset, cut: () => cable.breakAt(Math.floor(cable.joints.length / 2)), release: () => cable.release(0)});
+
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize);
 renderer.setAnimationLoop(now => {

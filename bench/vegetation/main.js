@@ -1,13 +1,15 @@
+import {grassControls, plantControls} from './controls.js';
+import {treeProfileControls} from '../trees/controls.js';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
+import {createBenchPanel} from '../panel.js';
 import {createGrassField, createFreeVegetation, loadSyntyVegetation} from '../../src/vegetation/index.js';
 import {LeavedTrees, TREE_PROFILE} from '../../src/trees/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS, valueNoise} from '../../src/terrain/index.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {hash2, seededRandom} from '../../src/core/hash.js';
-import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder, detectAssets} from '../shared.js';
+import {benchRenderer, createBenchWeather, mountWeatherControls, presetsFolder, detectAssets} from '../shared.js';
 import {loadTerrainTextures} from '../terrain/textures.js';
 import {grassCoverageAt, grassDensityControls, terrainControls} from '../terrain/controls.js';
 import {createRollingBodies} from './ball.js';
@@ -108,9 +110,11 @@ function placeTrees() {
 }
 function shapeTrees() {
   trees.setProfile({
-    crown: {depth: THREE.MathUtils.clamp(TREE_PROFILE.crown.depth * P.plants.treeCrown, .1, .9)},
-    lobes: {spread: 1 + (P.plants.asymmetry - .3) * .5},
+    ...trees.profile,
+    crown: {...trees.profile.crown, depth: THREE.MathUtils.clamp(TREE_PROFILE.crown.depth * P.plants.treeCrown, .1, 1)},
+    lobes: {...trees.profile.lobes, spread: 1 + (P.plants.asymmetry - .3) * .5},
   });
+  treeProfileUI.sync();
 }
 function buildBushes() {
   bushes.place(plantSites(P.plants.bushes, 13).map(({x, z, yaw, size}) => {
@@ -140,28 +144,20 @@ function launchBalls(count, box = false) {
 }
 const rollBall = () => launchBalls(1);
 
-const gui = new GUI({title: 'Vegetation'});
-const wf = weatherFolder(gui, weather);
-const fg = gui.addFolder('Grass');
-fg.add(P.grass, 'clumps', 500, 60000, 500).onFinishChange(buildGrass); fg.add(P.grass, 'radius', 10, 60, 1).onFinishChange(buildGrass);
-fg.add(P.grass, 'size', .35, 2.5, .05).name('Clump size').onFinishChange(buildGrass);
-fg.add(P.grass, 'sizeVariation', 0, 1, .01).name('Size variation').onFinishChange(buildGrass);
-fg.addColor(P.grass, 'color').name('Meadow color').onFinishChange(buildGrass);
-fg.addColor(P.grass, 'soilColor').name('Dry grass color').onFinishChange(buildGrass);
-fg.add(P.grass, 'tintVariation', 0, 1, .01).name('Color variation').onFinishChange(buildGrass);
-fg.add(P.grass, 'density', 0, 1, .01); fg.add(P.grass, 'lodDistance', 5, 80, 1); fg.add(P.grass, 'farDensity', 0, 1, .01); fg.add(P.grass, 'shadowDistance', 0, 60, 1); fg.add(P.grass, 'transmission', 0, 2, .01).name('backlight');
+const gui = createBenchPanel('Vegetation');
+const wf = mountWeatherControls(weather);
+grassControls(gui, {settings: P.grass, rebuild: buildGrass});
 const terrain = gui.addFolder('Terrain').close();
 terrainControls(terrain, {rules, appearance, onLayersChanged() { field.updateRules(rules); buildGrass(); }});
 grassDensityControls(terrain, {cover, defaults: defaultCover, stats: coverStats, rebuild: buildGrass});
-const fp = gui.addFolder('Plants');
-fp.add(P.plants, 'trees', 0, 60, 1).onFinishChange(placeTrees); fp.add(P.plants, 'bushes', 0, 120, 1).onFinishChange(buildBushes); fp.add(P.plants, 'gust', 0, 1, .01);
-fp.add(P.plants, 'treeWidth', .5, 1.8, .01).name('Crown width').onFinishChange(placeTrees);
-fp.add(P.plants, 'treeCrown', .4, 1.6, .01).name('Crown depth').onFinishChange(shapeTrees);
-fp.add(P.plants, 'asymmetry', 0, 1, .01).name('Lobe spread').onFinishChange(shapeTrees);
-const fi = gui.addFolder('Interact'); fi.add(P.interact, 'ballSpeed', 1, 15, .5); fi.add(P.interact, 'ballRadius', .4, 2.5, .1); fi.add({rollBall}, 'rollBall').name('roll the ball');
-fi.add(P.interact, 'recoverySeconds', .25, 8, .25).name('Grass recovery · s');
-fi.add({stress: () => launchBalls(8)}, 'stress').name('Stress test · 8 balls');
-fi.add({slide: () => launchBalls(1, true)}, 'slide').name('Slide a box');
+plantControls(gui, {plants: P.plants, interact: P.interact, placeTrees, buildBushes, shapeTrees, rollBall,
+  stress: () => launchBalls(8), slide: () => launchBalls(1, true)});
+const treeProfileUI = treeProfileControls(gui, {title: 'Tree profile', trees, onChange(profile) {
+  P.plants.treeCrown = profile.crown.depth / TREE_PROFILE.crown.depth;
+  P.plants.asymmetry = .3 + (profile.lobes.spread - 1) * 2;
+  gui.controllersRecursive().forEach(control => control.updateDisplay());
+}});
+treeProfileControls(gui, {title: 'Bush profile', trees: bushes});
 presetsFolder(gui, {bundled: import.meta.glob('../../presets/vegetation/*.json'), name: 'vegetation',
   getState: () => ({schema: 'three-kit.vegetation', version: 1, grass: {...P.grass}, plants: {...P.plants}}),
   apply: p => {

@@ -1,14 +1,21 @@
-import {TERRAIN_LAYERS} from '../../src/terrain/index.js';
+import {OCEAN_COAST_WET_DEFAULTS, TERRAIN_LAYERS, TERRAIN_PAINT_DEFAULTS, TERRAIN_PAINT_FIELDS} from '../../src/terrain/index.js';
 
 export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
   const automatic = gui.addFolder('Automatic layers');
-  for (const [key, label, min, max, step] of [
+  const primary = [
     ['rockSlope', 'Rock slope', .2, 2, .05],
     ['snowLine', 'Snow line · m', -2, 22, .5],
     ['mudBelow', 'Mud below · m', -3, 6, .1],
     ['forestCover', 'Forest floor coverage', 0, 1, .01],
-  ]) {
+  ];
+  for (const [key, label, min, max, step] of primary) {
     automatic.add(rules, key, min, max, step).name(label).onFinishChange(onLayersChanged);
+  }
+  const detail = automatic.addFolder('Layer detail').close();
+  for (const [key, spec] of Object.entries(TERRAIN_PAINT_FIELDS)) {
+    if (primary.some(([name]) => key === name)) continue;
+    rules[key] ??= TERRAIN_PAINT_DEFAULTS[key];
+    detail.add(rules, key, spec.min, spec.max, spec.step).name(spec.label).onFinishChange(onLayersChanged);
   }
   const textures = gui.addFolder('Triplanar textures');
   for (const [key, label, min, max, step] of [
@@ -21,6 +28,22 @@ export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
   ]) {
     textures.add(appearance[key], 'value', min, max, step).name(label);
   }
+}
+
+export function shorelineControls(gui, appearance) {
+  const folder = gui.addFolder('Shoreline');
+  folder.add(appearance.shoreWidth, 'value', 0, 2, .05).name('Wet band · m');
+  folder.add(appearance.shoreWetness, 'value', 0, 1, .05).name('Water wetness');
+}
+
+export function coastControls(gui, coast, caustics) {
+  const folder = gui.addFolder('Coast');
+  const wet = {...OCEAN_COAST_WET_DEFAULTS};
+  const visibility = {on: coast.s.on};
+  folder.add(visibility, 'on').name('Show island and seabed').onChange(on => coast.applySettings({on}));
+  folder.add(wet, 'strength', 0, 1, .05).name('Wet sand').onChange(() => coast.applyWet(wet));
+  folder.add(caustics.settings, 'strength', 0, 2, .05).name('Bed caustics');
+  folder.close();
 }
 
 export function grassDensityControls(gui, {cover, defaults, stats, rebuild}) {

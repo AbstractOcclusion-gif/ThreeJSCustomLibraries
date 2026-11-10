@@ -1,6 +1,7 @@
+import {particleControls} from './controls.js';
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
+import {createBenchPanel} from '../panel.js';
 import {createChips, createParticlePrefab, createPuffs, createParticleDepthBinding, createWaterSpray, OCEAN_SHEET_FILES} from '../../src/particles/index.js';
 import '../bench.css';
 
@@ -53,7 +54,7 @@ const chips = createChips(scene, {pool: 128}); chips.setGround(() => 0);
 const fragmentMaterial = new T.MeshStandardMaterial({color: 0xef9c63}), fragmentGeometry = new T.BoxGeometry(.38, .08, .28);
 const fragments = createChips(scene, {pool: 16, authored: true, material: fragmentMaterial}); fragments.setGround(() => 0);
 
-const state = {chipColor: '#e0ae88', chipCount: 28, shock: 26, sprayLoop: false, mistSize: 1, splashStrength: .6, softDistance: .2};
+const state = {chipColor: '#e0ae88', chipCount: 28, shock: 26, sprayLoop: false, mistSize: 1, splashStrength: .6};
 const fx = {
   impactDust: () => { stop(); dust.start(); }, campfire: () => { stop(); fire.start(); }, smokePlume: () => { stop(); smoke.start(); }, stopEmitters: stop,
   mortar: () => puffs.mortar(origin, 1.3),
@@ -64,12 +65,8 @@ const fx = {
   splash: () => spray.splash(waterCentre.clone().add(new T.Vector3(.6, 0, .4)), state.splashStrength, .25),
   clear: () => { stop(); prefabs.forEach(p => p.clear()); puffs.clear(); chips.clear(); fragments.clear(); spray.clear(); },
 };
-const gui = new GUI({title: 'Particles'});
-const f1 = gui.addFolder('Puffs & prefabs'); for (const k of ['impactDust', 'campfire', 'smokePlume', 'stopEmitters', 'mortar', 'sparks']) f1.add(fx, k);
-const f2 = gui.addFolder('Chips & fragments'); f2.addColor(state, 'chipColor'); f2.add(state, 'chipCount', 1, 120, 1); f2.add(state, 'shock', 4, 60, 1); f2.add(fx, 'chips'); f2.add(fx, 'fragments');
-const f3 = gui.addFolder('Water spray'); f3.add(fx, 'mist'); f3.add(fx, 'splash'); f3.add(state, 'sprayLoop').name('auto spray'); f3.add(state, 'mistSize', .3, 3); f3.add(state, 'splashStrength', .1, 1);
-f3.add(state, 'softDistance', .01, 1).onChange(v => { depth.uniforms.uFxSoftDistance.value = v; });
-gui.add(fx, 'clear');
+const gui = createBenchPanel('Particles');
+particleControls(gui, {state, fx, depth, spray});
 
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); target.dispose(); target = makeTarget(); blit.material.map = target.texture; depth.uniforms.tFxDepth.value = target.depthTexture; viewport.set(target.width, target.height); }
 addEventListener('resize', resize);

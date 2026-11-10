@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
+import {createBenchPanel} from '../panel.js';
 import {createChannel, createChannelSurface, createRipples, createFlowBake, skyFromWeather} from '../../src/water/index.js';
 import {createSurfaceWeather, createWeatherSurfaceMaterial} from '../../src/surface/index.js';
-import {benchRenderer, createBenchWeather, waterMaterialControls, weatherFolder, presetsFolder} from '../shared.js';
+import {benchRenderer, createBenchWeather, mountWeatherControls} from '../shared.js';
+import {channelControls, inlandOpticsDefaults} from './controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
 
@@ -31,7 +32,7 @@ let channel, flowTime = 0, waveTime = 0, diving = false, dragged = -1;
 
 const P = {
   channel: {preset: 'stream', width: 1, drop: 3, depth: 1},
-  water: {speed: 1, foam: .55, foamFeather: .65, refraction: 1, clarity: 1, reflection: 1, godRays: .55, tint: '#ffffff',
+  water: {...inlandOpticsDefaults(), speed: 1, foam: .55, foamFeather: .65, bankFoam: 1, refraction: 1, clarity: 1, reflection: 1, godRays: .55, tint: '#ffffff',
     rippleStrength: 1, microRipples: .025, caustics: .65},
   waves: {height: .035, wavelength: 1.2, direction: 0, spread: 45, speed: 1},
   interact: {mode: 'orbit', rippleStrength: 1, markers: true},
@@ -73,23 +74,13 @@ function toggleUnderwater() {
 }
 rebuild();
 
-const gui = new GUI({title: 'Channel water'});
-const wf = weatherFolder(gui, weather);
-const banks = {state: 'follow weather'};
-gui.add(banks, 'state', ['follow weather', 'dry', 'wet', 'snow']).name('Bank surface').onChange(state => {
-  if (state !== 'follow weather') bankWeather.set({wetness: Number(state === 'wet'), snow: Number(state === 'snow')});
+const gui = createBenchPanel('Channel water');
+const wf = mountWeatherControls(weather);
+const banks = channelControls(gui, {settings: P, bankWeather, rebuild, toggleUnderwater, bake,
+  setInteraction(mode) { rippleGesture.cancel(); controls.enabled = !diving && mode === 'orbit'; },
+  clearRocks() { for (const rock of obstacles) rock.set(0, 0, 0, 0); syncObstacles(); },
+  bundled: import.meta.glob('../../presets/water/*.json'),
 });
-const fc = gui.addFolder('Channel'); fc.add(P.channel, 'preset', ['stream', 'river']).onChange(rebuild); fc.add(P.channel, 'width', .6, 1.6, .05).onChange(rebuild); fc.add(P.channel, 'drop', 0, 6, .1).name('drop · m').onChange(rebuild); fc.add(P.channel, 'depth', .4, 2, .05).onChange(rebuild);
-const fw = gui.addFolder('Water');
-for (const [key, max] of [['speed', 2], ['foam', 1], ['foamFeather', 1]]) fw.add(P.water, key, 0, max, .01);
-waterMaterialControls(fw, P.water);
-const fv = gui.addFolder('Wind waves'); fv.add(P.waves, 'height', 0, .16, .005); fv.add(P.waves, 'wavelength', .35, 4, .05); fv.add(P.waves, 'direction', -180, 180, 5).name('direction vs wind °'); fv.add(P.waves, 'spread', 0, 90, 5); fv.add(P.waves, 'speed', 0, 2, .05); fv.close();
-const fi = gui.addFolder('Interact'); fi.add(P.interact, 'mode', ['orbit', 'ripple', 'rock']).onChange(v => { rippleGesture.cancel(); controls.enabled = !diving && v === 'orbit'; }); fi.add(P.interact, 'rippleStrength', 0, 2, .05); fi.add(P.interact, 'markers').name('flow markers');
-fi.add({clearRocks: () => { for (const r of obstacles) r.set(0, 0, 0, 0); syncObstacles(); }}, 'clearRocks').name('clear rocks'); fi.add({toggleUnderwater}, 'toggleUnderwater').name('underwater view');
-const fb = gui.addFolder('Flow bake'); fb.add(P.bake, 'iterations', 10, 400, 10); fb.add({bake}, 'bake').name('bake flow field');
-presetsFolder(gui, {bundled: import.meta.glob('../../presets/water/*.json'), name: 'channel-water',
-  getState: () => ({schema: 'three-kit.channel-water', version: 1, channel: {...P.channel}, water: {...P.water}, waves: {...P.waves}}),
-  apply: p => { Object.assign(P.channel, p.channel); Object.assign(P.water, p.water); Object.assign(P.waves, p.waves); rebuild(); gui.controllersRecursive().forEach(c => c.updateDisplay()); }});
 
 // Pointer interaction on the water surface.
 const canvas = renderer.domElement, pointer = new THREE.Vector2(), ray = new THREE.Raycaster(); let lastEdit = 0;

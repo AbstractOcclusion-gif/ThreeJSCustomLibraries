@@ -2,6 +2,7 @@
 import {NoToneMapping,LinearToneMapping,ReinhardToneMapping,CineonToneMapping,ACESFilmicToneMapping,AgXToneMapping,NeutralToneMapping} from 'three';
 import {Weather,DayCycle} from '../index.js';
 import {DAY_FIELDS,SKY_FIELDS,APPEARANCE_FIELDS,PRECIPITATION_FIELDS,PRECIPITATION_DEFAULTS,resolveVisualConfig} from './settings.js';
+import {downloadJson,readJsonFile} from '../../core/presets.js';
 
 const num=(label,min,max,step=.01,help='')=>({label,type:'number',min,max,step,help});
 const flag=label=>({label,type:'boolean'});
@@ -55,6 +56,9 @@ export function createWeatherDevPanel({system,view,renderer,container,onChange=(
   const next={...lastPrecipitation,[key]:value};view.configure({precipitation:next});lastPrecipitation=next;
  });
  const weather=group('Weather engine');
+ field(weather,'weather','target',{label:'Weather profile',type:'select',options:system.weather.names},()=>system.weather.target,
+  value=>system.weather.transitionTo(value,{seconds:system.weather.defaultDuration}));
+ field(weather,'weather','paused',flag('Pause weather and time'),()=>system.paused,value=>system.paused=value);
  field(weather,'weather','enabled',flag('Use weather profiles'),()=>system.weather.on,value=>system.weather.setEnabled(value));
  field(weather,'weather','auto',flag('Automatic transitions'),()=>system.weather.auto.enabled,value=>system.weather.setAuto(value));
  field(weather,'weather','defaultDuration',num('Manual transition duration · s',0,600,1),()=>system.weather.defaultDuration,value=>system.weather.defaultDuration=value);
@@ -103,6 +107,11 @@ export function createWeatherDevPanel({system,view,renderer,container,onChange=(
  const initial=getPreset(),actions=element('div');actions.className='wd-actions';
  const reset=element('button',actions,'Reset defaults');reset.onclick=()=>{try{loadPreset(structuredClone(initial));}catch(error){report(error.message,true);}};
  const copy=element('button',actions,'Copy preset JSON');copy.onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(getPreset(),null,2));report('Preset copied.');}catch(error){report('Clipboard unavailable; use Save preset.',true);}};
+ const save=element('button',actions,'Save weather preset');save.onclick=()=>downloadJson('weather-preset.json',getPreset());
+ const load=element('input',actions);load.type='file';load.accept='.json,application/json';load.hidden=true;
+ const loadButton=element('button',actions,'Load weather preset…');loadButton.onclick=()=>load.click();
+ load.onchange=async()=>{try{if(load.files[0])loadPreset(await readJsonFile(load.files[0]));}
+  catch(error){report(error.message,true);}finally{load.value='';}};
  search.oninput=()=>{
   const term=search.value.trim().toLowerCase();for(const {row,input,spec}of fields)row.hidden=!!term&&!(spec.label+' '+input.dataset.config+' '+row.parentElement.querySelector('summary')?.textContent).toLowerCase().includes(term);
   for(const details of groups){const rows=fields.filter(f=>f.row.parentElement===details);details.hidden=!!term&&(!rows.length||rows.every(f=>f.row.hidden));if(term&&!details.hidden)details.open=true;}

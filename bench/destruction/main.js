@@ -1,6 +1,7 @@
+import {destructionControls} from './controls.js';
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
+import {createBenchPanel} from '../panel.js';
 import {createThreeStructureView} from '../../src/destruction/three.js';
 import {benchRenderer} from '../shared.js';
 import {createDemolition} from './physics.js';
@@ -76,14 +77,9 @@ const state = {
   },
   rebuild,
 };
-const gui = new GUI({title: 'Destruction'});
-gui.add(state, 'fire').name('Launch projectile');
-gui.add(state, 'speed', 18, 50, 1).name('Speed (m/s)');
-gui.add(state, 'slowMotion').name('Slow motion');
-gui.add(state, 'rebuild').name('Rebuild bridge');
-gui.add(state, 'shots').listen().disable();
-gui.add(state, 'impacts').name('Impact breaks').listen().disable();
-gui.add(state, 'detached').name('Overload breaks').listen().disable();
+const gui = createBenchPanel('Destruction');
+destructionControls(gui, state);
+
 rebuild();
 
 const raycaster = new T.Raycaster();

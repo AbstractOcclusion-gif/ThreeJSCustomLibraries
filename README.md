@@ -5,6 +5,24 @@
 
 Open **UI Tool** in the bench toolbar to search the active demo's controls, reveal a setting in its original panel, or pin it for later. Pins and the last demo are remembered in the current browser. Use the demo's preset controls to save scene values. Shared module panels live beside their owning bench. Terrain and Vegetation both use `bench/terrain/controls.js` for terrain and grass coverage.
 
+Press **/** to open and focus the UI Tool, **Enter** to reveal the first match, or **Escape** to close it. The **Field** and **Slate** skins are remembered in the browser. Edit `bench/ui-theme.css` to customize the shared palette and panel styling.
+
+When adding a tweak, put its control in the module panel and pass scene settings or callbacks from the demo. This keeps the label, range, and behavior the same wherever the capability is used.
+
+| Panel | Definition | Where it is used |
+| --- | --- | --- |
+| Weather | `src/weather/three/dev-panel.js` | Weather, Boundaries, Channel, Ocean, Pond, Terrain, Vegetation |
+| Terrain, shoreline, coast | `bench/terrain/controls.js` | Terrain and Vegetation share terrain layers and textures. Ocean uses the coast controls for its terrain model. |
+| Grass and plants | `bench/vegetation/controls.js` | Terrain and Vegetation share Grass. Vegetation also hosts planting and contact controls. |
+| Leaved Trees | `bench/trees/controls.js` | Vegetation trees and bushes, and Boundaries hedges |
+| Inland water | `bench/water/controls.js` | Channel, Pond, Terrain. Wind, freeze, and dive-height controls follow the capabilities supplied by the scene. |
+| Ocean and boat | `bench/ocean/controls.js`, `bench/ocean/trail-controls.js` | Ocean |
+| Particles and spray | `bench/particles/controls.js` | Particles. Ocean, Pond, and Terrain share the spray controls. |
+| Boundaries, Cable, Destruction, Fire | Each module's `bench/<module>/controls.js` | The respective demos |
+| Camera | `src/camera/panel.js` | Camera |
+
+Scene actions such as rolling a boulder, dropping an ice block, or starting the waterfall are supplied by the demo that owns them. Staged Aquarium and Fishing scenes use WebAquarium's own panels.
+
 Neutral Three.js modules extracted from Abstract Occlusion's projects. Plain ESM under `src/`, no build step; `bench/` holds one
 authoring page per module (Vite), `presets/` the JSON they save, `assets/` only free assets. Anything licensed (Synty packs,
 Enviro-derived sky textures, commercial FX sheets) is never in the repo: drop it in `private-assets/` and every module falls back

@@ -1,3 +1,5 @@
+import {readBenchSkin, setBenchSkin} from './ui-theme.js';
+
 const storageKey = 'three-kit.bench-ui.v1';
 const fields = 'input:not([type=hidden]), select, textarea, button';
 
@@ -51,16 +53,21 @@ function reveal(control) {
   if (!target) return;
   target.scrollIntoView({block: 'nearest'});
   target.focus({preventScroll: true});
-  target.animate([{outline: '2px solid #ffda8a'}, {outline: '2px solid transparent'}], 1600);
+  if (!target.ownerDocument.defaultView.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    target.animate([{outline: '2px solid var(--bench-accent, #ffda8a)'}, {outline: '2px solid transparent'}], 1600);
+  }
 }
 
 export function createUITool({panel, toggle, onOpenDemo}) {
   const state = readWorkspace();
-  const search = panel.querySelector('input');
+  const search = panel.querySelector('input[type=search]');
+  const skin = panel.querySelector('select');
+  skin.value = readBenchSkin();
+  skin.addEventListener('change', () => setBenchSkin(skin.value));
   const results = panel.querySelector('ul');
   const status = panel.querySelector('[role=status]');
   let activeDemo = null, activeFrame = null, pendingPin = null;
-  let observer;
+  let observer, frameKeys;
 
   function persist() {
     try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch {}
@@ -136,20 +143,41 @@ export function createUITool({panel, toggle, onOpenDemo}) {
   }
   toggle.addEventListener('click', () => setOpen(panel.hidden));
   search.addEventListener('input', render);
+  panel.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      setOpen(false);
+      toggle.focus();
+    } else if (event.key === 'Enter' && event.target === search) {
+      results.querySelector('li > button')?.click();
+    }
+  });
+  function focusSearch(event) {
+    if (event.key !== '/' || event.ctrlKey || event.altKey || event.metaKey ||
+        event.target.closest?.('input, select, textarea, [contenteditable=true]')) return;
+    event.preventDefault();
+    setOpen(true);
+    search.focus();
+  }
+  document.addEventListener('keydown', focusSearch);
   setOpen(new URLSearchParams(location.search).get('ui') === '1' || state.open);
 
   return {
     get lastDemo() { return state.demo; },
     setDemo(demo, frame) {
       observer?.disconnect();
+      frameKeys?.abort();
       activeDemo = state.demo = demo;
       activeFrame = frame;
       persist();
       frame?.addEventListener('load', () => {
         if (activeFrame !== frame) return;
         observer?.disconnect();
-        const body = frame.contentDocument?.body;
+        frameKeys?.abort();
+        const doc = frame.contentDocument;
+        const body = doc?.body;
         if (body) {
+          frameKeys = new AbortController();
+          doc.addEventListener('keydown', focusSearch, {signal: frameKeys.signal});
           observer = new MutationObserver(records => {
             if (records.some(record => [...record.addedNodes, ...record.removedNodes]
               .some(node => node.nodeType === 1 && (node.matches(fields) || node.querySelector(fields))))) render();

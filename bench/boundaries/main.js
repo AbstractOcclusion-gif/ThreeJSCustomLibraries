@@ -1,10 +1,12 @@
+import {boundariesControls} from './controls.js';
+import {treeProfileControls} from '../trees/controls.js';
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
-import {createBoundaries, validateLayout, layout, makeRun, distance, DEFAULT_KINDS} from '../../src/boundaries/index.js';
+import {createBenchPanel} from '../panel.js';
+import {createBoundaries, validateLayout, layout, makeRun, distance} from '../../src/boundaries/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
-import {benchRenderer, createBenchWeather, weatherFolder} from '../shared.js';
+import {benchRenderer, createBenchWeather, mountWeatherControls} from '../shared.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id), LIMIT = 40;
@@ -41,12 +43,10 @@ const actions = {
 const input = document.createElement('input'); input.type = 'file'; input.accept = '.json,application/json'; input.hidden = true; document.body.append(input);
 input.onchange = async () => { try { if (input.files[0]) change(validateLayout(await readJsonFile(input.files[0]))); } catch (e) { refresh(e.message); } finally { input.value = ''; } };
 
-const gui = new GUI({title: 'Boundaries'});
-const wf = weatherFolder(gui, weather);
-gui.add(S, 'kind', DEFAULT_KINDS);
-const fr = gui.addFolder('Run'); for (const k of ['finish', 'backPoint', 'undo', 'removeLast', 'sample', 'clearAll']) fr.add(actions, k);
-const fh = gui.addFolder('Hedge'); const H = boundaries.hedgeOptions; fh.add(H, 'heightM', .4, 4, .05).onFinishChange(() => refresh()); fh.add(H, 'widthM', .4, 3, .05).onFinishChange(() => refresh()); fh.add(H, 'spacingM', .4, 3, .05).onFinishChange(() => refresh()); fh.addColor(H, 'color').onFinishChange(() => refresh()); fh.add(H, 'tintJitter', 0, .5, .01).onFinishChange(() => refresh());
-const fl = gui.addFolder('Layout file'); fl.add(actions, 'export').name('export JSON'); fl.add(actions, 'import').name('import JSON…');
+const gui = createBenchPanel('Boundaries');
+const wf = mountWeatherControls(weather);
+boundariesControls(gui, {settings: S, actions, hedge: boundaries.hedgeOptions, refresh});
+treeProfileControls(gui, {title: 'Hedge foliage profile', trees: boundaries.hedges});
 
 // Tap (not drag) on the ground adds a point.
 const ray = new T.Raycaster(), ground = new T.Plane(new T.Vector3(0, 1, 0)); let down = null;

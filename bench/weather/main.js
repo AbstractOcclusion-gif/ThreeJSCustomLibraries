@@ -7,6 +7,7 @@ import {bundledWeatherAssets} from '../../src/weather/three/bundled-assets.js';
 import {createSurfaceWeather, createTrackMask, createWeatherSurfaceMaterial} from '../../src/surface/index.js';
 import {downloadJson, readJsonFile} from '../../src/core/presets.js';
 import '../bench.css';
+import '../ui-theme.js';
 
 const $ = id => document.getElementById(id), errors = [], events = [];
 function showError(error) { errors.push(String(error)); $('error').hidden = false; $('error').textContent = String(error); console.error(error); }
