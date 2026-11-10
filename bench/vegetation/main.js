@@ -34,7 +34,7 @@ const {layers, detail} = await loadTerrainTextures(renderer);
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;
 const surfaceWeather = createSurfaceWeather();
-const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: 512});
+const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: 512, directional: true});
 const groundMaterial = createTerrainMaterial({}, {
   field, layers, detailNormal: detail, appearance, weather: surfaceWeather, tracks, trackContrast: .5,
 });

@@ -12,6 +12,7 @@ uniform float grassGust;
 uniform sampler2D grassContact;
 uniform vec4 grassContactBounds;
 uniform bool grassContactActive;
+uniform bool grassContactDirectional;
 
 vec3 bendGrass(vec3 position) {
   mat4 placement = modelMatrix * instanceMatrix;
@@ -21,23 +22,43 @@ vec3 bendGrass(vec3 position) {
   vec2 bend = grassWind * (0.48 + grassGust * wave * 0.32
                           + 0.12 * sin(grassTime * 4.1 + phase));
   float contact = 0.0;
+  vec2 lean = vec2(1.0, 0.0);
   if (grassContactActive) {
     vec2 uv = (root - grassContactBounds.xy) / grassContactBounds.zw;
     if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) {
-      contact = texture2D(grassContact, uv).r;
+      vec4 track = texture2D(grassContact, uv);
+      contact = track.r;
+      if (grassContactDirectional) {
+        lean = track.gb * 2.0 - track.r;
+        if (length(lean) > 0.012) {
+          lean = normalize(lean);
+          if (contact > 0.05 && contact < 0.85) {
+            vec2 texel = 1.0 / vec2(textureSize(grassContact, 0));
+            vec2 side = vec2(-lean.y, lean.x);
+            vec2 stepUV = side * texel;
+            float falloff = texture2D(grassContact, uv - stepUV).r
+                          - texture2D(grassContact, uv + stepUV).r;
+            lean = normalize(lean + side * clamp(falloff * 1.5, -0.55, 0.55));
+          }
+        } else {
+          contact = 0.0;
+          lean = vec2(1.0, 0.0);
+        }
+      }
     }
   }
   bend *= min(1.0, ${MAX_BEND} / max(length(bend), 0.001));
   float flatten = smoothstep(0.0, 0.8, contact);
   // Rotate about the root so a flattened blade keeps its length.
   float angle = 1.48 * flatten * bendWeight;
-  float bladeY = position.y;
-  float bladeX = position.x;
-  position.x = cos(angle) * bladeX + sin(angle) * bladeY;
-  position.y = cos(angle) * bladeY - sin(angle) * bladeX;
-  vec3 offset = vec3(bend.x, 0.0, bend.y) * bendWeight * (1.0 - flatten);
   // Placement has orthogonal axes (translation, yaw and uniform scale).
   vec3 x = placement[0].xyz, y = placement[1].xyz, z = placement[2].xyz;
+  vec2 localLean = normalize(vec2(dot(x.xz, lean), dot(z.xz, lean)));
+  float along = dot(position.xz, localLean);
+  float c = cos(angle), s = sin(angle);
+  position.xz += localLean * ((c - 1.0) * along + s * position.y);
+  position.y = c * position.y - s * along;
+  vec3 offset = vec3(bend.x, 0.0, bend.y) * bendWeight * (1.0 - flatten);
   return position + vec3(dot(x, offset), dot(y, offset), dot(z, offset)) / dot(x, x);
 }`;
 
@@ -86,6 +107,7 @@ export function createGrassField({scene, geometries, map, color, placements, til
     grassContact: {value: contactTracks?.texture ?? null},
     grassContactBounds: {value: contactTracks?.bounds ?? new THREE.Vector4()},
     grassContactActive: {value: false},
+    grassContactDirectional: {value: Boolean(contactTracks?.directional)},
   };
   const sweeps = [];
   let contactMask = contactTracks;
@@ -142,9 +164,10 @@ export function createGrassField({scene, geometries, map, color, placements, til
       if (!contactMask && !Number.isFinite(minX)) return;
       if (![fromX, fromZ, toX, toZ, radius].every(Number.isFinite) || radius <= 0) return;
       if (!contactMask) {
-        contactMask = createTrackMask({origin: [minX - 1, minZ - 1], size: [maxX - minX + 2, maxZ - minZ + 2], resolution: 512});
+        contactMask = createTrackMask({origin: [minX - 1, minZ - 1], size: [maxX - minX + 2, maxZ - minZ + 2], resolution: 512, directional: true});
         uniforms.grassContact.value = contactMask.texture;
         uniforms.grassContactBounds.value.copy(contactMask.bounds);
+        uniforms.grassContactDirectional.value = true;
       }
       sweeps.push({from: {x: fromX, z: fromZ}, to: {x: toX, z: toZ}, radius, age: 0});
     },
