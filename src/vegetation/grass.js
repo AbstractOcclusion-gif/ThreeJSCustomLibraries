@@ -13,6 +13,9 @@ uniform sampler2D grassContact;
 uniform vec4 grassContactBounds;
 uniform bool grassContactActive;
 uniform bool grassContactDirectional;
+#ifdef GRASS_LIT
+varying vec2 vGrassBlade;
+#endif
 
 vec3 bendGrass(vec3 position) {
   mat4 placement = modelMatrix * instanceMatrix;
@@ -49,6 +52,9 @@ vec3 bendGrass(vec3 position) {
   }
   bend *= min(1.0, ${MAX_BEND} / max(length(bend), 0.001));
   float flatten = smoothstep(0.0, 0.8, contact);
+#ifdef GRASS_LIT
+  vGrassBlade = vec2(bendWeight, flatten);
+#endif
   // Rotate about the root so a flattened blade keeps its length.
   float angle = 1.48 * flatten * bendWeight;
   // Placement has orthogonal axes (translation, yaw and uniform scale).
@@ -67,23 +73,29 @@ const directionalEnd = directLights.indexOf('#if ( NUM_RECT_AREA_LIGHTS');
 const directionalCall = directLights.lastIndexOf('RE_Direct( directLight', directionalEnd);
 const callEnd = directLights.indexOf(';', directionalCall) + 1;
 const backlight = `
-  reflectedLight.directDiffuse += directLight.color * material.diffuseColor
-    * vec3(0.95, 1.0, 0.55) * grassTransmission * RECIPROCAL_PI
-    * max(0.0, -dot(geometryNormal, directLight.direction));
+  float grassBack = max(0.0, -dot(geometryNormal, directLight.direction));
+  float grassForward = pow(max(0.0, dot(geometryViewDir, -directLight.direction)), 2.0);
+  float grassThin = mix(0.3, 1.0, vGrassBlade.x);
+  reflectedLight.directDiffuse += directLight.color * sqrt(max(material.diffuseColor, vec3(0.0)))
+    * vec3(0.9, 1.0, 0.46) * grassTransmission * grassThin * RECIPROCAL_PI
+    * grassBack * (0.35 + 0.65 * grassForward);
 `;
 
 function patchMaterial(material, uniforms, lit, flatColorMix) {
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, uniforms);
-    shader.vertexShader = bendSource + '\n' + shader.vertexShader.replace(
+    shader.vertexShader = (lit ? '#define GRASS_LIT\n' : '') + bendSource + '\n' + shader.vertexShader.replace(
       '#include <begin_vertex>', 'vec3 transformed = bendGrass(position);',
     );
     if (lit) {
-      shader.fragmentShader = 'uniform float grassTransmission;\n' + shader.fragmentShader.replace(
+      shader.fragmentShader = 'uniform float grassTransmission;\nvarying vec2 vGrassBlade;\n' + shader.fragmentShader.replace(
         '#include <map_fragment>',
         `#include <map_fragment>
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuse, ${flatColorMix.toFixed(3)});`,
-      ).replace(
+      ).replace('#include <color_fragment>', `#include <color_fragment>
+        diffuseColor.rgb *= mix(0.64, 1.10, vGrassBlade.x);
+        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.63, 0.68, 0.51), vGrassBlade.y * 0.65);
+      `).replace(
         '#include <lights_fragment_begin>',
         directLights.slice(0, callEnd) + backlight + directLights.slice(callEnd),
       );

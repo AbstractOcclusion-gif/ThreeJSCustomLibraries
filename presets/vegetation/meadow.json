@@ -5,14 +5,15 @@
     "clumps": 14000,
     "radius": 45,
     "size": 1,
-    "color": "#7da24a",
-    "soilColor": "#aa965d",
-    "tintVariation": 0.45,
+    "sizeVariation": 0.9,
+    "color": "#50762e",
+    "soilColor": "#c2aa61",
+    "tintVariation": 0.9,
     "density": 1,
     "lodDistance": 26,
     "farDensity": 0.45,
     "shadowDistance": 18,
-    "transmission": 0.8
+    "transmission": 1.45
   },
   "plants": {
     "trees": 14,

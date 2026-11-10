@@ -49,6 +49,39 @@ export function createGrassClumpGeometries({rect = FREE_ATLAS_RECTS.grass, heigh
   return [build(cards), build(2)];
 }
 
+// Near meadow LOD: individual tapered blades. Sample the opaque center of a
+// blade in the existing atlas so geometry owns the silhouette.
+function createMeadowBladeGeometry() {
+  const position = [], uv = [], bend = [], indices = [];
+  const [ru, rv, rw, rh] = FREE_ATLAS_RECTS.grass;
+  for (let blade = 0; blade < 9; blade++) {
+    const angle = blade * 2.39996, dx = Math.cos(angle), dz = Math.sin(angle);
+    const root = .035 + hash2(blade, 1, 19) * .13;
+    const height = .24 + hash2(blade, 2, 19) * .34;
+    const lean = .06 + hash2(blade, 3, 19) * .17;
+    const base = position.length / 3;
+    for (let row = 0; row <= 3; row++) {
+      const t = row / 3, distance = root + lean * t * t, halfWidth = .025 * (1 - t) + .001;
+      for (const side of [-1, 1]) {
+        position.push(dx * distance - dz * side * halfWidth, height * t, dz * distance + dx * side * halfWidth);
+        uv.push(ru + rw * (.12 + Math.sin(t * 3) * .035 * t), rv + rh * Math.min(.98, t));
+        bend.push(t);
+      }
+      if (row) {
+        const a = base + (row - 1) * 2;
+        indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geometry.setAttribute('bendWeight', new THREE.Float32BufferAttribute(bend, 1));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 // Reference parts for createProceduralMeadowTree. Part uvs are normalised inside their atlas rect (createSpecimens maps
 // them through atlasRects[material]), so the bark swatch is the centre of the bark rect.
 export function createProceduralReference() {
@@ -60,8 +93,13 @@ export function createProceduralReference() {
 
 // Atlas rects as {materialName: [u, v, w, h]} for createSpecimens; parts from createProceduralMeadowTree use 'bark' and 'leaf'
 // with uv already in [0, 1] of their rect.
-export function createFreeVegetation() {
+export function createFreeVegetation({meadowBlades = false} = {}) {
   const atlas = createVegetationAtlas();
-  return {atlas, atlasRects: FREE_ATLAS_RECTS, grassGeometries: createGrassClumpGeometries(), reference: createProceduralReference(),
+  const grassGeometries = createGrassClumpGeometries();
+  if (meadowBlades) {
+    grassGeometries[0].dispose();
+    grassGeometries[0] = createMeadowBladeGeometry();
+  }
+  return {atlas, atlasRects: FREE_ATLAS_RECTS, grassGeometries, reference: createProceduralReference(),
     dispose() { atlas.dispose(); }};
 }
