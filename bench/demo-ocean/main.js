@@ -14,7 +14,7 @@ import {benchRenderer, bindResize} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {detectAssets} from '../kit/assets.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
-import {oceanControls} from './controls.js';
+import {oceanDemoControls} from './controls.js';
 import {sprayControls} from '../particles/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
@@ -147,7 +147,7 @@ islandActions.add(structures, 'buildBridge').name('Rebuild the bridge');
 shots.addTo(islandActions);
 sprayControls(gui, {spray, depth: fxDepth}).close();
 const wf = mountWeatherControls(weather);
-const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanControls(gui, {
+const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanDemoControls(gui, {
   boatSettings, launchBoat, applyBoatSettings, trail, ocean, sheetBase, float, camera, controls, rippleGesture, motes, coast, weather,
   bundled: import.meta.glob('../../presets/ocean/*.json'),
 });

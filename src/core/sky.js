@@ -19,7 +19,7 @@ export const SKY_GLSL = /* glsl */`
 #ifndef SKY_HOST_UNIFORMS
 uniform vec3 uSunCol, uAmb; uniform int uSky;
 #endif
-uniform float uSkyDyn, uEnvI, uEnvRot, uNightBlend, uDaylight; uniform vec3 uSkySunDir;
+uniform float uSkyDyn, uEnvI, uEnvRot, uNightBlend, uDaylight; uniform vec3 uSkySunDir, uSkySun;   // uSkySun: every sky mode, the water shaders read it
 #ifndef SKY_DYNAMIC_ONLY
 uniform sampler2D tEnv;
 #ifdef SKY_WEATHER_HDR
@@ -36,7 +36,7 @@ uniform samplerCube tDynamicSky;
 #ifndef SKY_CAPTURE_NO_BLEND
 uniform samplerCube tDynamicSkyPrev; uniform float uDynamicSkyBlend;
 #endif
-uniform vec3 uSkySun, uMoonDir;
+uniform vec3 uMoonDir;
 uniform float uMoonOn, uMoonPhase, uMoonRadius, uMoonIntensity, uMoonEarthshine, uStarIntensity, uStarReflection, uGalaxyIntensity, uNightIntensity, uStarsRotation;
 uniform vec2 uAuroraDirection;
 uniform float uAuroraIntensity, uAuroraTime;
