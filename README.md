@@ -12,20 +12,23 @@ When adding a tweak, put its control in the module panel and pass scene settings
 | Panel | Definition | Where it is used |
 | --- | --- | --- |
 | UI Tool | `src/ui/index.js` | UI Tool demo and the library's other bench demos |
-| Weather | `src/weather/three/dev-panel.js` | Weather, Boundaries, Channel, Ocean, Pond, Terrain, Vegetation |
-| Terrain, shoreline, coast | `bench/terrain/controls.js` | Terrain and Vegetation share terrain layers and textures. Ocean uses the coast controls for its terrain model. |
-| Grass and plants | `bench/vegetation/controls.js` | Terrain and Vegetation share Grass. Vegetation also hosts planting and contact controls. |
+| Stage | `bench/kit/controls.js` (`stageControls`) | Every module page on the basic stage: sun, light and wind |
+| Weather | `src/weather/three/dev-panel.js` | Weather page; the two demos through `bench/kit/weather.js` |
+| Terrain, shoreline, coast | `bench/terrain/controls.js` | Terrain page (layers, textures). The All tools demo adds shoreline and grass density by texture; the Ocean coast demo uses the coast controls. |
+| Grass and plants | `bench/vegetation/controls.js` | Vegetation (grass, planting, contact). The All tools demo shares Grass. |
 | Leaved Trees | `bench/trees/controls.js` | Vegetation trees and bushes, and Boundaries hedges |
-| Inland water | `bench/water/controls.js` | Channel, Pond, Terrain. Wind, freeze, and dive-height controls follow the capabilities supplied by the scene. |
-| Ocean and boat | `bench/ocean/controls.js`, `bench/ocean/trail-controls.js` | Ocean |
-| Particles and spray | `bench/particles/controls.js` | Particles. Ocean, Pond, and Terrain share the spray controls. |
-| Boundaries, Cable, Destruction, Fire | Each module's `bench/<module>/controls.js` | The respective demos |
-| Camera | `src/camera/panel.js` | Camera |
+| Inland water | `bench/water/controls.js` | Channel, Pond and the All tools demo. Wind, freeze, and dive-height controls follow the capabilities supplied by the scene. |
+| Ocean | `bench/ocean/controls.js` | Ocean page and Ocean coast demo: sea state, look, reflections, underwater optics, presets |
+| Boat, block, coast | `bench/demo-ocean/controls.js`, `bench/demo-ocean/trail-controls.js` | Ocean coast demo, around the shared ocean panels |
+| Particles and spray | `bench/particles/controls.js` | Particles. Pond and the two demos share the spray controls. |
+| Boundaries, Cable, Destruction, Fire | Each module's `bench/<module>/controls.js` | The respective pages |
+| Camera | `src/camera/panel.js` (styles: `src/camera/panel.css`) | Camera |
 
 Scene actions such as rolling a boulder, dropping an ice block, or starting the waterfall are supplied by the demo that owns them. Staged Aquarium and Fishing scenes use WebAquarium's own panels.
 
 Neutral Three.js modules extracted from Abstract Occlusion's projects. Plain ESM under `src/`, no build step; `bench/` holds one
-authoring page per module (Vite), `presets/` the JSON they save, `assets/` only free assets. Anything licensed (Synty packs,
+authoring page per module on the basic stage plus two mixed demos (`demo-ocean`, `demo-all`) where every module shares one
+weather (Vite), `presets/` the JSON they save, `assets/` only free assets. Anything licensed (Synty packs,
 Enviro-derived sky textures, commercial FX sheets) is never in the repo: drop it in `private-assets/` and every module falls back
 to a free default without it. The weather module ships its own generated textures in `assets/weather/` (Perlin-Worley cloud
 volumes, cirrus, moon, stars, galaxy, weather map — `npm run assets:weather` regenerates them); pass
@@ -48,13 +51,14 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 
 | Module | Entry | Bench | Status |
 | --- | --- | --- | --- |
-| core (lighting contract, hash, preset helpers) | `three-kit/core` | — | ✓ |
+| core (environment contract, lighting hook, sky, hash, value noise, fixed step, presets, validation) | `three-kit/core` | — | ✓ |
+| stage (basic sky, sun, ambient, ground and environment for standalone use) | `three-kit/stage` | every module page | ✓ |
 | weather & sky (sim + Three adapter + dev panel) | `three-kit/weather`, `/weather/three`, `/weather/dev-panel` | `bench/weather/` | ✓ |
 | particles (puffs, chips, prefabs; water spray: sheets, sprites, droplets, depth binding, precipitation) | `three-kit/particles`, `/particles/water` | `bench/particles/` | ✓ |
 | fire (ignition, heat spread, fuel) | `three-kit/fire` | `bench/fire/` | ✓ |
 | water (channel and pond surfaces, waves, ripples, flow bake; ocean surface) | `three-kit/water` | `bench/water/`, `bench/pond/`, `bench/ocean/` | ✓ |
-| flocking (instanced fish and schooling) | `three-kit/flocking` | `bench/pond/` | ✓ |
-| weathered surfaces (wetness, runoff streaks, snow, puddles, tracks, albedo anti-tiling) | `three-kit/surface` | `bench/weather/`, `bench/water/` | ✓ |
+| flocking (instanced fish and schooling) | `three-kit/flocking` | `bench/flocking/` | ✓ |
+| weathered surfaces (wetness, runoff streaks, snow, puddles, tracks, albedo anti-tiling) | `three-kit/surface` | `bench/terrain/` | ✓ |
 | terrain (heightfield, automatic triplanar layers, prop contact blending, detail normals, shoreline wetness) | `three-kit/terrain` | `bench/terrain/` | ✓ |
 | vegetation (grass with per-instance tint, specimens, procedural meadow tree, generated free assets, Synty loader code) | `three-kit/vegetation` | `bench/vegetation/` | ✓ |
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
@@ -63,12 +67,70 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | destruction (rigid structures, impact fracture, overload detachment) | `three-kit/destruction`, `/destruction/three` | `bench/destruction/` | ✓ |
 | camera (director, rigs, bullet time, replay, collision, post, panel) | `three-kit/camera` | `bench/camera/` | ✓ |
 
+### Standalone: what each entry needs
+
+Every entry imports on its own (`tests/isolation/` checks it). A module imports only `core` and the lower modules listed here;
+everything in the last column is optional and has a calm, clear-noon default.
+
+| Entry | Also imports | Peer dependencies | Optional inputs |
+| --- | --- | --- | --- |
+| `core`, `stage` | — | three | — |
+| `weather` | — | none (pure simulation) | — |
+| `weather/three` | `particles/water` precipitation (rain, snow) | three | `assetBaseUrl` or `...bundledWeatherAssets()` |
+| `particles` | — | three | `environment` (option or `setEnvironment`), `assets` sheets |
+| `particles/water` | — | three, passed in as `THREE` (motes and the spray pump import it) | `environment` (`spray.setEnvironment`, `precipitation.update`), `assets` |
+| `fire` | — | none | `environment` (option or `setEnvironment`): wind pushes the spread |
+| `water` | `particles/water` spray pump (the boat) | three | `sky` hook, `environment` (`ocean.setEnvironment`, `proceduralSky().setEnvironment`) |
+| `flocking` | — | three | `modelsUrl` / `models`, `surfaceHeight` / `floorHeight` callbacks |
+| `surface` | — | three | — |
+| `terrain` | `surface` | three | `lighting` hook (coast), water `shoreBinding` |
+| `vegetation` | — | three | `environment` in `grass.update` / `specimens.update` |
+| `trees` | — | three | `lighting` hook, `environment` (`setEnvironment`) |
+| `boundaries` | `trees` (hedges) | three | `lighting` hook, `environment` (`setEnvironment`), `assets` |
+| `cable` | — | three, cannon-es | `environment` (`setEnvironment`) |
+| `destruction`, `destruction/three` | — | cannon-es; three for the view | — |
+| `camera` | — | three | load `three-kit/camera/panel.css` when you use `createCameraPanel` |
+| `ui` | — | none | load `three-kit/ui/theme.css` |
+
+`particles/water` takes `THREE` as an argument (rather than importing it) so its tests can inject a fake loader.
+Per-frame methods are named `update(dt)`; `tick` remains as an alias where it existed. The camera director's `tick(dt)` is a
+different thing: it returns the time scale.
+
+### Basic stage
+
+`createBasicStage({scene, sky = true, ground = true, shadows = false, ...STAGE_DEFAULTS})` from `three-kit/stage` gives a
+module what it needs to be seen alone: a clear gradient sky, a sun, an ambient light, a flat ground, the default lighting hook
+and an environment kept in step with them. It returns `{environment, lighting, sun, hemi, sky, skyUniforms, ground}` and
+`setSun(elevationDegrees, azimuthDegrees)`, `setLight(level)` (1 = clear noon), `setWind(speed, headingDegrees, gust)`,
+`update(camera)` once per frame, and `dispose()`. Pass `sky: false` or `ground: false` when the host has its own.
+
+### Environment contract
+
+`createEnvironment()` from `three-kit/core` is the one optional input the reactive modules share. It is plain data owned by
+whoever drives the scene: the weather adapter fills `view.environment` each frame, the basic stage fills its own, or a project
+fills one by hand. Modules read it and never write it.
+
+| Field | Meaning |
+| --- | --- |
+| `wind.x`, `wind.z`, `wind.speed` | horizontal velocity the air moves toward, m/s, and its length (`setEnvironmentWind(env, speed, headingDegrees)`; 0° = +X, 90° = +Z) |
+| `wind.gust` | 0..1 turbulence share; the weather adapter leaves it to the host |
+| `sun.direction`, `sun.color` | unit vector toward the key light (the moon at night); colour × intensity, as a DirectionalLight |
+| `ambient.sky`, `ambient.ground` | colour × intensity, as a HemisphereLight |
+| `light` | relative scene light for unlit things such as sprites: white at clear noon |
+| `daylight`, `rain`, `snow` | 0..1 |
+
+### Fixed step
+
+`createFixedStep({step = 1/120, maxSteps = 6})` from `three-kit/core` drives physics that must not see a variable frame time
+(cable, destruction, buoyancy). `advance(dt, run)` calls `run(step)` once per whole step owed, keeps the remainder for the next
+frame and returns the number of steps; a slow frame runs at most `maxSteps` and drops the rest. `reset()` clears the remainder.
+
 ### Lighting hook
 
 Custom ShaderMaterials in the lib take `lighting: {glsl, uniforms}` (see `src/core/lighting.js`): the GLSL defines
 `shade(albedo, n, sunVisibility, ao, wrap)` and `applyFog(color, viewDistance)`. The default is sun + hemisphere + linear fog;
 `syncLighting(uniforms, {sun, hemi, fog})` drives it from ordinary Three lights, e.g. the ones the weather adapter animates.
-Water materials take a `sky: {glsl, uniforms, defines}` hook the same way (`src/weather/three/sky-dome.js` is the default).
+Water materials take a `sky: {glsl, uniforms, defines}` hook the same way (`proceduralSky()` from `src/water/sky-binding.js` is the default).
 
 ## Bench
 
@@ -104,19 +166,20 @@ waterline. Pass the water height at the eye's horizontal position and optional s
 `composite.render(scene, camera, {height, slopeX, slopeZ, waterType})`. The optical presets come from WebAquarium.
 
 With a WebGL2 renderer, the ocean runs WebAquarium's FFT cascades and camera-following clipmap.
-Use `ocean.update(dt, windSpeed, camera.position, windHeading)` before drawing. For scene optics, render
+Use `ocean.update(dt, windSpeed, camera.position, windHeading)` before drawing; with `ocean.setEnvironment(env)` the wind arguments may be left `undefined` and come from the environment. For scene optics, render
 `ocean.captureScene(scene, camera)` and `ocean.captureWater(waterScene, camera)`, then pass both targets
 to `composite.renderLayers`. Use `SurfaceProbes` to sample the same waves for the waterline or buoyancy.
 Optional `wake: {}` enables the moving ripple window and hull footprints, and `caustics: {}` enables the
 projected sunlight map. With `exclusion: true`, register a hull's lid and shell with `ocean.exclusion.add`.
 `captureScene` takes `excludeHulls` to toggle the depth mask. `FoamTrail` renders a stern ribbon or paints foam into the
-wake field after `ocean.update`. The Ocean bench exercises both with WebAquarium's original motorboat.
+wake field after `ocean.update`. The Ocean coast demo (`bench/demo-ocean/`) exercises both with WebAquarium's original motorboat
+when its assets are staged; the Ocean page (`bench/ocean/`) shows the surface alone on the basic stage.
 `ocean.setShore(heightAt, bounds)` accepts a terrain height callback, while
 `ocean.shoreBinding` lets a terrain material sample the wave and wet-sand inputs. Weather can run its
 existing fog and sunlight pass over host-provided color, scene depth, and water distance textures.
 
 The Pond bench uses the channel surface with Glider 2's waterfall sample and the Fishing pond's wind wave tuning.
-Set waterfall flow to zero to inspect a still pond. Click for one ripple, hold to pulse, or drag to leave a trail.
+Set waterfall flow to zero to inspect a still pond. Without weather, its air temperature slider drives the ice. Click for one ripple, hold to pulse, or drag to leave a trail.
 The `Water → Underwater light` folder controls caustics and shafts. With `bedCaustics: 'material'`, bind submerged
 lit materials through `surface.lighting.bindBedMaterial(material)` to receive projected caustics. Pass a list of
 `lightOccluders` to include mesh shadows in the shaft pass.
@@ -131,13 +194,13 @@ The build omits the staged game and licensed assets.
 `createFishFlock({bounds, counts, surfaceHeight?, floorHeight?})` from `three-kit/flocking` loads
 WebAquarium's fish meshes, instanced swim animation, and schooling behavior. Add the returned
 `group` to a scene and call `update(dt)`. Water and terrain heights are optional host callbacks.
-In the Pond bench, enable **Show fish school** and use **Underwater view**.
+The Flocking page (`bench/flocking/`) shows a school in a swim volume; the two demos put fish in water.
 
 ### Fire
 
 `createFireSystem({spreadRadius, cooling})` runs independently of Three.js. Register an object with
 `system.add({position, ignitionHeat, burnSeconds, heatOutput})`. Position is a live object with `x`, `y` and `z`
-coordinates. Call `object.ignite()` to start a fire and `system.tick(dt)` with elapsed seconds to advance it.
+coordinates. Call `object.ignite()` to start a fire and `system.update(dt)` with elapsed seconds to advance it (`tick` is kept as an alias).
 Read `object.phase` (`unlit`, `burning`, or `burned`) and the normalized `heat` and `fuel` values to drive visuals.
 Burned objects stay burned until `system.reset()`. The bench uses the shared fire and smoke particle sheets.
 
@@ -174,7 +237,8 @@ leaved bushes by default (`LeavedTrees`, bush profile, `hedgeOptions`), `fence`/
 (procedural fallbacks included), `electric` places utility poles and sagging conductors. `createCable({world, endpoints,
 length, preset})` needs `cannon-es`, the optional peer dependency also used by destruction. The camera module is unchanged
 from Glider: `createCameraDirector`, `createFollowRig`, `createOrbitRig`, `createReplay`, `createCameraCollision`,
-`createCameraPost`, `createCameraPanel`.
+`createCameraPost`, `createCameraPanel`. The panel's styles are not imported by the module (it stays plain ESM): load
+`three-kit/camera/panel.css` yourself, as with the UI tool's theme.
 
 ## Not in this repo (on purpose)
 
@@ -184,6 +248,8 @@ the Synty catalogue and private texture packs. See `private-assets/README.md` an
 ## Tests
 
 `npm test` runs Node's test discovery inside `tests/` (no browser). Selected modules also have `npm run test:<module>` scripts.
+`tests/isolation/` checks that every package entry imports alone and that modules and module pages import only what the
+rules above allow; a new bench page needs an entry there.
 
 ## Credits
 
