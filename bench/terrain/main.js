@@ -190,7 +190,9 @@ function stampDemo() {
 const gui = new GUI({title: 'Terrain material'});
 const controlsState = {blendObjects: true, water: true, wetPreview: false};
 const meadow = createFreeVegetation({meadowBlades: true});
-const cover = {grass: 1, rock: 0, snow: 0, mud: 0, forest: .24, patchiness: .85, patchSize: 5};
+const defaultCover = {grass: 100, rock: 0, snow: 0, mud: 0, forest: 24, patchiness: .85, patchSize: 5};
+const cover = {...defaultCover};
+const coverStats = {clumps: 0};
 const patchNoise = valueNoise(23);
 const meadowGreen = new THREE.Color('#50762e'), meadowDry = new THREE.Color('#c2aa61'), meadowTint = new THREE.Color();
 let terrainGrass, grassDirty = false;
@@ -210,7 +212,7 @@ function rebuildGrass() {
   }
   if (cover[dominant] === 0) continue;
   const patch = THREE.MathUtils.smoothstep(patchNoise(x / cover.patchSize, z / cover.patchSize), -.5, .5);
-  if (chance >= density * (1 - cover.patchiness * patch)) continue;
+  if (chance >= density * .01 * (1 - cover.patchiness * patch)) continue;
   const dry = Math.max(patch, field.layerWeightAt(x, z, TERRAIN_LAYERS.indexOf('mud')));
   meadowTint.lerpColors(meadowGreen, meadowDry, dry);
   const scale = THREE.MathUtils.lerp(.4, 1.75, .7 * (1 - dry) + .3 * variation);
@@ -218,9 +220,22 @@ function rebuildGrass() {
  }
  terrainGrass = createGrassField({scene, geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff,
   placements, tileSize: 6, flatColorMix: .75, contactTracks: tracks, followTracks: true});
+ coverStats.clumps = placements.length;
  grassDirty = false;
 }
 rebuildGrass();
+const groundCover = gui.addFolder('Grass density by texture');
+for (const [layer, label] of [['grass', 'Meadow'], ['mud', 'Mud'], ['forest', 'Forest floor'], ['rock', 'Rock'], ['snow', 'Snow']]) {
+ groundCover.add(cover, layer, 0, 100, 1).name(label + ' · %').onFinishChange(rebuildGrass);
+}
+groundCover.add(cover, 'patchiness', 0, 1, .01).name('Patch contrast').onFinishChange(rebuildGrass);
+groundCover.add(cover, 'patchSize', 2, 15, .5).name('Patch size · m').onFinishChange(rebuildGrass);
+groundCover.add(coverStats, 'clumps').name('Placed clumps').disable().listen();
+groundCover.add({reset() {
+ Object.assign(cover, defaultCover);
+ rebuildGrass();
+ groundCover.controllers.forEach(controller => controller.updateDisplay());
+}}, 'reset').name('Reset grass settings');
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
  onIceBreak(x, y, z, energy) {
   const strength = THREE.MathUtils.clamp(energy / 2400, .55, 1);
@@ -254,12 +269,6 @@ for (const [key, min, max, step] of [['rockSlope', .2, 2, .05], ['snowLine', -2,
  automatic.add(rules, key, min, max, step).onFinishChange(() => { field.updateRules(rules); rebuildGrass(); });
 }
 automatic.add(rules, 'forestCover', 0, 1, .01).name('Forest floor coverage').onFinishChange(() => { field.updateRules(rules); rebuildGrass(); });
-const groundCover = gui.addFolder('Grass cover');
-for (const [layer, label] of [['grass', 'Meadow'], ['mud', 'Mud'], ['forest', 'Forest floor'], ['rock', 'Rock'], ['snow', 'Snow']]) {
- groundCover.add(cover, layer, 0, 1, .01).name(label + ' density').onFinishChange(rebuildGrass);
-}
-groundCover.add(cover, 'patchiness', 0, 1, .01).name('Patch contrast').onFinishChange(rebuildGrass);
-groundCover.add(cover, 'patchSize', 2, 15, .5).name('Patch size · m').onFinishChange(rebuildGrass);
 const textures = gui.addFolder('Triplanar textures');
 textures.add(appearance.rockScale, 'value', .15, 1.2, .01).name('Rock tiling');
 for (const [key, min, max, step] of [['tiling', .1, 2, .05], ['sharpness', 1, 8, .25], ['antiTiling', 0, 1, .05], ['detailStrength', 0, 2, .05], ['heightBlend', 0, 1, .05]]) {
