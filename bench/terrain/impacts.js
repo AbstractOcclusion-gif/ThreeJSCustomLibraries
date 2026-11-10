@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import {Body, Box, Heightfield, Material, Sphere, Vec3, World} from 'cannon-es';
+import {Body, Box, Material, Sphere, Vec3, World} from 'cannon-es';
 import {createChips} from '../../src/particles/index.js';
+import {createTerrainCollider} from './heightfield.js';
 
 const STEP = 1 / 120;
 const SURFACES = {
@@ -12,12 +13,8 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
  const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
  world.defaultContactMaterial.friction = .52;
  world.defaultContactMaterial.restitution = .12;
- const {data, width, height} = field.heightMap.image;
- const shape = new Heightfield(Array.from({length: height}, (_, z) => Array.from(data.subarray(z * width, (z + 1) * width))),
-  {elementSize: field.bounds.z / (width - 1), minValue: field.geometry.boundingBox.min.y, maxValue: field.geometry.boundingBox.max.y});
- const ground = new Body({mass: 0, shape, position: new Vec3(field.bounds.x, 0, field.bounds.y)});
- // Cannon's local X/Y follow world Z/X, preserving the render mesh's triangle diagonals.
- ground.quaternion.setFromAxisAngle(new Vec3(1, 1, 1).unit(), -2 * Math.PI / 3);
+ const ground = createTerrainCollider(field);
+ const [shape] = ground.shapes;
  world.addBody(ground);
  const chips = createChips(scene, {pool: 128, life: [2, 3.5], baseSize: [.15, .36]});
  chips.setGround(field.heightAt);

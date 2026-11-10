@@ -9,6 +9,8 @@ import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js'
 import {hash2, seededRandom} from '../../src/core/hash.js';
 import {benchRenderer, createBenchWeather, weatherFolder, presetsFolder, detectAssets} from '../shared.js';
 import {loadTerrainTextures} from '../terrain/textures.js';
+import {createRollingBodies} from './ball.js';
+import {Sphere} from 'cannon-es';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
@@ -105,14 +107,24 @@ function buildBushes() {
 }
 buildGrass(); placeTrees(); buildBushes();
 
-// Rolling ball: flattens grass along its path.
-const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshStandardMaterial({color: 0xd9b36a, roughness: .6})); ball.castShadow = true; ball.visible = false; scene.add(ball);
-let roll = null;
-const rollBall = () => {
-  const halfPath = Math.min(18, P.grass.radius);
-  roll = {x: -halfPath, endX: halfPath, z: 2, fromX: -halfPath, elapsed: 0};
-  ball.visible = true;
-};
+const balls = createRollingBodies({scene, field, onContact(from, to, shape) {
+  const bladeHeight = .35 * P.grass.size;
+  const height = shape instanceof Sphere ? Math.min(shape.radius, bladeHeight) : 0;
+  const footprint = height ? Math.sqrt(height * (2 * shape.radius - height)) : Math.max(.2, bladeHeight);
+  grass.addSweep({fromX: from.x, fromZ: from.z, toX: to.x, toZ: to.z, radius: footprint});
+}});
+function launchBalls(count, box = false) {
+  balls.setTrunks(trees);
+  const target = trees.items.reduce((nearest, item) =>
+    !nearest || Math.hypot(item.x, item.z) < Math.hypot(nearest.x, nearest.z) ? item : nearest, null);
+  for (let i = 0; i < count; i++) {
+    const radius = P.interact.ballRadius;
+    const lane = i === 0 ? 0 : (i % 2 ? 1 : -1) * Math.ceil(i / 2);
+    balls.launch({x: (target?.x ?? 0) + 7, z: (target?.z ?? 2) + lane * (2 * radius + .3),
+      radius, speed: P.interact.ballSpeed, box});
+  }
+}
+const rollBall = () => launchBalls(1);
 
 const gui = new GUI({title: 'Vegetation'});
 const wf = weatherFolder(gui, weather);
@@ -130,6 +142,8 @@ fp.add(P.plants, 'treeCrown', .4, 1.6, .01).name('Crown depth').onFinishChange(s
 fp.add(P.plants, 'asymmetry', 0, 1, .01).name('Lobe spread').onFinishChange(shapeTrees);
 const fi = gui.addFolder('Interact'); fi.add(P.interact, 'ballSpeed', 1, 15, .5); fi.add(P.interact, 'ballRadius', .4, 2.5, .1); fi.add({rollBall}, 'rollBall').name('roll the ball');
 fi.add(P.interact, 'recoverySeconds', .25, 8, .25).name('Grass recovery · s');
+fi.add({stress: () => launchBalls(8)}, 'stress').name('Stress test · 8 balls');
+fi.add({slide: () => launchBalls(1, true)}, 'slide').name('Slide a box');
 presetsFolder(gui, {bundled: import.meta.glob('../../presets/vegetation/*.json'), name: 'vegetation',
   getState: () => ({schema: 'three-kit.vegetation', version: 1, grass: {...P.grass}, plants: {...P.plants}}),
   apply: p => {
@@ -151,16 +165,10 @@ renderer.setAnimationLoop(now => {
   const wind = THREE.MathUtils.clamp(w.wind * (.08 + P.plants.gust * .1), 0, 3);
   trees.setWind(wind); bushes.setWind(wind);
   trees.update(dt); bushes.update(dt);
-  if (roll) {
-    roll.x = Math.min(roll.endX, roll.x + P.interact.ballSpeed * dt); roll.elapsed += dt;
-    if (roll.elapsed > .08 || roll.x === roll.endX) { grass.addSweep({fromX: roll.fromX, fromZ: roll.z, toX: roll.x, toZ: roll.z, radius: P.interact.ballRadius}); roll.fromX = roll.x; roll.elapsed = 0; }
-    ball.scale.setScalar(P.interact.ballRadius);
-    ball.position.set(roll.x, heightAt(roll.x, roll.z) + P.interact.ballRadius, roll.z); ball.rotation.z -= P.interact.ballSpeed * dt / P.interact.ballRadius;
-    if (roll.x === roll.endX) { roll = null; ball.visible = false; }
-  }
+  balls.update(dt);
   grass.update(dt, {camera, windX, windZ, gust: P.plants.gust, transmission: P.grass.transmission * weather.system.day.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density, recoverySeconds: P.interact.recoverySeconds});
   weather.view.render();
   if (now - lastUI > 250) { lastUI = now; wf.sync(); const s = grass.stats; $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + (weather.assetBaseUrl === 'bundled' ? ' · bundled sky textures' : '') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\n${w.dominant} · ${weather.hourLabel(weather.system.day.hour)} · wind ${w.wind.toFixed(1)} m/s`; }
 });
 document.body.dataset.ready = 'true';
-window.vegetationBench = {get grass() { return grass; }, trees, bushes, rollBall, weather, scene, camera, renderer, pack};
+window.vegetationBench = {get grass() { return grass; }, trees, bushes, rollBall, bodies: balls, weather, scene, camera, renderer, pack};

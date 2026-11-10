@@ -29,8 +29,13 @@ vec3 bendGrass(vec3 position) {
   }
   bend *= min(1.0, ${MAX_BEND} / max(length(bend), 0.001));
   float flatten = smoothstep(0.0, 0.8, contact);
+  // Rotate about the root so a flattened blade keeps its length.
+  float angle = 1.48 * flatten * bendWeight;
+  float bladeY = position.y;
+  float bladeX = position.x;
+  position.x = cos(angle) * bladeX + sin(angle) * bladeY;
+  position.y = cos(angle) * bladeY - sin(angle) * bladeX;
   vec3 offset = vec3(bend.x, 0.0, bend.y) * bendWeight * (1.0 - flatten);
-  position.y *= 1.0 - 0.95 * flatten * bendWeight;
   // Placement has orthogonal axes (translation, yaw and uniform scale).
   vec3 x = placement[0].xyz, y = placement[1].xyz, z = placement[2].xyz;
   return position + vec3(dot(x, offset), dot(y, offset), dot(z, offset)) / dot(x, x);
