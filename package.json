@@ -45,7 +45,7 @@
     "build": "vite build",
     "stage:webaquarium": "node scripts/stage-webaquarium.mjs",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test tests",
+    "test": "node --test \"tests/**/*.test.js\"",
     "test:weather": "node --test tests/weather/weather.test.js tests/weather/lifecycle.test.js",
     "test:particles": "node --test tests/particles/water.test.js",
     "test:water": "node --test tests/water/water.test.js",
