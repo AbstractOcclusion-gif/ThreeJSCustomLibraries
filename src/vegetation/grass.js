@@ -171,6 +171,7 @@ export function createGrassField({scene, geometries, map, color, placements, til
   const projection = new THREE.Matrix4();
   const stats = {visibleTiles: 0, visibleClumps: 0, shadowTiles: 0, activeSweeps: 0};
 
+  let heldEnvironment = null;
   return {
     stats,
     addSweep({fromX, fromZ, toX, toZ, radius}) {
@@ -196,8 +197,10 @@ export function createGrassField({scene, geometries, map, color, placements, til
     setCutoff(value) {
       material.alphaTest = depth.alphaTest = value;
     },
-    // Only `camera` is required. Wind comes from windX/windZ/gust, else from an optional `environment` (core/environment.js), else calm.
-    update(dt, {camera, environment, windX = environment?.wind.x ?? 0, windZ = environment?.wind.z ?? 0, gust = environment?.wind.gust ?? 0,
+    // Optional shared environment (core/environment.js), held by reference; an `environment` passed to update() wins.
+    setEnvironment(next) { heldEnvironment = next ?? null; },
+    // Only `camera` is required. Wind comes from windX/windZ/gust, else from the environment (update's, else the held one), else calm.
+    update(dt, {camera, environment = heldEnvironment, windX = environment?.wind.x ?? 0, windZ = environment?.wind.z ?? 0, gust = environment?.wind.gust ?? 0,
       transmission = VIEW_DEFAULTS.transmission * (environment?.daylight ?? 1), lodDistance = VIEW_DEFAULTS.lodDistance, farDensity = VIEW_DEFAULTS.farDensity,
       shadowDistance = VIEW_DEFAULTS.shadowDistance, density = VIEW_DEFAULTS.density, recoverySeconds = RECOVERY_SECONDS}) {
       uniforms.grassTime.value += dt;

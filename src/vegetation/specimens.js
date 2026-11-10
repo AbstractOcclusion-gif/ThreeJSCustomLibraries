@@ -105,6 +105,7 @@ export function createSpecimens({scene, parts, atlas, atlasRects, placements, pr
     scene.add(mesh);
     return mesh;
   });
+  let heldEnvironment = null;
   return {
     setCount(count, species = 'all') {
       for (const mesh of meshes) {
@@ -116,8 +117,10 @@ export function createSpecimens({scene, parts, atlas, atlasRects, placements, pr
       uniforms.plantTime.value = 0;
       uniforms.plantSweep.value.set(0, 0, 0, 1);
     },
-    // Wind comes from windX/windZ/gust, else from an optional `environment` (core/environment.js), else calm.
-    update(dt, {environment, windX = environment?.wind.x ?? 0, windZ = environment?.wind.z ?? 0, gust = environment?.wind.gust ?? 0, sweep} = {}) {
+    // Optional shared environment (core/environment.js), held by reference; an `environment` passed to update() wins.
+    setEnvironment(next) { heldEnvironment = next ?? null; },
+    // Wind comes from windX/windZ/gust, else from the environment (update's, else the held one), else calm.
+    update(dt, {environment = heldEnvironment, windX = environment?.wind.x ?? 0, windZ = environment?.wind.z ?? 0, gust = environment?.wind.gust ?? 0, sweep} = {}) {
       uniforms.plantTime.value += dt;
       uniforms.plantWind.value.set(windX, windZ).multiplyScalar(WIND.scale).clampLength(0, WIND.max);
       uniforms.plantGust.value = gust;
