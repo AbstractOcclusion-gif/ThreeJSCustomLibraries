@@ -1,6 +1,6 @@
 {
   "name": "@abstractocclusion/three-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Neutral Three.js modules: weather & sky, water & ocean, particles, fire, terrain & surfaces, vegetation, leaved trees, fish flocking, boundaries, cable, destruction, camera, UI tool. Each runs alone on a basic stage or together on one shared environment. Plain ESM sources, no build step.",
   "type": "module",
   "license": "MIT",

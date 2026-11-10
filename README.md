@@ -37,7 +37,7 @@ volumes, cirrus, moon, stars, galaxy, weather map — `npm run assets:weather` r
 ## Use in a project
 
 ```sh
-npm i github:AbstractOcclusion-gif/ThreeJSCustomLibraries#v0.1.0   # pin a tag; `three` is a peer dependency
+npm i github:AbstractOcclusion-gif/ThreeJSCustomLibraries#v0.2.0   # pin a tag; `three` is a peer dependency
 ```
 ```js
 import {createWeatherSystem} from '@abstractocclusion/three-kit/weather';
