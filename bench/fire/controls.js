@@ -8,6 +8,7 @@ export function fireLookControls(gui, {look, show}) {
   const folder = gui.addFolder('Fire look');
   folder.add(show, 'flames').name('Flames');
   folder.add(show, 'fluid').name('Fluid flames (off = sheets)');
+  folder.add(look, 'planes', 1, 3, 1).name('Flame planes (1 = faces camera)');
   folder.add(show, 'smoke').name('Smoke');
   folder.add(show, 'embers').name('Embers');
   folder.add(show, 'light').name('Fire light');

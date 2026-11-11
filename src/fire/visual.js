@@ -20,6 +20,7 @@ export function createFlameLook() {
     brightness: 1,    // scale on the emitted light of the flames
     turbulence: 1,    // scale on how ragged the flames are and how far the fire sways
     windLean: 1,      // scale on how far the wind bends the flames
+    planes: 3,        // fluid flames: 1 = one sheet facing the camera; 2 or 3 = upright sheets crossed through the fire
     smoke: 1,         // scale on how much smoke rises
     embers: 1,        // scale on how many embers fly
     light: 1,         // scale on the light the fire casts
@@ -47,11 +48,14 @@ const WIND = Object.freeze({lean: .22, full: 14});   // m of sideways travel per
 const SWAY = Object.freeze({amount: .1, rate: .9});
 const PULSE = Object.freeze({depth: .13, rate: 2.3});
 
-// Fluid flames: the heat of a small 2D fluid (fluid.js) shown on one upright sheet that turns to face the camera.
+// Fluid flames: the heat of a small 2D fluid (fluid.js) shown on upright sheets: one that turns to face the camera,
+// or up to MAX_PLANES crossed through the fire at even angles, alternate ones mirrored, so it has volume from every side.
 //   widen    sheet width, in widths of the burning object: room for the flames to lean and curl
 //   sink     how far below the top of the fuel the sheet starts, in metres at size 1 (the object hides that part)
 //   linger   seconds the sheet stays drawn after the fire stops being fed, while the last heat rises away
-const FLUID = Object.freeze({widen: 2.3, sink: .08, linger: 2.5, windFull: 10});
+//   lean     metres the wind pushes the top of a 1 m flame sideways, at full wind (WIND.full)
+const FLUID = Object.freeze({widen: 2.3, sink: .08, linger: 2.5, lean: .55});
+const MAX_PLANES = 3;
 
 // Life of a fire fed by a source: it grows over the first `grow` share of its fuel, dies over the last `die` share,
 // then smoulders (smoke and glow only) for `smoulder` seconds.
@@ -203,32 +207,60 @@ export function createFireVisual(scene, {position, footprint = [.3, .3], rise = 
 
   const fluid = renderer ? createFlameFluid(renderer) : null;
   const half = Math.max(footprint[0], footprint[1], .05) * size;
-  const cameraRight = new THREE.Vector3(1, 0, 0);
   let fluidMesh = null, fluidUniforms = null, fluidMaterial = null, fluidGeometry = null, fed = 0;
   if (fluid) {
     fluid.setSource(Math.min(.5, 1 / FLUID.widen * .5));
     fluidUniforms = {
       tHeat: {value: null}, uBase: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2()}, uBrightness: {value: look.brightness},
+      uPlanes: {value: MAX_PLANES}, uLean: {value: new THREE.Vector2()},
     };
-    fluidGeometry = new THREE.PlaneGeometry(1, 1).translate(0, .5, 0);
+    // MAX_PLANES unit sheets; aPlane tells the shader which one a vertex belongs to.
+    const corners = [], uvs = [], planeIndex = [], faces = [];
+    for (let plane = 0; plane < MAX_PLANES; plane++) {
+      corners.push(-.5, 0, 0, .5, 0, 0, .5, 1, 0, -.5, 1, 0);
+      uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+      planeIndex.push(plane, plane, plane, plane);
+      const first = plane * 4;
+      faces.push(first, first + 1, first + 2, first, first + 2, first + 3);
+    }
+    fluidGeometry = new THREE.BufferGeometry();
+    fluidGeometry.setIndex(faces);
+    fluidGeometry.setAttribute('position', new THREE.Float32BufferAttribute(corners, 3));
+    fluidGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    fluidGeometry.setAttribute('aPlane', new THREE.Float32BufferAttribute(planeIndex, 1));
     fluidMaterial = new THREE.ShaderMaterial({
       uniforms: fluidUniforms, transparent: true, depthTest: true, depthWrite: false, side: THREE.DoubleSide,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
       vertexShader: /* glsl */`
+        attribute float aPlane;
         uniform vec3 uBase;
-        uniform vec2 uSize;
+        uniform vec2 uSize, uLean;
+        uniform float uPlanes;
         varying vec2 vUv;
+        varying float vFacing;   // 1 seen face-on, 0 edge-on
         void main() {
-          // Upright, turned about the vertical to face the camera.
+          if (aPlane >= uPlanes) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+          vec3 toEye = normalize(vec3(viewMatrix[0][2], 0.0, viewMatrix[2][2]));
+          // One sheet turns about the vertical to face the camera; several stand crossed at even angles.
           vec3 right = normalize(vec3(viewMatrix[0][0], 0.0, viewMatrix[2][0]));
-          vec3 world = uBase + right * (position.x * uSize.x) + vec3(0.0, position.y * uSize.y, 0.0);
-          vUv = uv;
+          if (uPlanes > 1.5) {
+            float angle = aPlane * 3.14159265 / uPlanes;
+            right = vec3(cos(angle), 0.0, sin(angle));
+          }
+          vFacing = abs(dot(cross(right, vec3(0.0, 1.0, 0.0)), toEye));
+          float height = position.y * uSize.y;
+          vec3 world = uBase + right * (position.x * uSize.x) + vec3(0.0, height, 0.0);
+          // The wind bends the whole fire from its base, more the higher it reaches.
+          world.xz += uLean * height * height;
+          // Alternate sheets are mirrored so the crossed flames do not line up.
+          vUv = vec2(mod(aPlane, 2.0) > .5 ? 1.0 - uv.x : uv.x, uv.y);
           gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
         }`,
       fragmentShader: /* glsl */`
         uniform sampler2D tHeat;
-        uniform float uBrightness;
+        uniform float uBrightness, uPlanes;
         varying vec2 vUv;
+        varying float vFacing;
         vec3 flameColor(float heat) {
           vec3 color = mix(vec3(.3, .01, 0.0), vec3(1.0, .24, .012), smoothstep(.03, .4, heat));
           color = mix(color, vec3(1.0, .58, .12), smoothstep(.34, .7, heat));
@@ -240,7 +272,11 @@ export function createFireVisual(scene, {position, footprint = [.3, .3], rise = 
           float density = smoothstep(visible.x, visible.y, t);
           // The slice ends at its sides and top: fade there so its border never shows.
           float edge = smoothstep(0.0, .08, vUv.x) * smoothstep(0.0, .08, 1.0 - vUv.x) * smoothstep(0.0, .12, 1.0 - vUv.y);
-          float alpha = density * edge;
+          // A sheet seen edge-on is a line: fade it out there and let the others carry the fire. Crossed sheets
+          // overlap, so each gives less light.
+          const float overlapLight = .62;        // light of each sheet when several are crossed
+          float crossed = step(1.5, uPlanes);
+          float alpha = density * edge * mix(1.0, smoothstep(.08, .45, vFacing) * overlapLight, crossed);
           if (alpha <= .003) discard;
           const float glow = 1.3, cover = .5;    // as the sheet flames: light at the core, share of the background hidden
           gl_FragColor = vec4(flameColor(smoothstep(visible.x, 1.0, t)) * (glow * uBrightness * alpha), alpha * cover);
@@ -250,8 +286,6 @@ export function createFireVisual(scene, {position, footprint = [.3, .3], rise = 
     });
     fluidMesh = new THREE.Mesh(fluidGeometry, fluidMaterial);
     fluidMesh.frustumCulled = false; fluidMesh.visible = false; fluidMesh.renderOrder = RENDER_ORDER;
-    // The sim needs the wind across the sheet, and the sheet faces whoever looks at it.
-    fluidMesh.onBeforeRender = (_renderer, _scene, camera) => { cameraRight.setFromMatrixColumn(camera.matrixWorld, 0); };
     scene.add(fluidMesh);
   }
 
@@ -371,8 +405,10 @@ export function createFireVisual(scene, {position, footprint = [.3, .3], rise = 
         fed = feeding ? FLUID.linger : Math.max(0, fed - dt);
         fluidMesh.visible = useFluid && fed > 0;
         if (fluidMesh.visible) {
-          const across = wind ? THREE.MathUtils.clamp((wind.x * cameraRight.x + wind.z * cameraRight.z) / FLUID.windFull, -1, 1) * look.windLean : 0;
-          fluid.update(dt, {intensity: feeding ? Math.pow(intensity, INTENSITY.count) * look.density : 0, wind: across});
+          fluid.update(dt, {intensity: feeding ? Math.pow(intensity, INTENSITY.count) * look.density : 0});
+          fluidUniforms.uPlanes.value = THREE.MathUtils.clamp(Math.round(look.planes), 1, MAX_PLANES);
+          const lean = wind && wind.speed > 0 ? FLUID.lean * Math.min(1, wind.speed / WIND.full) * look.windLean / wind.speed : 0;
+          fluidUniforms.uLean.value.set(wind ? wind.x * lean : 0, wind ? wind.z * lean : 0);
           const width = half * 2 * FLUID.widen;
           fluidUniforms.tHeat.value = fluid.temperature;
           fluidUniforms.uBase.value.set(position.x, position.y + (rise[1] - FLUID.sink) * size, position.z);

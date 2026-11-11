@@ -14,15 +14,16 @@ export const FLAME_FLUID_DEFAULTS = Object.freeze({
 // Units: the slice is 1 wide; speeds are slice widths per second.
 const SIM = Object.freeze({
   step: 1 / 60, maxSteps: 2,
-  buoyancy: 12,            // upward acceleration of fully hot air
-  cooling: 2.3,            // share of the heat lost per second: with buoyancy, this sets the flame height
+  buoyancy: 10,            // upward acceleration of fully hot air
+  cooling: 2.2,            // share of the heat lost per second: with buoyancy, this sets the flame height
+  taper: 2.2,              // extra cooling at the top of the slice, as a multiple of `cooling`: flames thin to a tip
+  sideDrag: 1.6,           // sideways speed lost per second on top of `drag`: the fire wanders less left and right
   burnout: .22,            // heat lost per second whatever is left: thin wisps go out instead of lingering
   edge: [.16, 6],          // within this share of the slice from its sides and top, heat is lost this much faster per second
   drag: .6,                // velocity lost per second
-  curl: 1.4,               // vorticity confinement: how strongly small swirls are kept alive
-  wind: 1.6,               // sideways acceleration at a wind input of 1
+  curl: .6,                // vorticity confinement: how strongly small swirls are kept alive
   sourceRows: .045,        // height of the heated band, as a share of the slice height
-  sourceFlicker: 5.5,      // how fast the heat along the band wanders, per second
+  sourceFlicker: 3.2,      // how fast the heat along the band wanders, per second
   sourceGrain: 14,         // hot spots along the band
 });
 
@@ -58,10 +59,10 @@ export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.re
   });
 
   const passes = {
-    // Move the velocity along itself, then add buoyancy, wind, drag and vorticity confinement.
+    // Move the velocity along itself, then add buoyancy, drag and vorticity confinement.
     advectVelocity: pass(/* glsl */`
       uniform sampler2D tVelocity, tHeat;
-      uniform float uAspect, uDt, uWind;
+      uniform float uAspect, uDt;
       float curlAt(vec2 uv) {
         return (texture2D(tVelocity, uv + vec2(uTexel.x, 0.0)).y - texture2D(tVelocity, uv - vec2(uTexel.x, 0.0)).y)
           - (texture2D(tVelocity, uv + vec2(0.0, uTexel.y)).x - texture2D(tVelocity, uv - vec2(0.0, uTexel.y)).x);
@@ -71,16 +72,16 @@ export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.re
         vec2 v = texture2D(tVelocity, vUv - texture2D(tVelocity, vUv).xy * scale * uDt).xy;
         float heat = texture2D(tHeat, vUv).r;
         v.y += ${SIM.buoyancy.toFixed(2)} * heat * uDt;
-        v.x += ${SIM.wind.toFixed(2)} * uWind * heat * uDt;
         // Push along the gradient of |curl|, turned a quarter: it feeds the swirls the solver would smooth away.
         vec2 grad = vec2(abs(curlAt(vUv + vec2(uTexel.x, 0.0))) - abs(curlAt(vUv - vec2(uTexel.x, 0.0))),
           abs(curlAt(vUv + vec2(0.0, uTexel.y))) - abs(curlAt(vUv - vec2(0.0, uTexel.y))));
         float len = length(grad);
         if (len > .0001) v += ${SIM.curl.toFixed(2)} * uDt * curlAt(vUv) * vec2(grad.y, -grad.x) / len;
         v *= 1.0 - ${SIM.drag.toFixed(2)} * uDt;
+        v.x *= 1.0 - ${SIM.sideDrag.toFixed(2)} * uDt;
         if (vUv.y < uTexel.y) v.y = max(v.y, 0.0);   // nothing flows down through the fuel
         gl_FragColor = vec4(v, 0.0, 1.0);
-      }`, {tVelocity: {value: null}, tHeat: {value: null}, uWind: {value: 0}}),
+      }`, {tVelocity: {value: null}, tHeat: {value: null}}),
     divergence: pass(/* glsl */`
       uniform sampler2D tVelocity;
       void main() {
@@ -127,7 +128,7 @@ export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.re
         // A flame that nears the open border burns out before it gets there, so it is never cut off.
         float border = min(min(vUv.x, 1.0 - vUv.x), 1.0 - vUv.y);
         float quench = ${SIM.edge[1].toFixed(1)} * (1.0 - smoothstep(0.0, ${SIM.edge[0].toFixed(2)}, border));
-        heat = max(0.0, heat * (1.0 - (${SIM.cooling.toFixed(2)} + quench) * uDt) - ${SIM.burnout.toFixed(2)} * uDt);
+        heat = max(0.0, heat * (1.0 - (${SIM.cooling.toFixed(2)} * (1.0 + ${SIM.taper.toFixed(2)} * vUv.y) + quench) * uDt) - ${SIM.burnout.toFixed(2)} * uDt);
         float along = (vUv.x - uSource.x) / uSource.y;
         float band = (1.0 - smoothstep(.75, 1.0, abs(along))) * (1.0 - smoothstep(0.0, ${SIM.sourceRows.toFixed(3)}, vUv.y));
         // Fuel does not burn evenly: hot spots wander along the band.
@@ -146,10 +147,10 @@ export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.re
   const draw = (material, into) => { quad.material = material; renderer.setRenderTarget(into); renderer.render(stage, eye); };
   let time = 0, disposed = false;
 
-  function stepOnce(intensity, wind) {
+  function stepOnce(intensity) {
     time += SIM.step;
     let u = passes.advectVelocity.uniforms;
-    u.tVelocity.value = velocity.read.texture; u.tHeat.value = heat.read.texture; u.uWind.value = wind;
+    u.tVelocity.value = velocity.read.texture; u.tHeat.value = heat.read.texture;
     draw(passes.advectVelocity, velocity.write); velocity.swap();
     passes.divergence.uniforms.tVelocity.value = velocity.read.texture;
     draw(passes.divergence, divergence);
@@ -173,10 +174,10 @@ export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.re
       if (!(sourceWidth > 0 && sourceWidth <= .5)) throw Error('Flame fluid source half width must be in (0, 0.5]');
       passes.advectHeat.uniforms.uSource.value.set(.5, sourceWidth);
     },
-    // intensity 0..1 feeds the fire; wind -1..1 pushes the hot air sideways across the slice.
-    update(dt, {intensity, wind = 0}) {
+    // intensity 0..1 feeds the fire.
+    update(dt, {intensity}) {
       if (disposed) return;
-      scope(() => clock.advance(dt, () => stepOnce(intensity, wind)));
+      scope(() => clock.advance(dt, () => stepOnce(intensity)));
     },
     clear() {
       scope(() => {
