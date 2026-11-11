@@ -59,7 +59,7 @@ export const SKY_FIELDS={
   captureInterval:number('Sky capture interval · s',.05,30,.05),lightingInterval:number('Lighting refresh interval · s',.1,60,.1),
  },
 };
-export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,shaftDensity:.0003,shaftHeight:350,shaftRange:6000,shaftContrast:1,shaftRays:1,shaftRayGlare:1.6,windStreaks:false,windStreakAmount:1,windDebris:false,windDebrisAmount:1,rainbow:true,rainbowStrength:1,rainbowSecond:true,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0,bankCoverage:.55,bankPuffiness:.65,bankDrift:.5,bankAmbientTint:.7,bankSunGlow:1,bankSteps:24});
+export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,shaftDensity:.0003,shaftHeight:350,shaftRange:6000,shaftContrast:1,shaftRays:1,shaftRayGlare:1.6,windStreaks:false,windStreakAmount:1,windDebris:false,windDebrisAmount:1,rainbow:true,rainbowStrength:1,rainbowSecond:true,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0,bankCoverage:.55,bankPuffiness:.65,bankDrift:.5,bankAmbientTint:.7,bankSunGlow:1,bankSteps:16});
 export const APPEARANCE_FIELDS={
  cloudShadowStrength:number('Surface cloud shadow strength',0,1,.05,'Applies to materials registered as cloud shadow receivers.'),
  sunShafts:bool('Volumetric sunlight'),shaftStrength:number('Sun shaft strength',0,4,.05),

@@ -6,6 +6,7 @@ import {CLOUD_GLSL} from './cloud-density.js';
 const SHADOW_MAP = Object.freeze({size: 384, cover: 16000});
 // Sun rays show while the view direction is within this range of cosines to the sun: gone at the first, full at the second.
 const RAY_FACING = [.1, .5];
+const RAY_OFFSCREEN = .3;   // share of the half screen the sun may sit outside the frame before the rays are gone
 
 // Dry-land adaptation of WebAquarium's air composite. Scene depth ends each ray,
 // and the live sky density field determines how much sunlight reaches it.
@@ -67,6 +68,8 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    uniform vec4 bankShape;      // coverage, puffiness, sun glow, samples per pixel
    uniform vec4 shaftHaze;      // haze density (1/m at sea level), haze scale height (m), march range (m), shadow contrast
    const float BANK_RANGE = 650.0;   // m of air the fog bank is marched through
+   const float BANK_TOP = 3.0;       // falloff heights above the base elevation where the bank ends
+   const float BANK_OPAQUE = .02;    // light left through the bank below which the march stops
    const int SHAFT_STEPS = 40;       // haze samples per pixel for the sun shafts
    uniform sampler2D cloudShadowMap;
    uniform vec3 sunScreen;      // xy = the sun's position on screen (uv), z = 1 facing the sun, 0 with it behind
@@ -107,7 +110,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     const float coreShade = .38;           // light left in the densest core
     light = 1.0;
     float elevation = (p.y - bankSettings.w) / bankSettings.y;
-    if (elevation >= 3.0) return 0.0;
+    if (elevation >= BANK_TOP) return 0.0;
     float coverage = bankShape.x, puffiness = bankShape.y;
     vec3 q = vec3((p.xz - bankOffset) / bankSettings.z, elevation * .6);
     float roll = bankNoise(q * .83 + vec3(13.0, 7.0, -bankTime * .075)) - .5;
@@ -154,6 +157,8 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     float weight = 1.0, total = 0.0;
     for (int i = 0; i < RAY_STEPS; i++) {
      uv += stride;
+     // Beyond the screen edge there is nothing to read: no light comes from there.
+     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) break;
      vec3 seen = texture2D(sceneColor, uv).rgb;
      float sky = step(1.0, texture2D(sceneDepth, uv).r);
      float glare = clamp(max(seen.r, max(seen.g, seen.b)) - rayGlare, 0.0, glareLimit) * sky;
@@ -238,22 +243,28 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     float bankShade = 0.0;
     float bankLight = bankSunStrength * smoothstep(.01, .06, sunDirection.y);
     if (bankSettings.x > 0.0) {
-     float bankDistance = min(airDistance, BANK_RANGE);
-     int steps = int(bankShape.w);
+     // The bank lies under one height: march only the part of the ray below it, where the fog can be.
+     float bankTop = bankSettings.w + BANK_TOP * bankSettings.y;
+     float enter = 0.0, leave = min(airDistance, BANK_RANGE);
+     if (origin.y > bankTop) enter = direction.y < 0.0 ? (bankTop - origin.y) / direction.y : leave;
+     else if (direction.y > 0.0) leave = min(leave, (bankTop - origin.y) / direction.y);
+     float inBank = leave - enter;
+     int steps = inBank > 0.0 ? int(bankShape.w) : 0;
      for (int i = 0; i < steps; i++) {
-      // Squared spacing keeps nearby fog detail when the depth ray runs all the way to the sky.
+      // Squared spacing keeps nearby fog detail when the ray runs a long way through the bank.
       float a = float(i) / bankShape.w, b = float(i + 1) / bankShape.w;
       a *= a; b *= b;
-      float stepLength = (b - a) * bankDistance;
-      vec3 p = origin + direction * (a * bankDistance + offset * stepLength);
+      float stepLength = (b - a) * inBank;
+      vec3 p = origin + direction * (enter + a * inBank + offset * stepLength);
       float bankLit = 1.0;
       float bankT = exp(-bankExtinction(p, bankLit) * stepLength);
       float bankOpacity = 1.0 - bankT;
-      float visibility = bankLight > 0.0 && bankOpacity > 0.0 ? cloudGroundTransmittance(p, sunDirection) : 0.0;
+      float visibility = bankLight > 0.0 && bankOpacity > 0.0 ? sunThroughClouds(p) : 0.0;
       // Keep a broad warm contribution from the sky in cloud shadow.
       bankSun += bankTransmittance * bankOpacity * bankLit * mix(.35, 1.0, visibility);
       bankShade += bankTransmittance * bankOpacity * bankLit;
       bankTransmittance *= bankT;
+      if (bankTransmittance < BANK_OPAQUE) break;   // nothing behind this much fog shows
      }
     }
     // Sun shafts: haze lit wherever the clouds let the sun through, marched far enough to reach the cloud shadows.
@@ -292,7 +303,10 @@ export function createSunScattering(cloudUniforms, sunDirection) {
      const float brightSkyLoss = .6;             // share of the bow lost against a sky that is already white
      float inRain = smoothstep(rainDepth.x, rainDepth.y, airDistance) * bankTransmittance;
      float brightness = clamp(max(fogged.r, max(fogged.g, fogged.b)), 0.0, 1.0);
-     glow += rainbowLight(direction) * inRain * horizonFade * (1.0 - brightSkyLoss * brightness);
+     // A bow belongs to the sky: it fades out below the horizon instead of lying on the ground seen from above.
+     const vec2 horizon = vec2(-.03, .05);       // view direction y
+     float aboveHorizon = smoothstep(horizon.x, horizon.y, direction.y);
+     glow += rainbowLight(direction) * inRain * aboveHorizon * horizonFade * (1.0 - brightSkyLoss * brightness);
     }
     gl_FragColor = vec4(fogged + glow * (1.0 - clamp(fogged, 0.0, 1.0)), 1.0);
     #include <tonemapping_fragment>
@@ -351,7 +365,10 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    // Where the sun sits on screen. Rays fade out as the camera turns away from it.
    const facing = camera.getWorldDirection(forward).dot(uniforms.sunDirection.value);
    sunPoint.setFromMatrixPosition(camera.matrixWorld).addScaledVector(uniforms.sunDirection.value, camera.far * .5).project(camera);
-   uniforms.sunScreen.value.set(sunPoint.x * .5 + .5, sunPoint.y * .5 + .5, THREE.MathUtils.smoothstep(facing, RAY_FACING[0], RAY_FACING[1]));
+   // With the sun outside the frame there is no glare on screen to spread: the rays fade out over RAY_OFFSCREEN.
+   const outside = Math.max(Math.abs(sunPoint.x) - 1, Math.abs(sunPoint.y) - 1, 0);
+   const onScreen = 1 - THREE.MathUtils.smoothstep(outside, 0, RAY_OFFSCREEN);
+   uniforms.sunScreen.value.set(sunPoint.x * .5 + .5, sunPoint.y * .5 + .5, onScreen * THREE.MathUtils.smoothstep(facing, RAY_FACING[0], RAY_FACING[1]));
    uniforms.rayStrength.value = strength > 0 ? rays : 0;
    uniforms.rayGlare.value = glare;
    uniforms.rainbow.value.copy(bow);
@@ -369,7 +386,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    try {
     renderer.setScissorTest(false);
     renderer.autoClear = true;
-    if (strength > 0) {
+    if (strength > 0 || sunStrength > 0) {
      uniforms.shadowCentre.value.setFromMatrixPosition(camera.matrixWorld);
      renderer.setRenderTarget(shadowTarget);
      renderer.render(shadowScene, screenCamera);
