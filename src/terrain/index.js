@@ -222,8 +222,18 @@ export function createTerrainMaterial(parameters = {}, {
   shader.fragmentShader = shader.fragmentShader.replace('void main() {', `${TERRAIN_GLSL}\nvoid main() {`)
    .replace('float up = inverseTransformDirection', `${TERRAIN_FRAGMENT}\nfloat up = inverseTransformDirection`)
    .replace('snowCoverage *= 1.0 - track * .92;', `
-    if (terrainSnowCover && !terrainProp) snowCoverage = textureLod(terrainSnowDepth, (terrainGrid + .5) / terrainSize, 0.0).r;
-    else snowCoverage *= 1.0 - track * .92;
+    if (terrainSnowCover && !terrainProp) {
+     snowCoverage = textureLod(terrainSnowDepth, (terrainGrid + .5) / terrainSize, 0.0).r;
+     #ifdef TERRAIN_SNOW_DETAIL
+     // A thin packed layer lets the wet soil show through the rut.
+     const float thinSnowCoverage = .85;
+     const float mudRevealStrength = .7;
+     float mudReveal = track * (1.0 - smoothstep(0.0, thinSnowCoverage, snowCoverage));
+     vec4 trackMud = terrainTexture(TERRAIN_MUD, terrainP.xz, terrainDx.xz, terrainDy.xz);
+     diffuseColor.rgb = mix(diffuseColor.rgb, trackMud.rgb, mudReveal);
+     snowCoverage *= 1.0 - mudReveal * mudRevealStrength;
+     #endif
+    } else snowCoverage *= 1.0 - track * .92;
    `)
    .replace('diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);', '')
    .replace('roughnessFactor = mix(roughnessFactor, .83, snowCoverage);', `
