@@ -17,7 +17,7 @@ const LIBRARY_ALLOWED = {
   terrain: ['surface'],
   destruction: ['cable/cable.js', 'cable/three.js', 'particles/chips.js', 'particles/puffs.js'],
   boundaries: ['trees'],
-  weather: ['particles/water/precipitation.js'],   // rain and snow
+  weather: ['particles/water/precipitation.js', 'particles/wind.js'],   // rain and snow; wind streaks and debris
   water: ['particles/water/spray-pump.js'],        // the boat spray pump
 };
 // Module pages (bench/<page>/): the modules each one shows. Every page may also use core, the stage and the UI tool the

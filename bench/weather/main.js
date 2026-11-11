@@ -57,7 +57,7 @@ const view = createThreeWeather({system, scene, renderer, camera, ...(privateBas
     return surfaceAt(x * scale, z * scale, [terrain]);
   },
   sky: {quality: 'low', bottom: 460, thickness: 540, scale: 5600, mapScale: 12000, mapVariation: .48, detail: .32, aurora: true, auroraHeading: 160},
-  appearance: {sunShafts: true, shaftStrength: 1.4, heightFog: true}, precipitation: {count: 800, radius: 30, height: 30}});
+  appearance: {sunShafts: true, shaftStrength: 1.4, heightFog: true, windStreaks: true, windDebris: true}, precipitation: {count: 800, radius: 30, height: 30}});
 view.sun.castShadow = true; view.sun.shadow.mapSize.set(1024, 1024); Object.assign(view.sun.shadow.camera, {left: -180, right: 180, top: 180, bottom: -180, near: 1, far: 400});
 
 // Neutral test valley: ground, hills, trees, blocks, three roughness spheres.
@@ -125,6 +125,9 @@ $('clouds').onchange = () => view.configure({sky: {clouds: $('clouds').checked}}
 $('cloud-shadows').onchange = () => view.configure({appearance: {cloudShadowStrength: Number($('cloud-shadows').checked)}});
 $('shafts').onchange = () => view.configure({appearance: {sunShafts: $('shafts').checked}});
 $('height-fog').onchange = () => view.configure({appearance: {heightFog: $('height-fog').checked}});
+$('rainbow').onchange = () => view.configure({appearance: {rainbow: $('rainbow').checked}});
+$('wind-streaks').onchange = () => view.configure({appearance: {windStreaks: $('wind-streaks').checked}});
+$('wind-debris').onchange = () => view.configure({appearance: {windDebris: $('wind-debris').checked}});
 $('heading').oninput = () => { system.weather.windHeading = Number($('heading').value); $('heading-value').textContent = $('heading').value + '°'; };
 $('pause').onclick = () => { system.paused = !system.paused; $('pause').textContent = system.paused ? 'Resume' : 'Pause'; };
 function syncControls() {
@@ -134,6 +137,7 @@ function syncControls() {
   $('cloud-shadows').checked = appearance.cloudShadowStrength > 0;
   $('aurora').checked = view.settings.aurora;
   $('shafts').checked = appearance.sunShafts; $('height-fog').checked = appearance.heightFog;
+  $('rainbow').checked = appearance.rainbow; $('wind-streaks').checked = appearance.windStreaks; $('wind-debris').checked = appearance.windDebris;
   $('quality').value = view.settings.quality; $('clouds').checked = view.settings.clouds; $('pause').textContent = system.paused ? 'Resume' : 'Pause';
   $('transition').max = Math.max(20, system.weather.defaultDuration); $('transition').value = system.weather.defaultDuration; $('transition-value').textContent = system.weather.defaultDuration + ' s';
   $('hour').value = system.day.hour; $('hour-value').textContent = hourLabel(system.day.hour);

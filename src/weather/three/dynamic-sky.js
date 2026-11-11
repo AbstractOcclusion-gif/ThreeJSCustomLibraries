@@ -174,7 +174,7 @@ export class DynamicSky {
     const w = weather.on, p = weather.cloudProfile;
     u.uCloudCoverage.value = w ? THREE.MathUtils.lerp(s.clearCoverage, s.overcastCoverage, p[0]) : s.coverage;
     if (w) { u.uCloudScale.value = s.scale * p[1]; u.uCloudThickness.value = s.thickness * p[2]; u.uCloudDetail.value = Math.min(0.8, s.detail * p[3]); u.uCirrusOpacity.value = s.cirrusOpacity * (s.clearCoverage * (weather.weights[weather.names?.indexOf('clear')??0]??0) + p[4]); }
-    const speed = w ? weather.wind : s.windSpeed, heading = THREE.MathUtils.degToRad(w ? windHeading : s.windHeading);
+    const speed = (w ? weather.wind : s.windSpeed) * s.cloudDrift, heading = THREE.MathUtils.degToRad(w ? windHeading : s.windHeading);
     u.uCloudOffset.value.x += Math.cos(heading) * speed * dt; u.uCloudOffset.value.y += Math.sin(heading) * speed * dt;
     u.uCloudDetailOffset.value.x += Math.cos(heading) * speed * CLOUD_DRIFT.detail * dt; u.uCloudDetailOffset.value.y += Math.sin(heading) * speed * CLOUD_DRIFT.detail * dt;
     u.uCloudLift.value += speed * CLOUD_DRIFT.lift * dt;

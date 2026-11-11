@@ -12,7 +12,7 @@ export const DAY_FIELDS=Object.freeze({
 });
 export const DYNAMIC_SKY_DEFAULTS=Object.freeze({
  quality:'mobile',clouds:true,coverage:.3,clearCoverage:0,overcastCoverage:.95,density:.006,
- bottom:700,distantDrop:0,thickness:450,scale:14000,detail:.25,windSpeed:8,windHeading:0,brightness:5,ambient:1,
+ bottom:700,distantDrop:0,thickness:450,scale:14000,detail:.25,windSpeed:8,windHeading:0,cloudDrift:1,brightness:5,ambient:1,
  turbidity:.5,rayleigh:1,mie:.0005,mieG:.8,exposure:.18,skySaturation:2.2,
  mapScale:30000,mapVariation:.35,captureInterval:.35,lightingInterval:3,
  cirrus:true,cirrusOpacity:.14,cirrusAltitude:4500,cirrusScale:16000,cirrusSpeed:12,
@@ -35,6 +35,7 @@ export const SKY_FIELDS={
   distantDrop:number('Distant cloud drop · m',0,300,5,'Lowers the apparent cloud base toward the horizon in the sky capture.'),
   scale:number('Shape scale · m',100,100000,100),detail:number('Detail erosion',0,.8),brightness:number('Sunlit cloud brightness',0,30,.1),ambient:number('Cloud ambient',0,10,.1),
   mapScale:number('Weather map scale · m',100,150000,100),mapVariation:number('Weather map variation',0,1),
+  cloudDrift:number('Cloud drift ×',0,20,.1,'Scale on how fast the clouds travel with the wind. 1 is the real wind speed at cloud height.'),
   windSpeed:number('Manual wind · m/s',0,100,.5,'Used when weather profiles are disabled.'),windHeading:number('Manual heading · degrees',0,360,1,'Used when weather profiles are disabled.'),
  },
  'Cirrus':{cirrus:bool('Cirrus'),cirrusOpacity:number('Opacity',0,1),cirrusAltitude:number('Altitude · m',1,20000,1),cirrusScale:number('Scale · m',100,100000,100),cirrusSpeed:number('Drift · m/s',0,100,.5)},
@@ -58,7 +59,7 @@ export const SKY_FIELDS={
   captureInterval:number('Sky capture interval · s',.05,30,.05),lightingInterval:number('Lighting refresh interval · s',.1,60,.1),
  },
 };
-export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,shaftDensity:.0003,shaftHeight:350,shaftRange:6000,shaftContrast:1,shaftRays:1,shaftRayGlare:1.6,rainbow:true,rainbowStrength:1,rainbowSecond:true,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0,bankCoverage:.55,bankPuffiness:.65,bankDrift:.5,bankAmbientTint:.7,bankSunGlow:1,bankSteps:24});
+export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,shaftDensity:.0003,shaftHeight:350,shaftRange:6000,shaftContrast:1,shaftRays:1,shaftRayGlare:1.6,windStreaks:false,windStreakAmount:1,windDebris:false,windDebrisAmount:1,rainbow:true,rainbowStrength:1,rainbowSecond:true,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0,bankCoverage:.55,bankPuffiness:.65,bankDrift:.5,bankAmbientTint:.7,bankSunGlow:1,bankSteps:24});
 export const APPEARANCE_FIELDS={
  cloudShadowStrength:number('Surface cloud shadow strength',0,1,.05,'Applies to materials registered as cloud shadow receivers.'),
  sunShafts:bool('Volumetric sunlight'),shaftStrength:number('Sun shaft strength',0,4,.05),
@@ -68,6 +69,8 @@ export const APPEARANCE_FIELDS={
  shaftHeight:number('Shaft haze height · m',10,3000,10,'The haze thins with altitude over this height: raise it toward the cloud base so beams show all the way up.'),
  shaftRange:number('Shaft range · m',100,12000,50,'How far the beams are traced.'),
  shaftContrast:number('Shaft shadow contrast',0,3,.05,'How much the air in cloud shadow darkens the view behind it. This is what separates the beams.'),
+ windStreaks:bool('Wind streaks'),windStreakAmount:number('Wind streak amount',0,4,.05,'More streaks for the same wind. None show in calm air.'),
+ windDebris:bool('Wind-blown leaves and dust'),windDebrisAmount:number('Wind debris amount',0,4,.05,'More debris for the same wind. None flies in a light breeze.'),
  rainbow:bool('Rainbow'),rainbowStrength:number('Rainbow strength',0,3,.05,'Shows while the air is still wet from rain and the sun is out.'),rainbowSecond:bool('Second rainbow'),
  heightFog:bool('3D height fog'),bankDensity:number('Bank density',0,.2,.001),
  bankHeight:number('Bank falloff height · m',1,200,1),bankScale:number('Bank noise scale · m',10,1000,1),

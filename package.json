@@ -26,6 +26,7 @@
     "./weather/bundled-assets": "./src/weather/three/bundled-assets.js",
     "./particles": "./src/particles/index.js",
     "./fire": "./src/fire/index.js",
+    "./fire/visual": "./src/fire/visual.js",
     "./particles/water": "./src/particles/water/index.js",
     "./water": "./src/water/index.js",
     "./flocking": "./src/flocking/index.js",

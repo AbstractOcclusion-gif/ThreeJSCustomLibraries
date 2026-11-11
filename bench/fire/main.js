@@ -1,9 +1,9 @@
-import {fireControls} from './controls.js';
+import {fireControls, fireLookControls} from './controls.js';
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createFireSystem} from '../../src/fire/index.js';
-import {createParticlePrefab} from '../../src/particles/index.js';
+import {createFireVisual, createFlameLook} from '../../src/fire/visual.js';
 import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import {environmentControls} from '../kit/controls.js';
@@ -12,6 +12,9 @@ import {aimRay} from '../kit/input.js';
 
 // Crate glow: intensity x min(1, fuel x fuelGain), flickering by flicker at flickerRate rad/ms; charred trim is trimShade of the plank.
 const GLOW = Object.freeze({intensity: 2.8, fuelGain: 3, flicker: .1, flickerRate: .017}), TRIM_SHADE = .75;
+// Where flames start on a crate: half extents of its top (m) and the height range above its base they rise from.
+const CRATE_FIRE = Object.freeze({footprint: [.54, .47], rise: [.1, .82], size: 1.1});
+const flameLook = createFlameLook(), fireParts = {flames: true};
 const renderer = benchRenderer();
 renderer.shadowMap.enabled = true;
 const scene = new T.Scene();
@@ -42,7 +45,7 @@ const pickables = [];
 const setups = [
   [-3.7, 0, 10], [-2.1, 0.15, 12], [-0.5, -0.15, 8], [1.15, 0.25, 10], [4.6, -0.1, 10],
 ];
-const crates = await Promise.all(setups.map(async ([x, z, burnSeconds], index) => {
+const crates = setups.map(([x, z, burnSeconds], index) => {
   const group = new T.Group();
   group.position.set(x, 0, z);
   const fire = system.add({position: group.position, burnSeconds});
@@ -67,22 +70,18 @@ const crates = await Promise.all(setups.map(async ([x, z, burnSeconds], index) =
   const light = new T.PointLight(0xff8f36, 0, 3.5, 2);
   light.position.set(x, 1.1, z);
   scene.add(light);
-  const fx = await createParticlePrefab(scene, 'fire', {position: new T.Vector3(x, 0.58, z), size: 1.16, pool: 30});
-  fx.stop();
-  return {fire, fx, light, plank, trim, burning: false};
-}));
+  const fx = createFireVisual(scene, {position: group.position, ...CRATE_FIRE, look: flameLook});
+  return {fire, fx, light, plank, trim};
+});
 
 const status = document.getElementById('status');
 const reset = () => {
   system.reset();
-  for (const crate of crates) {
-    crate.burning = false;
-    crate.fx.stop();
-    crate.fx.clear();
-  }
+  for (const crate of crates) crate.fx.clear();
 };
 const gui = createBenchPanel('Fire');
 fireControls(gui, {ignite: () => crates[0].fire.ignite(), reset});
+fireLookControls(gui, {look: flameLook, show: fireParts});
 // Optional wind: off = even spread and upright flames, as before.
 const wind = {environment: false, windSpeed: 8, windHeading: 0}, environment = createEnvironment();
 function applyWind() {
@@ -112,11 +111,8 @@ startFrameLoop(renderer, (dt, now) => {
   for (const [index, crate] of crates.entries()) {
     const {fire, fx, light, plank, trim} = crate;
     const isBurning = fire.phase === 'burning';
-    if (crate.burning !== isBurning) {
-      crate.burning = isBurning;
-      if (isBurning) fx.start();
-      else fx.stop();
-    }
+    fx.show.flames = fireParts.flames;
+    fx.intensity = isBurning ? Math.min(1, fire.fuel * GLOW.fuelGain) : 0;
     burning += Number(isBurning);
     burned += Number(fire.phase === 'burned');
     fx.update(dt);
@@ -130,6 +126,7 @@ startFrameLoop(renderer, (dt, now) => {
   renderer.render(scene, camera);
 });
 document.body.dataset.ready = 'true';
+window.fireBench = {system, crates, flameLook, environment, scene, camera, renderer};
 
 onLeave(() => {
   renderer.setAnimationLoop(null);

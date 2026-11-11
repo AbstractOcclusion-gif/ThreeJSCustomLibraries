@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {DynamicSky,DYNAMIC_SKY_DEFAULTS,CLOUD_QUALITY} from './dynamic-sky.js';
 import {createSkyUniforms,createSkyDome,skyDefines} from './sky-dome.js';
 import {createPrecipitation} from './precipitation.js';
+import {createWindStreaks,createWindDebris} from '../../particles/wind.js';
 import {createSunScattering} from './sun-scattering.js';
 import {createLightning} from './lightning.js';
 import {createCloudShadows} from './cloud-shadows.js';
@@ -67,6 +68,12 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
   return look.rainbowStrength*smoothstep(airWetness,...RAINBOW.wetness)*smoothstep(system.weather.sunlight,...RAINBOW.sunlight)*system.day.daylight;
  }
  let rain=precipitationConfig===false?null:createPrecipitation(group,precipitationConfig);
+ let windStreaks=null,windDebris=null;
+ // Each wind effect exists only while its setting is ticked.
+ function syncWindEffect(effect,enabled,create){
+  if(enabled)return effect??create({THREE,group});
+  effect?.dispose();return null;
+ }
  const updateScope=createRenderScope(renderer,{clearColor:false,scissorOff:false});   // the sky captures put the host's target, viewport and scissor back
  const bridge={s:{on:true,auto:false,hour:NOON},daylight:1,moonDir:new THREE.Vector3(),moonPhase:.5};
  const reducedMotion=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -148,6 +155,8 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    }
    airWetness=Math.max(Math.min(1,w.rain),airWetness-dt/RAINBOW.drySeconds);
    rain?.update(dt,shared,worldPosition);
+   windStreaks=syncWindEffect(windStreaks,look.windStreaks,createWindStreaks);windStreaks?.update(dt,shared,worldPosition,look.windStreakAmount);
+   windDebris=syncWindEffect(windDebris,look.windDebris,createWindDebris);windDebris?.update(dt,shared,worldPosition,look.windDebrisAmount);
    const stormWeight=w.weights[w.names.indexOf('stormy')]??0;
    flashRemaining=Math.max(0,flashRemaining-dt);
    const lightningEnabled=settings.lightningStrength>0&&!reducedMotion?.matches;
@@ -198,7 +207,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,shaftHaze,look.shaftRays,look.shaftRayGlare,look.heightFog?bankColor:fogObject.color,sun.color,bankSunStrength,bankSettings,bankShape,bankOffset,bankTime,wakeHead,wakeTail,rainbowBows.set(bow,look.rainbowSecond?bow*RAINBOW.secondShare:0),input);
   },
   dispose(){
-   if(disposed)return;disposed=true;cloudShadows.dispose();bolt?.dispose();scattering?.dispose();dynamic.dispose();rain?.dispose();dome.geometry.dispose();dome.material.dispose();scene.remove(group);
+   if(disposed)return;disposed=true;cloudShadows.dispose();bolt?.dispose();scattering?.dispose();dynamic.dispose();rain?.dispose();windStreaks?.dispose();windDebris?.dispose();dome.geometry.dispose();dome.material.dispose();scene.remove(group);
    if(scene.background===null)scene.background=saved.background;if(scene.fog===fogObject)scene.fog=saved.fog;defaultEnvironment.clear();
    if(ownsSun){scene.remove(sun,sun.target);sun.dispose();}else{sun.color.copy(sunState.color);sun.intensity=sunState.intensity;sun.position.copy(sunState.position);sun.target.position.copy(sunState.target);}
    if(ownsHemi){scene.remove(hemi);hemi.dispose();}else{hemi.color.copy(hemiState.color);hemi.groundColor.copy(hemiState.ground);hemi.intensity=hemiState.intensity;hemi.position.copy(hemiState.position);}
