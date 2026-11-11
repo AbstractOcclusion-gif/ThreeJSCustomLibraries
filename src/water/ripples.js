@@ -33,15 +33,13 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = .4
   texture.needsUpdate = true;
  }
 
- function splash(x, z, strength, radius = SPLASH.radius) {
-  if (!(radius > 0) || !Number.isFinite(radius)) return;
-  const reach = radius === SPLASH.radius ? SPLASH.reach : Math.ceil(radius / cell);
+ function splash(x, z, strength) {
   const cx = Math.floor((x - xMin) / cell), cz = Math.floor((z - zMin) / cell);
-  for (let row = Math.max(1, cz - reach); row <= Math.min(rows - 2, cz + reach); row++) {
-   for (let col = Math.max(1, cx - reach); col <= Math.min(columns - 2, cx + reach); col++) {
+  for (let row = Math.max(1, cz - SPLASH.reach); row <= Math.min(rows - 2, cz + SPLASH.reach); row++) {
+   for (let col = Math.max(1, cx - SPLASH.reach); col <= Math.min(columns - 2, cx + SPLASH.reach); col++) {
     const i = row * columns + col;
     const distance = Math.hypot(xMin + (col + .5) * cell - x, zMin + (row + .5) * cell - z);
-    if (wet[i] && distance < radius) velocity[i] -= strength * SPLASH.depth * (.5 + .5 * Math.cos(Math.PI * distance / radius));
+    if (wet[i] && distance < SPLASH.radius) velocity[i] -= strength * SPLASH.depth * (.5 + .5 * Math.cos(Math.PI * distance / SPLASH.radius));
    }
   }
   active = ACTIVE_SECONDS;

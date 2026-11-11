@@ -131,30 +131,31 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     float wet = surfaceWeather.x * (1.0 - snowCoverage);
     diffuseColor.rgb *= (1.0 - .42 * wet) * (1.0 - track * min(1.0, surfaceTrackContrast + .18 * wet));
     roughnessFactor = mix(roughnessFactor, max(.12, roughnessFactor * .4), wet);
-    #ifdef SURFACE_RAIN_IMPACTS
-    float rainFootprint = length(fwidth(vSurfaceWorld.xz));
-    if (surfaceRainAmount > 0.0) {
-     const float filmImpactStrength = .3;
-     float film = wet * smoothstep(.55, .95, up);
-     vec2 rainGradient = rainImpactGradient(vSurfaceWorld.xz, surfaceTime, surfaceRainAmount, rainFootprint);
-     vec3 filmNormal = transformDirection(vec3(rainGradient.x, 0.0, rainGradient.y), viewMatrix);
-     normal = normalize(normal + filmNormal * film * filmImpactStrength);
-    }
-    #endif
     float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
     if (surfaceRunoff > 0.0 && wet > .1 && runoffSlope > 0.0) {
      float streak = surfaceRainStreaks(vSurfaceWorld) * surfaceRunoff * runoffSlope * smoothstep(.1, .72, wet);
      diffuseColor.rgb *= 1.0 - .42 * streak;
      roughnessFactor = mix(roughnessFactor, .085, streak);
     }
+    float puddle = 0.0;
     if (wet > .45 && surfacePuddles > 0.0) {
      vec3 basinPosition = vec3(vSurfaceWorld.xz * .34, 0.0);
      float basin = valueNoise(basinPosition) * .85 + valueNoise(basinPosition * 3.2) * .15;
-     float puddle = surfacePuddles * smoothstep(.94, .995, up) * smoothstep(.45, .92, wet) * (1.0 - smoothstep(.24, .38, basin));
+     puddle = surfacePuddles * smoothstep(.94, .995, up) * smoothstep(.45, .92, wet) * (1.0 - smoothstep(.24, .38, basin));
      diffuseColor.rgb *= 1.0 - .38 * puddle;
      roughnessFactor = mix(roughnessFactor, .055, puddle);
      normal = normalize(mix(normal, transformDirection(vec3(0, 1, 0), viewMatrix), puddle * .75));
     }
+    #ifdef SURFACE_RAIN_IMPACTS
+    float rainFootprint = length(fwidth(vSurfaceWorld.xz));
+    if (surfaceRainAmount > 0.0) {
+     const float filmImpactStrength = .3;
+     float film = max(puddle, wet * smoothstep(.55, .95, up));
+     vec2 rainGradient = rainImpactGradient(vSurfaceWorld.xz, surfaceTime, surfaceRainAmount, rainFootprint);
+     vec3 filmNormal = transformDirection(vec3(rainGradient.x, 0.0, rainGradient.y), viewMatrix);
+     normal = normalize(normal + filmNormal * film * filmImpactStrength);
+    }
+    #endif
     diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);
     roughnessFactor = mix(roughnessFactor, .83, snowCoverage);
     metalnessFactor *= 1.0 - snowCoverage;

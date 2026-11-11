@@ -21,7 +21,6 @@ const BANK = Object.freeze({slope: 2.5, maxHeight: 3, belowWater: .012});   // m
 const COLORS = Object.freeze({grass: [.105, .145, .077], bed: [.235, .198, .139], grassFrom: 1.1,
   stripe: {base: .94, amount: .06, along: 2.3, across: 12}});
 const lerp = (a, b, t) => a + (b - a) * t;
-const bedOffset = (across, depth) => -depth * Math.max(0, 1 - Math.abs(across) ** BED_POWER);
 const wetProfile = [-1, -.85, -.6, 0, .6, .85, 1];
 const bankProfile = [-2.4, -1.35, ...wetProfile, 1.35, 2.4];
 
@@ -58,7 +57,7 @@ export function createChannel({width = 1, depth = 1, drop = 3, river = false, se
   for (const row of rows) {
    for (const across of profile) {
     const edge = Math.abs(across);
-    const bed = bedOffset(across, row.depth);
+    const bed = -row.depth * Math.max(0, 1 - edge ** BED_POWER);
     const bank = edge > 1 ? Math.min(BANK.maxHeight, (edge - 1) * BANK.slope) : 0;
     // Cross sections keep a shared X so wide banks cannot fold over tight bends.
     positions.push(row.centre.x,
@@ -114,17 +113,9 @@ export function createChannel({width = 1, depth = 1, drop = 3, river = false, se
    width: lerp(a.width, b.width, fraction),
    height: lerp(a.height, b.height, fraction),
    speed: lerp(a.speed, b.speed, fraction),
-   depth: lerp(a.depth, b.depth, fraction),
    slope: (b.centre.z - a.centre.z) / (b.centre.x - a.centre.x),
   };
  }
 
- function bedHeightAt(x, z) {
-  const section = sectionAt(x);
-  if (!section) return undefined;
-  const across = Math.abs(z - section.centre) / section.width;
-  const bank = Math.min(BANK.maxHeight, Math.max(0, across - 1) * BANK.slope);
-  return section.height + bedOffset(across, section.depth) + bank - BANK.belowWater;
- }
- return {surface: geometry(true), bed: geometry(false), duration: travel, sample, sectionAt, bedHeightAt};
+ return {surface: geometry(true), bed: geometry(false), duration: travel, sample, sectionAt};
 }

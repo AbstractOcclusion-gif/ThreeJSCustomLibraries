@@ -46,6 +46,38 @@ uniform bool terrainProp;
 uniform bool terrainSnowCover;
 uniform sampler2D terrainSnowDepth;
 
+#ifdef TERRAIN_RILLS
+uniform float terrainRills;
+float terrainRainRills(vec3 world, vec3 terrainNormal) {
+ // The horizontal component of the upward normal points downhill.
+ // Stretch the existing runoff streaks along that direction.
+ const float alongSlopeScale = .16;
+ vec2 downhill = terrainNormal.xz / max(length(terrainNormal.xz), .001);
+ vec2 crossSlope = vec2(-downhill.y, downhill.x);
+ vec3 slopeCoordinates = vec3(dot(world.xz, crossSlope), world.y,
+  dot(world.xz, downhill) * alongSlopeScale);
+ return surfaceRainStreaks(slopeCoordinates) * terrainRills;
+}
+#endif
+
+#ifdef TERRAIN_BASIN_COUNT
+uniform vec4 terrainBasinShape[TERRAIN_BASIN_COUNT];
+uniform vec2 terrainBasinLevel[TERRAIN_BASIN_COUNT];
+uniform float terrainBasinFill;
+float terrainPuddle(vec3 world) {
+ const float edgeFadeMeters = .025;
+ float coverage = 0.0;
+ for (int index = 0; index < TERRAIN_BASIN_COUNT; index++) {
+  vec4 shape = terrainBasinShape[index];
+  if (length((world.xz - shape.xy) / shape.zw) > 1.0) continue;
+  vec2 basin = terrainBasinLevel[index];
+  float level = basin.x + basin.y * terrainBasinFill;
+  coverage = max(coverage, smoothstep(0.0, edgeFadeMeters, level - world.y));
+ }
+ return coverage;
+}
+#endif
+
 float terrainHeightAt(vec2 grid, out vec3 groundNormal) {
  ivec2 size = textureSize(terrainHeights, 0);
  ivec2 i = min(ivec2(grid), size - 2);
@@ -186,7 +218,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, ...surface
+ field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, rills, basins, ...surface
 } = {}) {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
@@ -197,11 +229,17 @@ export function createTerrainMaterial(parameters = {}, {
  if (contactBand !== undefined && (!Number.isFinite(contactBand) || contactBand < 0)) throw Error('Contact band must be a non-negative distance');
  if (!layerArray && field.forestMap && !layers.forest?.isTexture) throw Error('Terrain forest cover needs a forest floor texture');
  const material = createWeatherSurfaceMaterial(parameters, surface);
+ if (rills) material.defines = {...material.defines, TERRAIN_RILLS: 1};
+ if (basins?.areas.length) material.defines = {...material.defines, TERRAIN_BASIN_COUNT: basins.areas.length};
  if (snowMaterial) material.defines = {...material.defines, TERRAIN_SNOW_DETAIL: 1};
  if (field.forestMap) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  const compileSurface = material.onBeforeCompile;
  const uniforms = {
+  terrainRills: rills ?? {value: 0},
+  terrainBasinFill: basins?.fill ?? {value: 0},
+  terrainBasinShape: {value: basins?.areas.map(({x, z, radiusX, radiusZ}) => new THREE.Vector4(x, z, radiusX, radiusZ)) ?? []},
+  terrainBasinLevel: {value: basins?.areas.map(({floor, capacity}) => new THREE.Vector2(floor, capacity)) ?? []},
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap}, terrainBounds: {value: field.bounds},
   terrainLayerArray: {value: layerArray ?? null},
   terrainGrass: {value: layers?.grass}, terrainRock: {value: layers?.rock}, terrainSnow: {value: layers?.snow}, terrainMud: {value: layers?.mud},
@@ -235,6 +273,32 @@ export function createTerrainMaterial(parameters = {}, {
      snowCoverage *= 1.0 - mudReveal * mudRevealStrength;
      #endif
     } else snowCoverage *= 1.0 - track * .92;
+   `)
+   .replace('float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));', `
+    #ifdef TERRAIN_RILLS
+    float runoffSlope = smoothstep(.04, .28, length(terrainNormal.xz));
+    #else
+    float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
+    #endif
+   `)
+   .replace('float streak = surfaceRainStreaks(vSurfaceWorld) *', `
+    #ifdef TERRAIN_RILLS
+    float runoffPattern = terrainRainRills(vSurfaceWorld, terrainNormal);
+    #else
+    float runoffPattern = surfaceRainStreaks(vSurfaceWorld);
+    #endif
+    float streak = runoffPattern *
+   `)
+   .replace('if (wet > .45 && surfacePuddles > 0.0) {', `
+    #ifdef TERRAIN_BASIN_COUNT
+    if (terrainBasinFill > 0.0) {
+     puddle = terrainPuddle(vSurfaceWorld) * (1.0 - snowCoverage);
+    #else
+    if (wet > .45 && surfacePuddles > 0.0) {
+   `)
+   .replace('diffuseColor.rgb *= 1.0 - .38 * puddle;', `
+    #endif
+    diffuseColor.rgb *= 1.0 - .38 * puddle;
    `)
    .replace('diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);', '')
    .replace('roughnessFactor = mix(roughnessFactor, .83, snowCoverage);', `

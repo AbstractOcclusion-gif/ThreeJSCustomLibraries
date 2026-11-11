@@ -22,11 +22,11 @@ const LIBRARY_ALLOWED = {
 };
 // Module pages (bench/<page>/): the modules each one shows. Every page may also use core, the stage and the UI tool the
 // bench chrome (bench/ui-demo.js) mounts on every page. Built on by design: boundaries->trees, fire->particle flames,
-// pond->waterfall spray, terrain->surface and water, vegetation->leaved trees.
+// pond->waterfall spray, terrain->surface, vegetation->leaved trees.
 const PAGES = {
   boundaries: ['boundaries', 'trees'], cable: ['cable'], camera: ['camera'], destruction: ['destruction'],
   fire: ['fire', 'particles'], flocking: ['flocking'], ocean: ['water'], particles: ['particles'],
-  pond: ['water', 'particles'], terrain: ['terrain', 'surface', 'water'], ui: ['ui'], vegetation: ['vegetation', 'trees'],
+  pond: ['water', 'particles'], terrain: ['terrain', 'surface'], ui: ['ui'], vegetation: ['vegetation', 'trees'],
   water: ['water'], weather: ['weather'],
 };
 const EVERY_PAGE = ['core', 'stage', 'ui'];
