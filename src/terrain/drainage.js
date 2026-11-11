@@ -1,4 +1,4 @@
-import {FloatType} from 'three';
+import {FloatType, MathUtils} from 'three';
 import {createDataTexture} from '../core/data-texture.js';
 
 // Match the heightfield's triangulation, including its shared diagonal.
@@ -107,6 +107,22 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
     texture.needsUpdate = true;
   }
 
+  function sample(x, z, target) {
+    const gx = (x - field.bounds.x) / stepX, gz = (z - field.bounds.y) / stepZ;
+    if (gx < 0 || gz < 0 || gx > width - 1 || gz > height - 1) return false;
+    const ix = Math.min(Math.floor(gx), width - 2);
+    const iz = Math.min(Math.floor(gz), height - 2);
+    const u = gx - ix, v = gz - iz;
+    const a = (iz * width + ix) * CHANNELS;
+    const b = a + CHANNELS, c = a + width * CHANNELS, d = c + CHANNELS;
+    const {lerp} = MathUtils;
+    const gradeX = lerp(lerp(values[a], values[b], u), lerp(values[c], values[d], u), v);
+    const gradeZ = lerp(lerp(values[a + 1], values[b + 1], u), lerp(values[c + 1], values[d + 1], u), v);
+    const basin = (Math.round(gz) * width + Math.round(gx)) * CHANNELS;
+    target.set(gradeX, gradeZ, values[basin + 2], values[basin + 3]);
+    return true;
+  }
+
   rebuild();
-  return {texture, rebuild, dispose: () => texture.dispose()};
+  return {texture, rebuild, sample, dispose: () => texture.dispose()};
 }

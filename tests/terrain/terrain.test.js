@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {createTerrainDrainage, createTerrainField, valueNoise, OceanCoastTerrain} from '../../src/terrain/index.js';
+import {createTerrainRunoff} from '../../src/terrain/runoff.js';
 import {createLighting} from '../../src/core/lighting.js';
 
 test('terrain field validates its inputs, samples heights inside its bounds and disposes', () => {
@@ -55,4 +56,42 @@ test('terrain drainage follows slope, fills a one-cell basin and drains open edg
   drainage.dispose();
   field.dispose();
  }
+});
+
+test('runoff beads move downhill without a phase reset and move faster on steeper slopes', () => {
+ const extent = 32, resolution = 33, maskResolution = 256;
+ const step = 1 / 60;
+ function travelOnSlope(grade) {
+  const heights = Float32Array.from({length: resolution ** 2}, (_, index) => (index % resolution) * grade);
+  const field = createTerrainField({size: [extent, extent], resolution: [resolution, resolution], heights});
+  const drainage = createTerrainDrainage(field);
+  const runoff = createTerrainRunoff({field, drainage, resolution: maskResolution});
+  function centerOfWetMark() {
+   const {data, width} = runoff.texture.image;
+   let weightedX = 0, weight = 0;
+   for (let index = 0; index < data.length; index++) {
+    weightedX += (index % width + .5) * data[index];
+    weight += data[index];
+   }
+   assert.ok(weight > 0);
+   return weightedX / weight * extent / width;
+  }
+  try {
+   const rain = {rain: .007, amount: 1, puddleFill: 0};
+   const dry = {...rain, rain: 0};
+   for (let frame = 0; frame < 66; frame++) runoff.update(step, rain);
+   const first = centerOfWetMark();
+   for (let frame = 0; frame < 12; frame++) runoff.update(step, dry);
+   const middle = centerOfWetMark();
+   for (let frame = 0; frame < 12; frame++) runoff.update(step, dry);
+   const last = centerOfWetMark();
+   assert.ok(first > middle && middle > last);
+   return first - last;
+  } finally {
+   runoff.dispose();
+   drainage.dispose();
+   field.dispose();
+  }
+ }
+ assert.ok(travelOnSlope(.5) > travelOnSlope(.25));
 });

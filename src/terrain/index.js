@@ -50,46 +50,7 @@ uniform sampler2D terrainSnowDepth;
 
 #ifdef TERRAIN_DRAINAGE
 uniform sampler2D terrainDrainage;
-uniform float terrainRills, terrainPuddleFill;
-
-vec2 terrainGrade(vec2 grid) {
- ivec2 size = textureSize(terrainDrainage, 0);
- vec2 bounded = clamp(grid, vec2(0.0), vec2(size - 1));
- ivec2 a = min(ivec2(bounded), size - 2);
- vec2 f = bounded - vec2(a);
- vec2 north = mix(texelFetch(terrainDrainage, a, 0).rg,
-  texelFetch(terrainDrainage, a + ivec2(1, 0), 0).rg, f.x);
- vec2 south = mix(texelFetch(terrainDrainage, a + ivec2(0, 1), 0).rg,
-  texelFetch(terrainDrainage, a + ivec2(1, 1), 0).rg, f.x);
- return mix(north, south, f.y);
-}
-
-float terrainRainRills(vec2 world, vec2 grid, vec2 grade, vec2 cellsPerMeter) {
- // Trace a short path upstream through the grade field. Advect the two
- // phases along that path and crossfade when either phase wraps.
- const float cyclesPerSecond = .8;
- const float travelPerGrade = 1.35;
- const float maxTravelMeters = 1.1;
- const float pathFrequency = 5.2;
- const float sampleSpacingMeters = .35;
- const int pathSamples = 4;
- float phase = fract(surfaceTime * cyclesPerSecond);
- float alternate = fract(phase + .5);
- vec2 signal = vec2(0.0);
- for (int index = 0; index < pathSamples; index++) {
-  float slope = length(grade);
-  vec2 travel = grade * min(travelPerGrade, maxTravelMeters / max(slope, .001));
-  signal.x += valueNoise(vec3((world - travel * phase) * pathFrequency, 2.0));
-  signal.y += valueNoise(vec3((world - travel * alternate) * pathFrequency, 2.0));
-  if (index + 1 == pathSamples) break;
-  vec2 stepUp = grade * (sampleSpacingMeters / max(slope, .001));
-  world -= stepUp;
-  grid -= stepUp * cellsPerMeter;
-  grade = terrainGrade(grid);
- }
- float rill = mix(signal.x, signal.y, 1.0 - abs(phase * 2.0 - 1.0)) / float(pathSamples);
- return smoothstep(.48, .68, rill) * terrainRills;
-}
+uniform float terrainPuddleFill;
 
 float terrainPuddle(vec2 grid, vec2 size, float groundHeight) {
  const float edgeFadeMeters = .012;
@@ -97,6 +58,12 @@ float terrainPuddle(vec2 grid, vec2 size, float groundHeight) {
  float level = mix(basin.x, basin.y, terrainPuddleFill);
  float depth = level - groundHeight;
  return basin.y > basin.x ? smoothstep(0.0, edgeFadeMeters, depth) : 0.0;
+}
+#endif
+#ifdef TERRAIN_RUNOFF_MAP
+uniform sampler2D terrainRunoff;
+float terrainRunoffHeight(vec2 uv) {
+ return textureLod(terrainRunoff, uv, 0.0).r;
 }
 #endif
 #ifdef TERRAIN_PUDDLE_SKY
@@ -243,7 +210,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, drainage, puddleSky, ...surface
+ field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, drainage, runoffTexture, puddleSky, ...surface
 } = {}) {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
@@ -254,6 +221,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (contactBand !== undefined && (!Number.isFinite(contactBand) || contactBand < 0)) throw Error('Contact band must be a non-negative distance');
  if (!layerArray && field.forestMap && !layers.forest?.isTexture) throw Error('Terrain forest cover needs a forest floor texture');
  const material = createWeatherSurfaceMaterial(parameters, surface);
+ if (runoffTexture) material.defines = {...material.defines, TERRAIN_RUNOFF_MAP: 1};
  if (drainage) material.defines = {...material.defines, TERRAIN_DRAINAGE: 1};
  if (drainage && puddleSky) material.defines = {...material.defines, TERRAIN_PUDDLE_SKY: 1};
  if (snowMaterial) material.defines = {...material.defines, TERRAIN_SNOW_DETAIL: 1};
@@ -263,7 +231,7 @@ export function createTerrainMaterial(parameters = {}, {
  const uniforms = {
   ...(drainage && puddleSky),
   terrainDrainage: {value: drainage?.texture ?? null},
-  terrainRills: drainage?.rills ?? {value: 0},
+  terrainRunoff: {value: runoffTexture ?? null},
   terrainPuddleFill: drainage?.fill ?? {value: 0},
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap}, terrainBounds: {value: field.bounds},
   terrainLayerArray: {value: layerArray ?? null},
@@ -300,27 +268,36 @@ export function createTerrainMaterial(parameters = {}, {
     } else snowCoverage *= 1.0 - track * .92;
    `)
    .replace('float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));', `
-    #ifdef TERRAIN_DRAINAGE
-    vec2 grade = wet > .1 && terrainRills > 0.0 ? terrainGrade(terrainGrid) : vec2(0.0);
-    float runoffSlope = smoothstep(.025, .25, length(grade));
+    #ifdef TERRAIN_RUNOFF_MAP
+    float runoffSlope = terrainRunoffHeight(terrainUV) * (1.0 - snowCoverage);
     #else
     float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
     #endif
    `)
-   .replace('float streak = surfaceRainStreaks(vSurfaceWorld) *', `
-    #ifdef TERRAIN_DRAINAGE
-    vec2 cellsPerMeter = (terrainSize - 1.0) / terrainBounds.zw;
-    float runoffPattern = terrainRainRills(vSurfaceWorld.xz, terrainGrid, grade, cellsPerMeter);
+   .replace('if (surfaceRunoff > 0.0 && wet > .1 && runoffSlope > 0.0) {', `
+    #ifdef TERRAIN_RUNOFF_MAP
+    if (surfaceRunoff > 0.0 && runoffSlope > 0.0) {
     #else
-    float runoffPattern = surfaceRainStreaks(vSurfaceWorld);
+    if (surfaceRunoff > 0.0 && wet > .1 && runoffSlope > 0.0) {
     #endif
-    float streak = runoffPattern *
+   `)
+   .replace('float streak = surfaceRainStreaks(vSurfaceWorld) * surfaceRunoff * runoffSlope * smoothstep(.1, .72, wet);', `
+    #ifdef TERRAIN_RUNOFF_MAP
+    float streak = runoffSlope * surfaceRunoff;
+    #else
+    float streak = surfaceRainStreaks(vSurfaceWorld) * surfaceRunoff * runoffSlope * smoothstep(.1, .72, wet);
+    #endif
    `)
    .replace('diffuseColor.rgb *= 1.0 - .42 * streak;', `
-    #ifdef TERRAIN_DRAINAGE
-    const float rillNormalStrength = .24;
-    vec3 filmNormal = normalize(vec3(grade.x * rillNormalStrength, 1.0, grade.y * rillNormalStrength));
-    normal = normalize(mix(normal, transformDirection(filmNormal, viewMatrix), streak));
+    #ifdef TERRAIN_RUNOFF_MAP
+    const float beadHeightMeters = .045;
+    vec2 texel = 1.0 / vec2(textureSize(terrainRunoff, 0));
+    vec2 grade = vec2(
+     terrainRunoffHeight(terrainUV + vec2(texel.x, 0.0)) - terrainRunoffHeight(terrainUV - vec2(texel.x, 0.0)),
+     terrainRunoffHeight(terrainUV + vec2(0.0, texel.y)) - terrainRunoffHeight(terrainUV - vec2(0.0, texel.y))
+    ) * beadHeightMeters / (2.0 * texel * terrainBounds.zw);
+    vec3 beadNormal = inverseTransformDirection(surfaceGeometricNormal, viewMatrix) - vec3(grade.x, 0.0, grade.y);
+    normal = normalize(mix(normal, transformDirection(normalize(beadNormal), viewMatrix), streak));
     #endif
     diffuseColor.rgb *= 1.0 - .42 * streak;
    `)

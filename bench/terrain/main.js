@@ -10,6 +10,7 @@ import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
 import {terrainControls} from './controls.js';
+import {createTerrainRunoff} from '../../src/terrain/runoff.js';
 import {createTerrainBasins} from './basins.js';
 import '../bench.css';
 
@@ -48,6 +49,7 @@ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
 const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0};
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
 const drainage = createTerrainDrainage(field);
+const runoff = createTerrainRunoff({field, drainage});
 let drainageDirty = false;
 const {layerArray, detail, rock, snowMaterial} = await loadTerrainTextures(renderer, {snowDetail: true});
 const appearance = createTerrainAppearance();
@@ -62,7 +64,8 @@ snowMaterial.transmission = snowTransmission;
 const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial, rainAmount};
 const groundMaterial = createTerrainMaterial({}, {
   ...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast,
-  drainage: {texture: drainage.texture, rills, fill: puddleFill},
+  drainage: {texture: drainage.texture, fill: puddleFill},
+  runoffTexture: runoff.texture,
   puddleSky: stage.skyUniforms,
 });
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
@@ -216,6 +219,7 @@ startFrameLoop(renderer, (dt, now) => {
   surfaceWeather.update(dt, null);
   rockWeather.update(dt, null);
   puddleFill.value = Math.min(1, surface.puddles + rain);
+  runoff.update(dt, {rain: rainAmount.value, amount: rills.value, puddleFill: puddleFill.value});
   renderer.render(scene, camera);
   if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${surface.wetness.toFixed(2)} · snow ${surface.snow ? 'on' : 'off'}`; }
 });
@@ -226,6 +230,7 @@ onLeave(() => {
   snowMaterial.normal.dispose(); snowMaterial.roughness.dispose();
   boulderGeometry.dispose(); boulderMaterial.dispose();
   snowCapGeometry.dispose(); snowCapMaterial.dispose();
+  runoff.dispose();
   drainage.dispose();
   tracks.dispose(); field.dispose(); groundMaterial.dispose(); layerArray.dispose(); detail.dispose(); rock.dispose();
   stage.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
