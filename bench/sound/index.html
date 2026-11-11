@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>three-kit · Sound</title>
+<style>
+body { margin: 0; background: #12212b; color: #edf5f6; font: 15px system-ui; }
+canvas { display: block; }
+aside { position: absolute; inset: 1rem auto auto 1rem; width: min(21rem, calc(100% - 4rem)); max-height: calc(100dvh - 4rem); overflow: auto; padding: 1rem; border-radius: 12px; background: #12212bf0; }
+h1 { margin: 0 0 .7rem; font-size: 1.4rem; }
+label { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+fieldset { margin: .7rem 0; border: 1px solid #63808a; }
+button, select { font: inherit; }
+meter { width: 4rem; }
+</style>
+</head>
+<body>
+<aside>
+<h1>Sound playground</h1>
+<button id="unlock">Enable audio</button>
+<button id="click" disabled>Menu click</button>
+<p id="status" role="status">Use headphones to hear the moving emitter. Move the listener with the slider.</p>
+<fieldset id="controls" disabled>
+<legend>Scene</legend>
+<label>Listener position <input id="listener" type="range" aria-label="Listener position"></label>
+<label>Underwater <input id="underwater" type="range"></label>
+<label>Cave <input id="cave" type="range"></label>
+<label>Rain <input id="rain" type="range"></label>
+<label>Wind <input id="wind" type="range"></label>
+<label>Custom band-pass <input id="custom" type="checkbox"></label>
+</fieldset>
+<fieldset id="mixer" disabled><legend>Mixer</legend></fieldset>
+</aside>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
