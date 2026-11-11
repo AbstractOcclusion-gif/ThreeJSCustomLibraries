@@ -23,6 +23,9 @@ const VISIBILITY_TRANSMITTANCE=.02;   // exponential fog keeps 2 % of the light 
 // Fog bank: density x min(max, base + bank). Its billows churn at churn[0] + churn[1] x wind (m/s) times real time.
 // Its colour leans sunShare of the way from the ambient sky toward the sun tint, so banks warm up at dusk.
 const BANK=Object.freeze({base:.55,max:2,churn:[.6,.07],sunShare:.35});
+// Rainbow: the air stays wet for drySeconds after the rain; the bow fades in over these wetness and sunlight ranges,
+// and the second bow is secondShare as bright as the primary.
+const RAINBOW=Object.freeze({drySeconds:90,wetness:[.03,.35],sunlight:[.25,.7],secondShare:.3});
 const SHAFT_MIN_SUN=.01;              // sun direction y: below this no sun shafts or bank glow
 // Lightning: automatic flashes above stormFrom storm weight, distance [min, span] m, interval x [min, span], flash seconds;
 // a strike starts strikeAbove m over the hit or cloudShare into the cloud layer; the bolt strength is divided by boltScale.
@@ -55,7 +58,14 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  let scattering;
  const bankOffset=new THREE.Vector2(),bankSettings=new THREE.Vector4(),bankShape=new THREE.Vector4(),shaftHaze=new THREE.Vector4(),bankColor=new THREE.Color(),bankAmbient=new THREE.Color();
  const wakeHead=new THREE.Vector4(),wakeTail=new THREE.Vector3();
- let bankTime=0;
+ let bankTime=0,airWetness=0;
+ const rainbowBows=new THREE.Vector2();
+ // Strength of the primary bow: wet air, direct sun, daytime.
+ function rainbowAmount(){
+  if(!look.rainbow||sunDir.y<=SHAFT_MIN_SUN||system.day.moonLit)return 0;
+  const {smoothstep}=THREE.MathUtils;
+  return look.rainbowStrength*smoothstep(airWetness,...RAINBOW.wetness)*smoothstep(system.weather.sunlight,...RAINBOW.sunlight)*system.day.daylight;
+ }
  let rain=precipitationConfig===false?null:createPrecipitation(group,precipitationConfig);
  const updateScope=createRenderScope(renderer,{clearColor:false,scissorOff:false});   // the sky captures put the host's target, viewport and scissor back
  const bridge={s:{on:true,auto:false,hour:NOON},daylight:1,moonDir:new THREE.Vector3(),moonPhase:.5};
@@ -136,6 +146,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
     bankColor.copy(fogObject.color).lerp(bankAmbient,look.bankAmbientTint);
     bankOffset.x+=Math.cos(heading)*drift;bankOffset.y+=Math.sin(heading)*drift;
    }
+   airWetness=Math.max(Math.min(1,w.rain),airWetness-dt/RAINBOW.drySeconds);
    rain?.update(dt,shared,worldPosition);
    const stormWeight=w.weights[w.names.indexOf('stormy')]??0;
    flashRemaining=Math.max(0,flashRemaining-dt);
@@ -166,14 +177,15 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
   },
   get postEnabled(){
    return (look.sunShafts&&sunDir.y>SHAFT_MIN_SUN&&!system.day.moonLit&&system.weather.sunlight>0&&look.shaftStrength>0)||
-    (look.heightFog&&look.bankDensity>0);
+    (look.heightFog&&look.bankDensity>0)||rainbowAmount()>0;
   },
   // Optional final draw for a perspective camera. A host can supply its own captured layers.
   render(input){
    if(disposed)return;
    const shafts=look.sunShafts&&sunDir.y>SHAFT_MIN_SUN&&!system.day.moonLit&&system.weather.sunlight>0?look.shaftStrength:0;
    const bankDensity=look.heightFog?look.bankDensity*Math.min(BANK.max,BANK.base+system.weather.bank):0;
-   if(!input&&((shafts===0&&bankDensity===0)||!camera.isPerspectiveCamera||renderer.getRenderTarget()!==null||
+   const bow=rainbowAmount();
+   if(!input&&((shafts===0&&bankDensity===0&&bow===0)||!camera.isPerspectiveCamera||renderer.getRenderTarget()!==null||
       renderer.capabilities.logarithmicDepthBuffer||renderer.capabilities.reversedDepthBuffer||renderer.xr.isPresenting)){
     renderer.render(scene,camera);
     return;
@@ -183,7 +195,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    bankShape.set(look.bankCoverage,look.bankPuffiness,look.bankSunGlow,look.bankSteps);
    const bankSunStrength=bankDensity>0&&sunDir.y>SHAFT_MIN_SUN&&!system.day.moonLit?Math.min(1,Math.sqrt(sun.intensity/APPEARANCE_DEFAULTS.sunIntensity)):0;
    shaftHaze.set(look.shaftDensity,look.shaftHeight,look.shaftRange,look.shaftContrast);
-   scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,shaftHaze,look.shaftRays,look.shaftRayGlare,look.heightFog?bankColor:fogObject.color,sun.color,bankSunStrength,bankSettings,bankShape,bankOffset,bankTime,wakeHead,wakeTail,input);
+   scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,shaftHaze,look.shaftRays,look.shaftRayGlare,look.heightFog?bankColor:fogObject.color,sun.color,bankSunStrength,bankSettings,bankShape,bankOffset,bankTime,wakeHead,wakeTail,rainbowBows.set(bow,look.rainbowSecond?bow*RAINBOW.secondShare:0),input);
   },
   dispose(){
    if(disposed)return;disposed=true;cloudShadows.dispose();bolt?.dispose();scattering?.dispose();dynamic.dispose();rain?.dispose();dome.geometry.dispose();dome.material.dispose();scene.remove(group);

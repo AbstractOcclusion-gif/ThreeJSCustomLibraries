@@ -58,7 +58,7 @@ export const SKY_FIELDS={
   captureInterval:number('Sky capture interval · s',.05,30,.05),lightingInterval:number('Lighting refresh interval · s',.1,60,.1),
  },
 };
-export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,shaftDensity:.0003,shaftHeight:350,shaftRange:6000,shaftContrast:1,shaftRays:1,shaftRayGlare:1.6,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0,bankCoverage:.55,bankPuffiness:.65,bankDrift:.5,bankAmbientTint:.7,bankSunGlow:1,bankSteps:24});
+export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,shaftDensity:.0003,shaftHeight:350,shaftRange:6000,shaftContrast:1,shaftRays:1,shaftRayGlare:1.6,rainbow:true,rainbowStrength:1,rainbowSecond:true,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0,bankCoverage:.55,bankPuffiness:.65,bankDrift:.5,bankAmbientTint:.7,bankSunGlow:1,bankSteps:24});
 export const APPEARANCE_FIELDS={
  cloudShadowStrength:number('Surface cloud shadow strength',0,1,.05,'Applies to materials registered as cloud shadow receivers.'),
  sunShafts:bool('Volumetric sunlight'),shaftStrength:number('Sun shaft strength',0,4,.05),
@@ -68,6 +68,7 @@ export const APPEARANCE_FIELDS={
  shaftHeight:number('Shaft haze height · m',10,3000,10,'The haze thins with altitude over this height: raise it toward the cloud base so beams show all the way up.'),
  shaftRange:number('Shaft range · m',100,12000,50,'How far the beams are traced.'),
  shaftContrast:number('Shaft shadow contrast',0,3,.05,'How much the air in cloud shadow darkens the view behind it. This is what separates the beams.'),
+ rainbow:bool('Rainbow'),rainbowStrength:number('Rainbow strength',0,3,.05,'Shows while the air is still wet from rain and the sun is out.'),rainbowSecond:bool('Second rainbow'),
  heightFog:bool('3D height fog'),bankDensity:number('Bank density',0,.2,.001),
  bankHeight:number('Bank falloff height · m',1,200,1),bankScale:number('Bank noise scale · m',10,1000,1),
  bankLevel:number('Bank base elevation · m',-1000,1000,1),

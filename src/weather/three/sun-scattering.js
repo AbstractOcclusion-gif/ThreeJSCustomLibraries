@@ -36,6 +36,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
   sunScreen: {value: new THREE.Vector3()},
   rayStrength: {value: 0},
   rayGlare: {value: 1},
+  rainbow: {value: new THREE.Vector2()},
   cloudShadowMap: {value: null},
   shadowCentre: {value: new THREE.Vector3()},
   shadowCover: {value: SHADOW_MAP.cover},
@@ -69,6 +70,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    const int SHAFT_STEPS = 40;       // haze samples per pixel for the sun shafts
    uniform sampler2D cloudShadowMap;
    uniform vec3 sunScreen;      // xy = the sun's position on screen (uv), z = 1 facing the sun, 0 with it behind
+   uniform vec2 rainbow;        // strength of the primary bow, strength of the second bow
    uniform float rayStrength, rayGlare;   // rayGlare: scene brightness above which a sky pixel counts as sun glare
    uniform vec3 shadowCentre;
    uniform float shadowCover;
@@ -162,6 +164,32 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     return light / total;
    }
 
+   // Pure spectral colour: 0 violet, 1 red.
+   vec3 spectrum(float t) {
+    float hue = mix(.72, 0.0, clamp(t, 0.0, 1.0));
+    return clamp(abs(fract(hue + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+   }
+
+   // Light added by the rainbow along a view direction. Drops send colours back at fixed angles from the point
+   // opposite the sun: 40.6-42.4 degrees for the primary bow (red outside), 50-53.5 for the second (red inside).
+   // The sky is a little brighter inside the primary bow and darker between the two.
+   vec3 rainbowLight(vec3 direction) {
+    const vec2 primary = vec2(40.6, 42.4);
+    const vec2 second = vec2(50.0, 53.5);
+    const float edge = .6;               // degrees over which a bow fades at each side
+    const float bowLight = .42;          // light a full-strength bow adds: a bow is translucent, never paint
+    const float innerGlow = .06;         // white light inside the primary bow
+    const float glowReach = 12.0;        // degrees the inner glow extends toward the centre
+    float angle = degrees(acos(clamp(-dot(direction, sunDirection), -1.0, 1.0)));
+    float inPrimary = smoothstep(primary.x - edge, primary.x + edge, angle) * (1.0 - smoothstep(primary.y - edge, primary.y + edge, angle));
+    float inSecond = smoothstep(second.x - edge, second.x + edge, angle) * (1.0 - smoothstep(second.y - edge, second.y + edge, angle));
+    vec3 light = spectrum((angle - primary.x) / (primary.y - primary.x)) * inPrimary * rainbow.x;
+    light += spectrum(1.0 - (angle - second.x) / (second.y - second.x)) * inSecond * rainbow.y;
+    light *= bowLight;
+    light += vec3(innerGlow * rainbow.x) * smoothstep(primary.x - glowReach, primary.x, angle) * (1.0 - smoothstep(primary.x, primary.x + edge, angle));
+    return light;
+   }
+
    void main() {
     vec3 color = texture2D(sceneColor, screenUV).rgb;
     float depth = texture2D(sceneDepth, screenUV).r;
@@ -193,7 +221,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     }
     float airDistance = airEnd - airStart;
     origin += direction * airStart;
-    if (airDistance <= 0.0 || (shaftStrength <= 0.0 && bankSettings.x <= 0.0)) {
+    if (airDistance <= 0.0 || (shaftStrength <= 0.0 && bankSettings.x <= 0.0 && rainbow.x <= 0.0)) {
      gl_FragColor = vec4(color, 1.0);
      #include <tonemapping_fragment>
      #include <colorspace_fragment>
@@ -258,6 +286,14 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     fogged *= 1.0 - shade;
     vec3 glow = scatterColor * (scattering * phase * horizonFade * glowScale);
     if (rayStrength > 0.0 && sunScreen.z > 0.0) glow += sunRays() * (rayStrength * sunScreen.z * horizonFade);
+    if (rainbow.x > 0.0) {
+     // The bow forms in the rain between the eye and the background: none in front of nearby things, full far away.
+     const vec2 rainDepth = vec2(40.0, 500.0);   // m
+     const float brightSkyLoss = .6;             // share of the bow lost against a sky that is already white
+     float inRain = smoothstep(rainDepth.x, rainDepth.y, airDistance) * bankTransmittance;
+     float brightness = clamp(max(fogged.r, max(fogged.g, fogged.b)), 0.0, 1.0);
+     glow += rainbowLight(direction) * inRain * horizonFade * (1.0 - brightSkyLoss * brightness);
+    }
     gl_FragColor = vec4(fogged + glow * (1.0 - clamp(fogged, 0.0, 1.0)), 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -293,7 +329,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
  const size = new THREE.Vector2();
  const forward = new THREE.Vector3(), sunPoint = new THREE.Vector3();
  return {
-  render(renderer, scene, camera, color, strength, haze, rays, glare, fogColor, sunColor, sunStrength, banks, shape, offset, time, wakeHead, wakeTail, input) {
+  render(renderer, scene, camera, color, strength, haze, rays, glare, fogColor, sunColor, sunStrength, banks, shape, offset, time, wakeHead, wakeTail, bow, input) {
    if (!input) {
     renderer.getDrawingBufferSize(size);
     if (size.x === 0 || size.y === 0) return;
@@ -318,6 +354,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    uniforms.sunScreen.value.set(sunPoint.x * .5 + .5, sunPoint.y * .5 + .5, THREE.MathUtils.smoothstep(facing, RAY_FACING[0], RAY_FACING[1]));
    uniforms.rayStrength.value = strength > 0 ? rays : 0;
    uniforms.rayGlare.value = glare;
+   uniforms.rainbow.value.copy(bow);
    uniforms.bankColor.value.copy(fogColor);
    uniforms.bankSunColor.value.copy(sunColor);
    uniforms.bankSunStrength.value = sunStrength;
