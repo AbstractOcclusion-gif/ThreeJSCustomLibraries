@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {createTerrainField, valueNoise, OceanCoastTerrain} from '../../src/terrain/index.js';
+import {createTerrainDrainage, createTerrainField, valueNoise, OceanCoastTerrain} from '../../src/terrain/index.js';
 import {createLighting} from '../../src/core/lighting.js';
 
 test('terrain field validates its inputs, samples heights inside its bounds and disposes', () => {
@@ -28,4 +28,31 @@ test('ocean coast terrain builds on the lighting hook and shares its uniforms', 
  assert.ok(Number.isFinite(coast.heightAt(0, -220)));
  coast.dispose();
  assert.equal(scene.children.length, 0);
+});
+
+test('terrain drainage follows slope, fills a one-cell basin and drains open edges', () => {
+ const resolution = 7, extent = resolution - 1;
+ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => index % resolution);
+ const indexAt = (x, z) => z * resolution + x;
+ const basin = indexAt(4, 3);
+ heights[basin] = 2;
+ const field = createTerrainField({size: [extent, extent], resolution: [resolution, resolution], heights});
+ const drainage = createTerrainDrainage(field, {maxPuddleDepth: 2});
+ try {
+  const data = drainage.texture.image.data;
+  const sample = (x, z) => Array.from(data.subarray(indexAt(x, z) * 4, (indexAt(x, z) + 1) * 4));
+  assert.deepEqual(sample(2, 3), [-1, 0, 2, 2]);
+  assert.deepEqual(sample(0, 3).slice(2), [0, 0]);
+  assert.deepEqual(sample(4, 3).slice(2), [2, 3]);
+  assert.ok(field.deform(4, 3, .4, .25) > 0);
+  field.flushDeformation();
+  drainage.rebuild();
+  assert.deepEqual(sample(4, 3).slice(2), [1.75, 3]);
+  field.resetDeformation();
+  drainage.rebuild();
+  assert.deepEqual(sample(4, 3).slice(2), [2, 3]);
+ } finally {
+  drainage.dispose();
+  field.dispose();
+ }
 });

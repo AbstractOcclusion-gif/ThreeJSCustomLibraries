@@ -1,7 +1,9 @@
 import * as THREE from 'three';
+import {SKY_GLSL} from '../core/sky.js';
 import {createWeatherSurfaceMaterial} from '../surface/index.js';
 import {TERRAIN_LAYERS} from './terrain-rules.js';
 export {createTerrainField, SNOW_DEPTH_SCALE} from './field.js';
+export {createTerrainDrainage} from './drainage.js';
 export {TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
 export {valueNoise} from '../core/value-noise.js';
 export {OceanCoastTerrain, TERRAIN_DEFAULTS as OCEAN_COAST_DEFAULTS, WET_DEFAULTS as OCEAN_COAST_WET_DEFAULTS} from './coast.js';
@@ -46,36 +48,59 @@ uniform bool terrainProp;
 uniform bool terrainSnowCover;
 uniform sampler2D terrainSnowDepth;
 
-#ifdef TERRAIN_RILLS
-uniform float terrainRills;
-float terrainRainRills(vec3 world, vec3 terrainNormal) {
- // The horizontal component of the upward normal points downhill.
- // Stretch the existing runoff streaks along that direction.
- const float alongSlopeScale = .16;
- vec2 downhill = terrainNormal.xz / max(length(terrainNormal.xz), .001);
- vec2 crossSlope = vec2(-downhill.y, downhill.x);
- vec3 slopeCoordinates = vec3(dot(world.xz, crossSlope), world.y,
-  dot(world.xz, downhill) * alongSlopeScale);
- return surfaceRainStreaks(slopeCoordinates) * terrainRills;
+#ifdef TERRAIN_DRAINAGE
+uniform sampler2D terrainDrainage;
+uniform float terrainRills, terrainPuddleFill;
+
+vec2 terrainGrade(vec2 grid) {
+ ivec2 size = textureSize(terrainDrainage, 0);
+ vec2 bounded = clamp(grid, vec2(0.0), vec2(size - 1));
+ ivec2 a = min(ivec2(bounded), size - 2);
+ vec2 f = bounded - vec2(a);
+ vec2 north = mix(texelFetch(terrainDrainage, a, 0).rg,
+  texelFetch(terrainDrainage, a + ivec2(1, 0), 0).rg, f.x);
+ vec2 south = mix(texelFetch(terrainDrainage, a + ivec2(0, 1), 0).rg,
+  texelFetch(terrainDrainage, a + ivec2(1, 1), 0).rg, f.x);
+ return mix(north, south, f.y);
+}
+
+float terrainRainRills(vec2 world, vec2 grid, vec2 grade, vec2 cellsPerMeter) {
+ // Trace a short path upstream through the grade field. Advect the two
+ // phases along that path and crossfade when either phase wraps.
+ const float cyclesPerSecond = .8;
+ const float travelPerGrade = 1.35;
+ const float maxTravelMeters = 1.1;
+ const float pathFrequency = 5.2;
+ const float sampleSpacingMeters = .35;
+ const int pathSamples = 4;
+ float phase = fract(surfaceTime * cyclesPerSecond);
+ float alternate = fract(phase + .5);
+ vec2 signal = vec2(0.0);
+ for (int index = 0; index < pathSamples; index++) {
+  float slope = length(grade);
+  vec2 travel = grade * min(travelPerGrade, maxTravelMeters / max(slope, .001));
+  signal.x += valueNoise(vec3((world - travel * phase) * pathFrequency, 2.0));
+  signal.y += valueNoise(vec3((world - travel * alternate) * pathFrequency, 2.0));
+  if (index + 1 == pathSamples) break;
+  vec2 stepUp = grade * (sampleSpacingMeters / max(slope, .001));
+  world -= stepUp;
+  grid -= stepUp * cellsPerMeter;
+  grade = terrainGrade(grid);
+ }
+ float rill = mix(signal.x, signal.y, 1.0 - abs(phase * 2.0 - 1.0)) / float(pathSamples);
+ return smoothstep(.48, .68, rill) * terrainRills;
+}
+
+float terrainPuddle(vec2 grid, vec2 size, float groundHeight) {
+ const float edgeFadeMeters = .012;
+ vec2 basin = texture2D(terrainDrainage, (grid + .5) / size).ba;
+ float level = mix(basin.x, basin.y, terrainPuddleFill);
+ float depth = level - groundHeight;
+ return basin.y > basin.x ? smoothstep(0.0, edgeFadeMeters, depth) : 0.0;
 }
 #endif
-
-#ifdef TERRAIN_BASIN_COUNT
-uniform vec4 terrainBasinShape[TERRAIN_BASIN_COUNT];
-uniform vec2 terrainBasinLevel[TERRAIN_BASIN_COUNT];
-uniform float terrainBasinFill;
-float terrainPuddle(vec3 world) {
- const float edgeFadeMeters = .025;
- float coverage = 0.0;
- for (int index = 0; index < TERRAIN_BASIN_COUNT; index++) {
-  vec4 shape = terrainBasinShape[index];
-  if (length((world.xz - shape.xy) / shape.zw) > 1.0) continue;
-  vec2 basin = terrainBasinLevel[index];
-  float level = basin.x + basin.y * terrainBasinFill;
-  coverage = max(coverage, smoothstep(0.0, edgeFadeMeters, level - world.y));
- }
- return coverage;
-}
+#ifdef TERRAIN_PUDDLE_SKY
+${SKY_GLSL}
 #endif
 
 float terrainHeightAt(vec2 grid, out vec3 groundNormal) {
@@ -218,7 +243,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, rills, basins, ...surface
+ field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, drainage, puddleSky, ...surface
 } = {}) {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
@@ -229,17 +254,17 @@ export function createTerrainMaterial(parameters = {}, {
  if (contactBand !== undefined && (!Number.isFinite(contactBand) || contactBand < 0)) throw Error('Contact band must be a non-negative distance');
  if (!layerArray && field.forestMap && !layers.forest?.isTexture) throw Error('Terrain forest cover needs a forest floor texture');
  const material = createWeatherSurfaceMaterial(parameters, surface);
- if (rills) material.defines = {...material.defines, TERRAIN_RILLS: 1};
- if (basins?.areas.length) material.defines = {...material.defines, TERRAIN_BASIN_COUNT: basins.areas.length};
+ if (drainage) material.defines = {...material.defines, TERRAIN_DRAINAGE: 1};
+ if (drainage && puddleSky) material.defines = {...material.defines, TERRAIN_PUDDLE_SKY: 1};
  if (snowMaterial) material.defines = {...material.defines, TERRAIN_SNOW_DETAIL: 1};
  if (field.forestMap) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  const compileSurface = material.onBeforeCompile;
  const uniforms = {
-  terrainRills: rills ?? {value: 0},
-  terrainBasinFill: basins?.fill ?? {value: 0},
-  terrainBasinShape: {value: basins?.areas.map(({x, z, radiusX, radiusZ}) => new THREE.Vector4(x, z, radiusX, radiusZ)) ?? []},
-  terrainBasinLevel: {value: basins?.areas.map(({floor, capacity}) => new THREE.Vector2(floor, capacity)) ?? []},
+  ...(drainage && puddleSky),
+  terrainDrainage: {value: drainage?.texture ?? null},
+  terrainRills: drainage?.rills ?? {value: 0},
+  terrainPuddleFill: drainage?.fill ?? {value: 0},
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap}, terrainBounds: {value: field.bounds},
   terrainLayerArray: {value: layerArray ?? null},
   terrainGrass: {value: layers?.grass}, terrainRock: {value: layers?.rock}, terrainSnow: {value: layers?.snow}, terrainMud: {value: layers?.mud},
@@ -275,30 +300,50 @@ export function createTerrainMaterial(parameters = {}, {
     } else snowCoverage *= 1.0 - track * .92;
    `)
    .replace('float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));', `
-    #ifdef TERRAIN_RILLS
-    float runoffSlope = smoothstep(.04, .28, length(terrainNormal.xz));
+    #ifdef TERRAIN_DRAINAGE
+    vec2 grade = wet > .1 && terrainRills > 0.0 ? terrainGrade(terrainGrid) : vec2(0.0);
+    float runoffSlope = smoothstep(.025, .25, length(grade));
     #else
     float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
     #endif
    `)
    .replace('float streak = surfaceRainStreaks(vSurfaceWorld) *', `
-    #ifdef TERRAIN_RILLS
-    float runoffPattern = terrainRainRills(vSurfaceWorld, terrainNormal);
+    #ifdef TERRAIN_DRAINAGE
+    vec2 cellsPerMeter = (terrainSize - 1.0) / terrainBounds.zw;
+    float runoffPattern = terrainRainRills(vSurfaceWorld.xz, terrainGrid, grade, cellsPerMeter);
     #else
     float runoffPattern = surfaceRainStreaks(vSurfaceWorld);
     #endif
     float streak = runoffPattern *
    `)
+   .replace('diffuseColor.rgb *= 1.0 - .42 * streak;', `
+    #ifdef TERRAIN_DRAINAGE
+    const float rillNormalStrength = .24;
+    vec3 filmNormal = normalize(vec3(grade.x * rillNormalStrength, 1.0, grade.y * rillNormalStrength));
+    normal = normalize(mix(normal, transformDirection(filmNormal, viewMatrix), streak));
+    #endif
+    diffuseColor.rgb *= 1.0 - .42 * streak;
+   `)
    .replace('if (wet > .45 && surfacePuddles > 0.0) {', `
-    #ifdef TERRAIN_BASIN_COUNT
-    if (terrainBasinFill > 0.0) {
-     puddle = terrainPuddle(vSurfaceWorld) * (1.0 - snowCoverage);
+    #ifdef TERRAIN_DRAINAGE
+    if (terrainPuddleFill > 0.0) {
+     puddle = terrainPuddle(terrainGrid, terrainSize, vSurfaceWorld.y) * (1.0 - snowCoverage);
     #else
     if (wet > .45 && surfacePuddles > 0.0) {
    `)
    .replace('diffuseColor.rgb *= 1.0 - .38 * puddle;', `
     #endif
     diffuseColor.rgb *= 1.0 - .38 * puddle;
+   `)
+   .replace('vec3 filmNormal = transformDirection', `
+    #ifdef TERRAIN_DRAINAGE
+    const float puddleRingScale = .48;
+    const float puddleRingStrength = 1.8;
+    vec2 puddleRings = rainImpactGradient(vSurfaceWorld.xz * puddleRingScale,
+      surfaceTime, surfaceRainAmount, rainFootprint * puddleRingScale);
+    rainGradient = mix(rainGradient, puddleRings * puddleRingStrength, puddle);
+    #endif
+    vec3 filmNormal = transformDirection
    `)
    .replace('diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);', '')
    .replace('roughnessFactor = mix(roughnessFactor, .83, snowCoverage);', `
@@ -342,6 +387,14 @@ export function createTerrainMaterial(parameters = {}, {
     const vec3 snowScatterTint = vec3(.67, .82, 1.0);
     outgoingLight += directionalLights[0].color * snowScatterTint * snowCoverage
       * thinSnow * backlight * grazingLight * terrainSnowTransmission;
+    #endif
+    #ifdef TERRAIN_PUDDLE_SKY
+    if (puddle > 0.0) {
+     const float waterFresnel = .02;
+     float fresnel = waterFresnel + (1.0 - waterFresnel) * pow(1.0 - saturate(dot(normal, geometryViewDir)), 5.0);
+     vec3 reflected = inverseTransformDirection(reflect(-geometryViewDir, normal), viewMatrix);
+     outgoingLight = mix(outgoingLight, sky(reflected, 0.0), puddle * fresnel);
+    }
     #endif
     #include <opaque_fragment>
    `)
