@@ -437,17 +437,7 @@ export function createTerrainMaterial(parameters = {}, {
     #endif
     diffuseColor.rgb *= 1.0 - surfacePuddleDarkening * puddle;
    `)
-   .replace('vec3 filmNormal = transformDirection', `
-    film = max(film, runoffFilmCoverage);
-    #ifdef TERRAIN_DRAINAGE
-    const float puddleRingScale = .48;
-    const float puddleRingStrength = 1.2;
-    vec2 puddleRings = rainImpactGradient(vSurfaceWorld.xz * puddleRingScale,
-      surfaceTime, surfaceRainAmount, rainFootprint * puddleRingScale);
-    rainGradient = mix(rainGradient, puddleRings * puddleRingStrength, puddle);
-    #endif
-    vec3 filmNormal = transformDirection
-   `)
+   .replace('float standingWater = puddle;', 'float standingWater = max(puddle, runoffFilmCoverage * (1.0 - snowCoverage));')
    .replace('diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);', '')
    .replace('roughnessFactor = mix(roughnessFactor, .83, snowCoverage);', `
     #ifdef TERRAIN_SNOW_DETAIL

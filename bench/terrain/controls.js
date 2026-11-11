@@ -98,6 +98,9 @@ export function wetnessControls(gui, {look, rates, melt, puddle, onPuddleDepth})
   folder.add(look.wetDarkening, 'value', 0, .8, .01).name('Wet darkening');
   folder.add(look.wetRoughness, 'value', .05, 1, .01).name('Wet roughness × (lower = glossier)');
   folder.add(look.puddleDarkening, 'value', 0, .8, .01).name('Puddle darkening');
+  folder.add(look.rippleSize, 'value', .3, 3, .05).name('Rain ripple size ×');
+  folder.add(look.rippleRate, 'value', .2, 3, .05).name('Rain ripple rate ×');
+  folder.add(look.rippleStrength, 'value', 0, 3, .05).name('Rain ripple strength ×');
   folder.add(rates, 'wetting', .01, 1, .01).name('Soaking speed · /s');
   folder.add(rates, 'drying', 0, .5, .005).name('Drying speed · /s');
   folder.add(melt, 'metresPerSecond', .001, .1, .001).name('Melt speed · m/s');

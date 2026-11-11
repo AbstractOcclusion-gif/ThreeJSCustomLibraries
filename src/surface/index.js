@@ -12,6 +12,9 @@ export function createSurfaceLook() {
   wetDarkening: {value: .42},     // albedo lost when soaked
   wetRoughness: {value: .4},      // roughness scale of a soaked surface: lower is glossier
   puddleDarkening: {value: .38},  // extra albedo lost under a puddle
+  rippleSize: {value: 1},         // scale on the raindrop rings
+  rippleRate: {value: 1},         // scale on how often drops fall
+  rippleStrength: {value: 1},     // scale on the ring relief
  };
 }
 
@@ -49,6 +52,7 @@ uniform float surfaceRainAmount;
 uniform vec3 surfaceSnowColor;
 uniform float surfacePuddles, surfaceAntiTile, surfaceRunoff, surfaceTime, surfaceTrackContrast;
 uniform float surfaceWetDarkening, surfaceWetRoughness, surfacePuddleDarkening;
+uniform float surfaceRippleSize, surfaceRippleRate, surfaceRippleStrength;
 uniform sampler2D surfaceTracks;
 uniform vec4 surfaceTrackBounds;
 uniform bool surfaceHasTracks;
@@ -110,6 +114,7 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
   surfaceTracks: {value: tracks?.texture ?? null}, surfaceHasTracks: {value: Boolean(tracks)},
   surfaceTrackContrast: {value: trackContrast},
   surfaceWetDarkening: look.wetDarkening, surfaceWetRoughness: look.wetRoughness, surfacePuddleDarkening: look.puddleDarkening,
+  surfaceRippleSize: look.rippleSize, surfaceRippleRate: look.rippleRate, surfaceRippleStrength: look.rippleStrength,
   surfaceTrackBounds: {value: tracks?.bounds ?? new THREE.Vector4(0, 0, 1, 1)},
  };
  material.onBeforeCompile = shader => {
@@ -169,14 +174,17 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
      normal = normalize(mix(normal, transformDirection(vec3(0, 1, 0), viewMatrix), puddle * .75));
     }
     #ifdef SURFACE_RAIN_IMPACTS
-    float rainFootprint = length(fwidth(vSurfaceWorld.xz));
     if (surfaceRainAmount > 0.0) {
-     const float filmImpactStrength = .065;
-     float film = max(puddle, wet * smoothstep(.55, .95, up));
-     vec2 rainGradient = rainImpactGradient(vSurfaceWorld.xz, surfaceTime, surfaceRainAmount, rainFootprint);
-     vec3 filmNormal = transformDirection(vec3(rainGradient.x, 0.0, rainGradient.y), viewMatrix);
-     // A still film has no gradient, and a zero vector has no direction to normalize.
-     if (dot(rainGradient, rainGradient) > 0.0) normal = normalize(normal + filmNormal * film * filmImpactStrength);
+     const float ringRelief = .4;          // surface slope of a fresh ring
+     const float splashRoughness = .1;     // a drop hitting wet ground flashes for an instant
+     vec3 impacts = rainImpacts(vSurfaceWorld.xz, surfaceTime, surfaceRainAmount, length(fwidth(vSurfaceWorld.xz)),
+       surfaceRippleSize, surfaceRippleRate);
+     // Rings need standing water. On ground that is only wet a drop leaves a brief splash.
+     float standingWater = puddle;
+     vec3 ringTilt = (viewMatrix * vec4(impacts.x, 0.0, impacts.y, 0.0)).xyz;
+     normal = normalize(normal - ringTilt * standingWater * ringRelief * surfaceRippleStrength);
+     float splash = impacts.z * wet * (1.0 - standingWater) * smoothstep(.3, .8, up);
+     roughnessFactor = mix(roughnessFactor, min(roughnessFactor, splashRoughness), splash);
     }
     #endif
     diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);
