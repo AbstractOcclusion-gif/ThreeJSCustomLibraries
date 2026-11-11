@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial} from '../../src/terrain/index.js';
@@ -15,7 +16,8 @@ const $ = id => document.getElementById(id);
 const TERRAIN = {span: 64, resolution: 257};
 const RELIEF = {ridgeHeight: 4.2, ridgeFrequency: [.14, .12], hillHeight: 2, hillFrequency: [.055, .07]};
 const TRACK = {radius: .8, spacing: .28, depth: .11, contrast: .5, maskResolution: 512};
-const BOULDER = {radius: 1.25, detail: 1, contactBand: .65, roughness: .87};
+const BOULDER = {radius: 1.25, detail: 2, contactBand: .65, roughness: .87};
+const SNOW_CAP = {edgeHeight: .44, fullHeight: .78, thickness: .22, color: '#e4edf2', roughness: .83};
 const BOULDERS = [
   {x: -4, z: 3, scale: [1.4, .8, 1], yaw: .6},
   {x: 4, z: -3, scale: [1, .64, 1.3], yaw: 1.9},
@@ -53,15 +55,55 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 const boulderGeometry = new THREE.DodecahedronGeometry(BOULDER.radius, BOULDER.detail);
-const boulderMaterial = createTerrainMaterial({map: rock, roughness: BOULDER.roughness}, {
-  ...terrainMaterialOptions, contactBand: BOULDER.contactBand, puddles: 0,
+// Keep the original rock triangles under the cap. The outer surface rejoins
+// the rock where all three vertices have zero snow depth.
+function createSnowCapGeometry(rockGeometry) {
+  const positions = rockGeometry.getAttribute('position');
+  const vertices = [];
+  const triangle = Array.from({length: 3}, () => new THREE.Vector3());
+  for (let start = 0; start < positions.count; start += triangle.length) {
+    let covered = false;
+    for (const [offset, vertex] of triangle.entries()) {
+      vertex.fromBufferAttribute(positions, start + offset);
+      const depth = SNOW_CAP.thickness * THREE.MathUtils.smoothstep(
+        vertex.y / BOULDER.radius, SNOW_CAP.edgeHeight, SNOW_CAP.fullHeight,
+      );
+      if (depth > 0) {
+        covered = true;
+        vertex.setLength(vertex.length() + depth);
+      }
+    }
+    if (covered) for (const {x, y, z} of triangle) vertices.push(x, y, z);
+  }
+
+  const triangles = new THREE.BufferGeometry();
+  triangles.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  const cap = mergeVertices(triangles);
+  triangles.dispose();
+  cap.computeVertexNormals();
+  return cap;
+}
+const snowCapGeometry = createSnowCapGeometry(boulderGeometry);
+const snowCapMaterial = createTerrainMaterial({color: SNOW_CAP.color, roughness: SNOW_CAP.roughness}, {
+  ...terrainMaterialOptions, contactBand: 0, puddles: 0,
 });
+// The physical cap owns the boulder's snow coverage.
+const rockWeather = createSurfaceWeather();
+const boulderMaterial = createTerrainMaterial({map: rock, roughness: BOULDER.roughness}, {
+  ...terrainMaterialOptions, weather: rockWeather, contactBand: BOULDER.contactBand, puddles: 0,
+});
+const snowCaps = [];
 for (const {x, z, scale, yaw} of BOULDERS) {
   const boulder = new THREE.Mesh(boulderGeometry, boulderMaterial);
   boulder.position.set(x, field.heightAt(x, z), z);
   boulder.scale.set(...scale);
   boulder.rotation.y = yaw;
   boulder.castShadow = boulder.receiveShadow = true;
+  const snowCap = new THREE.Mesh(snowCapGeometry, snowCapMaterial);
+  snowCap.visible = false;
+  snowCap.castShadow = snowCap.receiveShadow = true;
+  boulder.add(snowCap);
+  snowCaps.push(snowCap);
   scene.add(boulder);
 }
 
@@ -70,6 +112,8 @@ const surface = {wetness: 0, snow: false, paintTracks: false};
 function applySurface() {
   surfaceWeather.set({wetness: surface.wetness, snow: Number(surface.snow)});
   field.setSnowCover(surface.snow);
+  rockWeather.set({wetness: surface.wetness});
+  for (const cap of snowCaps) cap.visible = surface.snow;
   stage.sun.shadow.needsUpdate = true;
 }
 const gui = createBenchPanel('Terrain');
@@ -137,6 +181,7 @@ onLeave(() => {
   renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort();
   snowMaterial.normal.dispose(); snowMaterial.roughness.dispose();
   boulderGeometry.dispose(); boulderMaterial.dispose();
+  snowCapGeometry.dispose(); snowCapMaterial.dispose();
   tracks.dispose(); field.dispose(); groundMaterial.dispose(); layerArray.dispose(); detail.dispose(); rock.dispose();
   stage.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
 });

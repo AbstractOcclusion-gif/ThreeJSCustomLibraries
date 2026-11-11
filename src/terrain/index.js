@@ -34,6 +34,10 @@ uniform sampler2D terrainForestWeight;
 #endif
 ${TERRAIN_LAYERS.map((name, index) => `const int TERRAIN_${name.toUpperCase()} = ${index};`).join('\n')}
 const int TERRAIN_DETAIL = ${TERRAIN_LAYERS.length};
+#ifdef TERRAIN_SNOW_DETAIL
+const int TERRAIN_SNOW_NORMAL = TERRAIN_DETAIL + 1;
+const int TERRAIN_SNOW_ROUGHNESS = TERRAIN_DETAIL + 2;
+#endif
 uniform vec4 terrainBounds;
 uniform float terrainTiling, terrainSharpness, terrainAntiTiling, terrainDetailStrength, terrainHeightBlend;
 uniform float terrainRockScale;
@@ -57,6 +61,10 @@ float terrainHeightAt(vec2 grid, out vec3 groundNormal) {
 
 vec4 terrainSample(int layer, vec2 uv, vec2 dx, vec2 dy) {
  if (layer == TERRAIN_DETAIL) return textureGrad(terrainDetail, uv, dx, dy);
+ #ifdef TERRAIN_SNOW_DETAIL
+ if (layer == TERRAIN_SNOW_NORMAL) return textureGrad(terrainSnowNormal, uv, dx, dy);
+ if (layer == TERRAIN_SNOW_ROUGHNESS) return textureGrad(terrainSnowRoughness, uv, dx, dy);
+ #endif
  #ifdef TERRAIN_LAYER_ARRAY
  return textureGrad(terrainLayerArray, vec3(uv, float(layer)), dx, dy);
  #else
@@ -217,28 +225,38 @@ export function createTerrainMaterial(parameters = {}, {
     if (terrainSnowCover && !terrainProp) snowCoverage = textureLod(terrainSnowDepth, (terrainGrid + .5) / terrainSize, 0.0).r;
     else snowCoverage *= 1.0 - track * .92;
    `)
+   .replace('diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);', '')
    .replace('roughnessFactor = mix(roughnessFactor, .83, snowCoverage);', `
     #ifdef TERRAIN_SNOW_DETAIL
     vec2 snowUv = terrainP.xz * vec2(1.0, -1.0);
-    vec3 snowNormal = texture2D(terrainSnowNormal, snowUv).xyz * 2.0 - 1.0;
+    vec2 snowDx = dFdx(snowUv), snowDy = dFdy(snowUv);
+    vec3 snowNormal = terrainTexture(TERRAIN_SNOW_NORMAL, snowUv, snowDx, snowDy).xyz * 2.0 - 1.0;
     vec3 snowDetail = vec3(snowNormal.x, snowNormal.z - 1.0, -snowNormal.y);
     vec3 snowSurfaceNormal = normalize(terrainNormal + terrainSnowNormalStrength * snowDetail);
     normal = normalize(mix(normal, transformDirection(snowSurfaceNormal, viewMatrix), snowCoverage));
     // Sparse, fine grains sharpen reflected highlights. Fade them before
     // they become subpixel so distant snow does not shimmer as the camera moves.
     const float snowGrainFrequency = 95.0;
-    const float snowGrainRoughness = .42;
+    const float snowGrainRoughness = .18;
+    const float compactSnowRoughness = .43;
+    const vec3 compactSnowTint = vec3(.59, .79, 1.0);
+    const float snowVariationFrequency = .22;
     vec2 snowGrainUv = vSurfaceWorld.xz * snowGrainFrequency;
     float grainVisibility = 1.0 - smoothstep(.35, 1.0, length(fwidth(snowGrainUv)));
     float grain = smoothstep(.72, .9, valueNoise(vec3(snowGrainUv, 0.0))) * grainVisibility;
-    float snowRoughness = texture2D(terrainSnowRoughness, snowUv).r;
+    float snowRoughness = terrainTexture(TERRAIN_SNOW_ROUGHNESS, snowUv, snowDx, snowDy).r;
+    float compacted = terrainSnowCover && !terrainProp ? track : 0.0;
+    float driftVariation = valueNoise(vec3(vSurfaceWorld.xz * snowVariationFrequency, 0.0));
+    terrainSnowAlbedo *= mix(.84, 1.0, driftVariation);
+    terrainSnowAlbedo *= mix(vec3(1.0), compactSnowTint, compacted);
+    snowRoughness = mix(snowRoughness, min(snowRoughness, compactSnowRoughness), compacted);
     snowRoughness = mix(snowRoughness, min(snowRoughness, snowGrainRoughness), grain);
     roughnessFactor = mix(roughnessFactor, snowRoughness, snowCoverage);
     #else
     roughnessFactor = mix(roughnessFactor, .83, snowCoverage);
     #endif
+    diffuseColor.rgb = mix(diffuseColor.rgb, terrainSnowAlbedo, snowCoverage);
    `)
-   .replace('mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage)', 'mix(diffuseColor.rgb, terrainSnowAlbedo, snowCoverage)')
    .replace('float wet = surfaceWeather.x', 'float wet = max(surfaceWeather.x, shoreWet)');
  };
  return material;
