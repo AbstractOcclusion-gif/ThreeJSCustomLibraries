@@ -9,6 +9,7 @@ const FOREST_LAYER = 4;
 const MAX_DIG = .65;           // m below the original surface a deformation may dig
 // Maximum undisturbed drift depth in metres. The optional track rim extends the edit envelope.
 const MAX_SNOW_DEPTH = .43;
+const PACKED_SNOW_DEPTH_SHARE = .4;
 const SNOW_RIM = {start: .7, peak: .95, end: 1.2, displacedShare: .5, maxRise: .12};
 const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
 const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: recompute all normals at once
@@ -84,7 +85,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  }
  let minX = nx, minZ = nz, maxX = -1, maxZ = -1;
  const soil = samples.slice();
- let snow, snowEnabled = false;
+ let snow, packedSnowDepth, snowEnabled = false;
  const snowCover = {value: false};
  const snowMask = new Uint8Array(samples.length);
  let snowMaskDirty = false;
@@ -126,7 +127,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
     const distance = Math.hypot((i - gx) * stepX, (j - gz) * stepZ);
     const index = j * nx + i, previous = samples[index];
     const falloff = 1 - THREE.MathUtils.smoothstep(distance / radius, DIG_FALLOFF_START, 1);
-    const minimum = snowEnabled ? soil[index] : original[index] - MAX_DIG;
+    const minimum = snowEnabled ? soil[index] + (packedSnowDepth?.[index] ?? 0) : original[index] - MAX_DIG;
     const next = Math.fround(Math.max(minimum, previous - depth * falloff));
     if (next === previous) continue;
     if (snowEnabled) snow[index] = next - soil[index];
@@ -199,6 +200,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  function resetDeformation(onSample) {
   soil.set(original);
   snow = undefined;
+  packedSnowDepth = undefined;
   const restoreSnow = snowEnabled;
   snowEnabled = false;
   for (let index = 0; index < samples.length; index++) {
@@ -212,10 +214,12 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   if (enabled === snowEnabled) return false;
   if (enabled && !snow) {
    snow = new Float32Array(samples.length);
+   if (snowTrackRims) packedSnowDepth = new Float32Array(samples.length);
    for (let index = 0; index < snow.length; index++) {
     const x = index % nx, z = Math.floor(index / nx);
     const drift = SNOW.drift + SNOW.variation * Math.sin(x * SNOW.frequency[0] + Math.cos(z * SNOW.frequency[1]));
     snow[index] = drift * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], ...SNOW.flatness);
+    if (packedSnowDepth) packedSnowDepth[index] = snow[index] * PACKED_SNOW_DEPTH_SHARE;
    }
   }
   snowEnabled = enabled;
