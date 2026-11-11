@@ -10,11 +10,11 @@ import {environmentControls} from '../kit/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
 
-// Crate glow: intensity x min(1, fuel x fuelGain), flickering by flicker at flickerRate rad/ms; charred trim is trimShade of the plank.
-const GLOW = Object.freeze({intensity: 2.8, fuelGain: 3, flicker: .1, flickerRate: .017}), TRIM_SHADE = .75;
+// Burning wood glows: emissive colour x (flame intensity x burning + smoulder x smouldering). Charred trim is trimShade of the plank.
+const WOOD_GLOW = Object.freeze({color: [1, .22, .03], burning: .55, smouldering: .35}), TRIM_SHADE = .75;
 // Where flames start on a crate: half extents of its top (m) and the height range above its base they rise from.
 const CRATE_FIRE = Object.freeze({footprint: [.54, .47], rise: [.1, .82], size: 1.1});
-const flameLook = createFlameLook(), fireParts = {flames: true};
+const flameLook = createFlameLook(), fireParts = {flames: true, smoke: true, embers: true, light: true};
 const renderer = benchRenderer();
 renderer.shadowMap.enabled = true;
 const scene = new T.Scene();
@@ -67,11 +67,9 @@ const crates = setups.map(([x, z, burnSeconds], index) => {
     part(trim, 0, 0.414, side * 0.439, 0.11, 0.98, 0.04).rotation.z = side * 0.7;
   }
   scene.add(group);
-  const light = new T.PointLight(0xff8f36, 0, 3.5, 2);
-  light.position.set(x, 1.1, z);
-  scene.add(light);
-  const fx = createFireVisual(scene, {position: group.position, ...CRATE_FIRE, look: flameLook});
-  return {fire, fx, light, plank, trim};
+  const fx = createFireVisual(scene, {position: group.position, ...CRATE_FIRE, look: flameLook, source: fire});
+  fx.ready.catch(console.error);
+  return {fire, fx, plank, trim};
 });
 
 const status = document.getElementById('status');
@@ -109,16 +107,16 @@ startFrameLoop(renderer, (dt, now) => {
   system.update(dt);
   let burning = 0, burned = 0;
   for (const [index, crate] of crates.entries()) {
-    const {fire, fx, light, plank, trim} = crate;
+    const {fire, fx, plank, trim} = crate;
     const isBurning = fire.phase === 'burning';
-    fx.show.flames = fireParts.flames;
-    fx.intensity = isBurning ? Math.min(1, fire.fuel * GLOW.fuelGain) : 0;
+    Object.assign(fx.show, fireParts);
     burning += Number(isBurning);
     burned += Number(fire.phase === 'burned');
     fx.update(dt);
     plank.color.copy(wood).lerp(char, 1 - fire.fuel);
     trim.color.copy(plank.color).multiplyScalar(TRIM_SHADE);
-    light.intensity = isBurning ? GLOW.intensity * Math.min(1, fire.fuel * GLOW.fuelGain) * ((1 - GLOW.flicker) + GLOW.flicker * Math.sin(now * GLOW.flickerRate + index)) : 0;
+    plank.emissive.setRGB(...WOOD_GLOW.color).multiplyScalar(fx.intensity * WOOD_GLOW.burning + fx.smoulder * WOOD_GLOW.smouldering);
+    trim.emissive.copy(plank.emissive);
   }
   const summary = `${crates.length - burning - burned} unlit · ${burning} burning · ${burned} burned`;
   if (lastStatus !== summary) { status.textContent = summary; lastStatus = summary; }

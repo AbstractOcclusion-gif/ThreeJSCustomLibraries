@@ -17,6 +17,7 @@ const LIBRARY_ALLOWED = {
   terrain: ['surface'],
   destruction: ['cable/cable.js', 'cable/three.js', 'particles/chips.js', 'particles/puffs.js'],
   boundaries: ['trees'],
+  fire: ['particles/puffs.js'],                    // smoke and embers of the fire visual
   weather: ['particles/water/precipitation.js', 'particles/wind.js'],   // rain and snow; wind streaks and debris
   water: ['particles/water/spray-pump.js'],        // the boat spray pump
 };
