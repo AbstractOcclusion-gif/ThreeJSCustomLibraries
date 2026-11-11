@@ -10,6 +10,7 @@ import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
 import {terrainControls} from './controls.js';
+import {createTerrainDrainage, createTerrainWater} from './drainage.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
@@ -33,13 +34,16 @@ const {span, resolution} = TERRAIN;
 const half = span / 2, sampleSpacing = span / (resolution - 1);
 // Standalone: the basic stage gives sky, sun and ambient light; the terrain is the ground.
 const stage = createBasicStage({scene, ground: false, shadows: true, shadowExtent: half});
-const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
-  const x = (index % resolution) * sampleSpacing - half;
-  const z = Math.floor(index / resolution) * sampleSpacing - half;
+const drainage = createTerrainDrainage((x, z) => {
   const [ridgeX, ridgeZ] = RELIEF.ridgeFrequency;
   const [hillX, hillZ] = RELIEF.hillFrequency;
   return Math.sin(x * ridgeX) * Math.cos(z * ridgeZ) * RELIEF.ridgeHeight
     + Math.sin(x * hillX + z * hillZ) * RELIEF.hillHeight;
+});
+const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
+  const x = (index % resolution) * sampleSpacing - half;
+  const z = Math.floor(index / resolution) * sampleSpacing - half;
+  return drainage.heightAt(x, z);
 });
 const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0};
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
@@ -48,10 +52,11 @@ const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;   // no water on this page
 const surfaceWeather = createSurfaceWeather();
 const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: TRACK.maskResolution, directional: true});
+const rainAmount = {value: 0};
 const snowTransmission = {value: .2};
 snowMaterial.transmission = snowTransmission;
-const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial};
-const groundMaterial = createTerrainMaterial({}, {...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast});
+const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial, rainAmount};
+const groundMaterial = createTerrainMaterial({}, {...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast, puddles: 0});
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
 ground.receiveShadow = true;
 scene.add(ground);
@@ -95,7 +100,11 @@ const boulderMaterial = createTerrainMaterial({map: rock, roughness: BOULDER.rou
   ...terrainMaterialOptions, weather: rockWeather, contactBand: BOULDER.contactBand, puddles: 0,
 });
 const snowCaps = [];
-for (const {x, z, scale, yaw} of BOULDERS) {
+const streamStones = drainage.stones.map(({x, z, radius, slope}) => {
+  const scale = radius / BOULDER.radius;
+  return {x, z, scale: [scale, scale, scale], yaw: Math.atan(slope)};
+});
+for (const {x, z, scale, yaw} of [...BOULDERS, ...streamStones]) {
   const boulder = new THREE.Mesh(boulderGeometry, boulderMaterial);
   boulder.position.set(x, field.heightAt(x, z), z);
   boulder.scale.set(...scale);
@@ -110,10 +119,12 @@ for (const {x, z, scale, yaw} of BOULDERS) {
 }
 
 // Surface: manual wetness and snow (no weather here), tracks painted with the pointer.
+const terrainWater = createTerrainWater({renderer, scene, camera, stage, field, drainage, span, sampleSpacing, rainAmount});
+const rainWetness = createSurfaceWeather();
 const surface = {wetness: 0, snow: false, snowDepth: SNOW_DEPTH_SCALE.initial, paintTracks: false};
 function applySurface() {
   surfaceWeather.set({wetness: surface.wetness, snow: Number(surface.snow)});
-  field.setSnowCover(surface.snow);
+  if (field.setSnowCover(surface.snow)) terrainWater.invalidateBed();
   rockWeather.set({wetness: surface.wetness});
   for (const cap of snowCaps) cap.visible = surface.snow;
   stage.sun.shadow.needsUpdate = true;
@@ -122,11 +133,11 @@ const gui = createBenchPanel('Terrain');
 stageControls(gui, stage, {wind: false});
 terrainControls(gui, {rules, appearance, onLayersChanged() { field.updateRules(rules); }});
 const surfaceFolder = gui.addFolder('Surface');
-surfaceFolder.add(surface, 'wetness', 0, 1, .01).name('Wetness and puddles').onChange(applySurface);
+surfaceFolder.add(surface, 'wetness', 0, 1, .01).name('Ground wetness').onChange(applySurface);
 surfaceFolder.add(surface, 'snow').name('3D snow cover').onChange(applySurface);
 surfaceFolder.add(surface, 'snowDepth', SNOW_DEPTH_SCALE.min, SNOW_DEPTH_SCALE.max, .05)
   .name('Snow depth ×').onFinishChange(scale => {
-    field.setSnowDepthScale(scale);
+    if (field.setSnowDepthScale(scale)) terrainWater.invalidateBed();
     const previous = snowCapGeometry;
     snowCapGeometry = createSnowCapGeometry(boulderGeometry, scale);
     for (const cap of snowCaps) cap.geometry = snowCapGeometry;
@@ -138,9 +149,14 @@ surfaceFolder.add(surface, 'paintTracks').name('Paint tracks (drag)').onChange(o
 surfaceFolder.add({clear() {
   endStroke();
   tracks.clear();
-  field.resetDeformation();
+  if (field.resetDeformation()) terrainWater.invalidateBed();
   stage.sun.shadow.needsUpdate = true;
 }}, 'clear').name('Reset tracks and terrain');
+const waterFolder = gui.addFolder('Stream and rain');
+waterFolder.add(terrainWater.settings, 'speed', 0, 2, .05).name('Stream flow');
+waterFolder.add(terrainWater.settings, 'foam', 0, 1, .05).name('Stream foam');
+waterFolder.add(terrainWater.settings, 'puddles', 0, 1, .05).name('Puddle fill');
+waterFolder.add(rainAmount, 'value', 0, 1, .05).name('Rain on surfaces');
 
 const raycaster = new THREE.Raycaster(), canvas = renderer.domElement, trackEvents = new AbortController();
 let lastTrackPoint;
@@ -181,19 +197,30 @@ for (const type of ['pointerup', 'pointerleave', 'pointercancel']) canvas.addEve
 const unbindResize = bindResize(renderer, camera);
 let lastUI = 0;
 startFrameLoop(renderer, (dt, now) => {
-  if (field.flushDeformation()) stage.sun.shadow.needsUpdate = true;
+  if (field.flushDeformation()) {
+    terrainWater.invalidateBed();
+    stage.sun.shadow.needsUpdate = true;
+  }
   controls.update(); stage.update(camera);
-  surfaceWeather.update(dt, null);   // null: keeps the manual levels, still animates the rain streaks
+  rainWetness.update(dt, {rain: rainAmount.value});
+  const rain = rainWetness.levels.value.x;
+  const wetness = Math.max(surface.wetness, rain);
+  surfaceWeather.set({wetness});
+  rockWeather.set({wetness});
+  surfaceWeather.update(dt, null);
+  rockWeather.update(dt, null);
+  terrainWater.render(dt, rain);
   renderer.render(scene, camera);
   if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${surface.wetness.toFixed(2)} · snow ${surface.snow ? 'on' : 'off'}`; }
 });
 document.body.dataset.ready = 'true';
-window.terrainBench = {field, rules, appearance, surfaceWeather, tracks, stage, scene, camera, renderer};
+window.terrainBench = {field, rules, appearance, surfaceWeather, tracks, terrainWater, stage, scene, camera, renderer};
 onLeave(() => {
   renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort();
   snowMaterial.normal.dispose(); snowMaterial.roughness.dispose();
   boulderGeometry.dispose(); boulderMaterial.dispose();
   snowCapGeometry.dispose(); snowCapMaterial.dispose();
+  terrainWater.dispose();
   tracks.dispose(); field.dispose(); groundMaterial.dispose(); layerArray.dispose(); detail.dispose(); rock.dispose();
   stage.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
 });

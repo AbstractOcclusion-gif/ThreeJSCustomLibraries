@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import {NOISE_GLSL} from '../core/lighting.js';
+import {RAIN_IMPACT_GLSL} from '../core/rain-impact.js';
 import {createWaveBank, WIND_WAVE_GLSL} from './waves.js';
 import {proceduralSky} from './sky-binding.js';
 import {createFoamTexture} from './foam-texture.js';
@@ -88,7 +90,7 @@ const RIPPLE_HEIGHT_GLSL = `
 // uDaylight (see sky-binding.js: skyFromWeather(view) or proceduralSky()). foamTexture (rgba tile: r/g brightness,
 // b density threshold, a coverage) is optional; without it a generated tile is used.
 // The host calls render(seconds, settings) once per frame (it captures the bed), then draws the scene itself.
-export function createChannelSurface({renderer, scene, camera, sky = proceduralSky(), ripples, obstacles, flow, foamTexture, freezeMap, iceDamage, captureScale = .5, causticSegments = 160, clipToBed = false, pondOptics = false, bedCaustics = 'screen', lightOccluders}) {
+export function createChannelSurface({renderer, scene, camera, sky = proceduralSky(), ripples, obstacles, flow, foamTexture, freezeMap, iceDamage, captureScale = .5, causticSegments = 160, clipToBed = false, stillBasins = false, rainAmount, pondOptics = false, bedCaustics = 'screen', lightOccluders}) {
  if (!renderer || !scene || !camera || !ripples || !obstacles || !flow) throw Error('Channel surface needs renderer, scene, camera, ripples, obstacles and flow');
  const depth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
  const capture = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthTexture: depth});
@@ -104,6 +106,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
  foamTile.wrapS = foamTile.wrapT = THREE.RepeatWrapping;
  const R = CHANNEL_RENDER_DEFAULTS;
  const uniforms = {
+  waterRainAmount: rainAmount ?? {value: 0},
   ...shadow?.uniforms,
   ...sky.uniforms,
   ...waves.uniforms,
@@ -216,7 +219,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
  const material = new THREE.ShaderMaterial({
   uniforms,
   side: THREE.DoubleSide,
-  defines: {...sky.defines, ...(clipToBed ? {WATER_BED_CLIP: 1} : {}), ...(iceDamage ? {WATER_ICE_DAMAGE: 1} : {})},
+  defines: {...sky.defines, ...(clipToBed ? {WATER_BED_CLIP: 1} : {}), ...(stillBasins ? {WATER_STILL_BASINS: 1} : {}), ...(rainAmount ? {WATER_RAIN_IMPACTS: 1} : {}), ...(iceDamage ? {WATER_ICE_DAMAGE: 1} : {})},
   vertexShader: `
    attribute vec3 flow;
    varying vec3 vFlow, vWorld, vNormal;
@@ -242,6 +245,11 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    uniform vec2 clipRange;
    uniform mat4 bedClipToWorld;
    uniform float currentTime;
+   #ifdef WATER_RAIN_IMPACTS
+   uniform float waterRainAmount;
+   ${NOISE_GLSL}
+   ${RAIN_IMPACT_GLSL}
+   #endif
    uniform float foamAmount, bankFoam, foamFeather, refraction, rippleCell, flowSpeed;
    uniform highp sampler2D rippleMap;
    uniform bool rippleActive;
@@ -316,6 +324,9 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    void main() {
     float footprint = length(fwidth(vWorld.xz));
     float across = vFlow.y;
+    #ifdef WATER_STILL_BASINS
+    bool stillWater = abs(across) > 1.0;
+    #endif
     #ifdef WATER_BED_CLIP
     float basinDepth = vWorld.y - vBedHeight;
     if (basinDepth <= .002) discard;
@@ -403,6 +414,12 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      gradient += microRipples * (1.0 - smoothstep(.025, .12, footprint)) *
       (.65 * a * cos(dot(p, a) * 34.0 - waveTime * 13.0) + .35 * b * cos(dot(p, b) * 48.0 - waveTime * 17.0));
     }
+    #ifdef WATER_RAIN_IMPACTS
+    if (waterRainAmount > 0.0) {
+     const float rainImpactStrength = .16;
+     gradient += rainImpactStrength * rainImpactGradient(vWorld.xz, waveTime, waterRainAmount, footprint);
+    }
+    #endif
     vec3 n = normalize(baseNormal - vec3(gradient.x, 0, gradient.y) * (1.0 - iceCoverage));
     if (!gl_FrontFacing) {
      #ifdef POND_GOD_PASS
@@ -492,6 +509,9 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
     float impact = impactFoam.w * (1.0 - smoothstep(.2, max(.21, impactFoam.z), length(impactDelta)));
     float coverage = clamp(bank + sqrt(field.b) * field.a * .9 + wake * .58 + impact, 0.0, 1.0);
     float foamOpacity = foamAmount * smoothstep(0.0, .35, flowSpeed);
+    #ifdef WATER_STILL_BASINS
+    if (stillWater) foamOpacity = 0.0;
+    #endif
     if (coverage > 0.0 && foamOpacity > 0.0) {
      vec2 velocity = (field.rg - .5) * 10.0;
      float cycle = fract(currentTime * .36), phase = fract(cycle + .5);

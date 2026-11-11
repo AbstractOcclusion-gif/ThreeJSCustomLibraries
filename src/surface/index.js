@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {RAIN_IMPACT_GLSL} from '../core/rain-impact.js';
 import {NOISE_GLSL} from '../core/lighting.js';
 export {createTrackMask} from '../core/track-mask.js';
 
@@ -28,6 +29,9 @@ export function createSurfaceWeather() {
 
 const SURFACE_GLSL = /* glsl */`
 uniform vec2 surfaceWeather;
+#ifdef SURFACE_RAIN_IMPACTS
+uniform float surfaceRainAmount;
+#endif
 uniform vec3 surfaceSnowColor;
 uniform float surfacePuddles, surfaceAntiTile, surfaceRunoff, surfaceTime, surfaceTrackContrast;
 uniform sampler2D surfaceTracks;
@@ -35,6 +39,9 @@ uniform vec4 surfaceTrackBounds;
 uniform bool surfaceHasTracks;
 varying vec3 vSurfaceWorld;
 ${NOISE_GLSL}
+#ifdef SURFACE_RAIN_IMPACTS
+${RAIN_IMPACT_GLSL}
+#endif
 
 float surfaceTrack(vec3 world) {
  if (!surfaceHasTracks) return 0.0;
@@ -71,14 +78,16 @@ vec3 surfaceUntile(vec2 uv) {
 
 // Standard PBR stays responsible for lights, shadows, fog and the host's environment map.
 export function createWeatherSurfaceMaterial(parameters = {}, {
- weather = createSurfaceWeather(), tracks, snowColor = '#eaf3fa', puddles = 1, antiTiling = 0, runoff = 1, trackContrast = .08,
+ weather = createSurfaceWeather(), rainAmount, tracks, snowColor = '#eaf3fa', puddles = 1, antiTiling = 0, runoff = 1, trackContrast = .08,
 } = {}) {
  if (![puddles, antiTiling, runoff].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
   throw Error('Puddle, anti-tiling and runoff amounts must be between zero and one');
  }
  if (!Number.isFinite(trackContrast) || trackContrast < 0 || trackContrast > 1) throw Error('Track contrast must be between zero and one');
  const material = new THREE.MeshStandardMaterial(parameters);
+ if (rainAmount) material.defines = {...material.defines, SURFACE_RAIN_IMPACTS: 1};
  const uniforms = {
+  surfaceRainAmount: rainAmount ?? {value: 0},
   surfaceWeather: weather.levels, surfaceSnowColor: {value: new THREE.Color(snowColor)},
   surfacePuddles: {value: puddles}, surfaceAntiTile: {value: antiTiling},
   surfaceRunoff: {value: runoff}, surfaceTime: weather.time,
@@ -122,6 +131,16 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     float wet = surfaceWeather.x * (1.0 - snowCoverage);
     diffuseColor.rgb *= (1.0 - .42 * wet) * (1.0 - track * min(1.0, surfaceTrackContrast + .18 * wet));
     roughnessFactor = mix(roughnessFactor, max(.12, roughnessFactor * .4), wet);
+    #ifdef SURFACE_RAIN_IMPACTS
+    float rainFootprint = length(fwidth(vSurfaceWorld.xz));
+    if (surfaceRainAmount > 0.0) {
+     const float filmImpactStrength = .3;
+     float film = wet * smoothstep(.55, .95, up);
+     vec2 rainGradient = rainImpactGradient(vSurfaceWorld.xz, surfaceTime, surfaceRainAmount, rainFootprint);
+     vec3 filmNormal = transformDirection(vec3(rainGradient.x, 0.0, rainGradient.y), viewMatrix);
+     normal = normalize(normal + filmNormal * film * filmImpactStrength);
+    }
+    #endif
     float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
     if (surfaceRunoff > 0.0 && wet > .1 && runoffSlope > 0.0) {
      float streak = surfaceRainStreaks(vSurfaceWorld) * surfaceRunoff * runoffSlope * smoothstep(.1, .72, wet);

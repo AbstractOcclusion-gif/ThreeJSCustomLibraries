@@ -250,7 +250,7 @@ export function createTerrainMaterial(parameters = {}, {
     const float snowGrainFrequency = 95.0;
     const float snowGrainRoughness = .18;
     const float compactSnowRoughness = .43;
-    const vec3 compactSnowTint = vec3(.59, .79, 1.0);
+    const vec3 compactSnowTint = vec3(.75, .87, 1.0);
     const float snowVariationFrequency = .22;
     vec2 snowGrainUv = vSurfaceWorld.xz * snowGrainFrequency;
     float grainVisibility = 1.0 - smoothstep(.35, 1.0, length(fwidth(snowGrainUv)));
@@ -275,7 +275,7 @@ export function createTerrainMaterial(parameters = {}, {
     float backlight = max(dot(-geometryViewDir, snowLight), 0.0);
     float grazingLight = 1.0 - abs(dot(surfaceGeometricNormal, snowLight));
     float thinSnow = terrainSnowCover && !terrainProp ? 1.0 - snowCoverage : .5;
-    const vec3 snowScatterTint = vec3(.52, .74, 1.0);
+    const vec3 snowScatterTint = vec3(.67, .82, 1.0);
     outgoingLight += directionalLights[0].color * snowScatterTint * snowCoverage
       * thinSnow * backlight * grazingLight * terrainSnowTransmission;
     #endif
