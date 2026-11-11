@@ -81,7 +81,17 @@ element('unlock').onclick = async () => {
     await sound.unlock();
     const {context} = sound;
     const routes = {click: 'ui', music: 'music', emitter: 'sfx', rain: 'ambience', wind: 'ambience', cue: 'ambience'};
-    for (const [id, bus] of Object.entries(routes)) sound.define(id, {bus, buffer: clip(context, DEMO.clips[id])});
+    const song = import.meta.env.DEV
+      ? sound.load(import.meta.env.BASE_URL + DEMO.localSong).catch(() => null)
+      : Promise.resolve(null);
+    const [music, ...recordings] = await Promise.all([
+      song, ...Object.values(DEMO.recordings).map(sound.load),
+    ]);
+    const buffers = Object.fromEntries(Object.keys(DEMO.recordings).map((id, index) => [id, recordings[index]]));
+    buffers.music = music;
+    for (const [id, bus] of Object.entries(routes)) {
+      sound.define(id, {bus, buffer: buffers[id] ?? clip(context, DEMO.clips[id])});
+    }
     setupMixer();
     underwater = sound.addEnvironmentFilter(SOUND_PRESETS.underwater);
     cave = sound.addEnvironmentReverb({...SOUND_PRESETS.cave, impulse: clip(context, DEMO.clips.impulse)});
@@ -101,7 +111,9 @@ element('unlock').onclick = async () => {
     });
     ambience.start();
     for (const id of ['controls', 'mixer', 'click']) element(id).disabled = false;
-    element('status').textContent = 'Amber is the moving emitter. Blue is the listener. Menu clicks stay clear through zone effects.';
+    element('status').textContent = music
+      ? 'Playing Foggy Harbor Lullaby. Amber marks the moving chimes. Blue marks the listener.'
+      : 'Amber marks the moving chimes. Blue marks the listener.';
   } catch (error) {
     spatial?.dispose();
     await sound?.dispose();
