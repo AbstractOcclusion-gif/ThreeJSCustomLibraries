@@ -5,6 +5,7 @@ import {configureTexture, createDataTexture} from '../../src/core/data-texture.j
 const files = import.meta.glob([
  '../../assets/terrain/*/{color,height}.jpg',
  '../../assets/terrain/rock_wall_02/normal.jpg',
+ '../../assets/terrain/snow_02/{normal,roughness}.jpg',
 ], {eager: true, query: '?url', import: 'default'});
 const sets = {grass: 'sparse_grass', rock: 'rock_wall_02', snow: 'snow_02', mud: 'brown_mud', forest: 'mud_forest'};
 
@@ -36,13 +37,14 @@ export function packTerrainLayers(layers) {
  return array;
 }
 
-export async function loadTerrainTextures(renderer) {
+export async function loadTerrainTextures(renderer, {snowDetail = false} = {}) {
  const loader = new THREE.ImageLoader();
  const load = (set, map) => loader.loadAsync(files[`../../assets/terrain/${set}/${map}.jpg`]);
- const [images, rockNormal] = await Promise.all([
+ const [images, rockNormal, snowMaps] = await Promise.all([
   Promise.all(Object.entries(sets).map(([layer, set]) =>
    Promise.all([layer, load(set, 'color'), load(set, 'height')]))),
   load(sets.rock, 'normal'),
+  snowDetail ? Promise.all([load(sets.snow, 'normal'), load(sets.snow, 'roughness')]) : null,
  ]);
  const canvas = document.createElement('canvas');
  const context = canvas.getContext('2d', {willReadFrequently: true});
@@ -63,5 +65,13 @@ export async function loadTerrainTextures(renderer) {
   return [layer, createDataTexture(new Uint8Array(pixels.buffer), color.width, color.height,
    {flipY: true, colorSpace: THREE.SRGBColorSpace, wrap: THREE.RepeatWrapping, filter: 'mipmap', anisotropy})];
  }));
- return {layerArray: packTerrainLayers(layers), rock: layers.rock, detail: configure(new THREE.Texture(rockNormal))};
+ const layerArray = packTerrainLayers(layers);
+ for (const [name, texture] of Object.entries(layers)) {
+  if (name !== 'rock') texture.dispose();
+ }
+ const snowMaterial = snowMaps && {
+  normal: configure(new THREE.Texture(snowMaps[0])),
+  roughness: configure(new THREE.Texture(snowMaps[1])),
+ };
+ return {layerArray, rock: layers.rock, detail: configure(new THREE.Texture(rockNormal)), snowMaterial};
 }

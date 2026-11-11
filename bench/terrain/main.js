@@ -12,68 +12,131 @@ import {terrainControls} from './controls.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
-const TRACK_RADIUS = .65;   // metres painted per stroke
+const TERRAIN = {span: 64, resolution: 257};
+const RELIEF = {ridgeHeight: 4.2, ridgeFrequency: [.14, .12], hillHeight: 2, hillFrequency: [.055, .07]};
+const TRACK = {radius: .8, spacing: .28, depth: .11, contrast: .5, maskResolution: 512};
+const BOULDER = {radius: 1.25, detail: 1, contactBand: .65, roughness: .87};
+const BOULDERS = [
+  {x: -4, z: 3, scale: [1.4, .8, 1], yaw: .6},
+  {x: 4, z: -3, scale: [1, .64, 1.3], yaw: 1.9},
+  {x: -10, z: -7, scale: [1.7, 1.2, 1.1], yaw: 2.5},
+  {x: 9, z: 7, scale: [.8, .6, .7], yaw: .3},
+];
 const renderer = benchRenderer(); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .1, 400);
 camera.position.set(13, 5.5, 16);
 const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0, 1, 0); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * .49; controls.update();
 
-// Same height field the vegetation bench grew on: gentle hills, 128 m square.
-const resolution = 129, span = 128, half = span / 2;
+const {span, resolution} = TERRAIN;
+const half = span / 2, sampleSpacing = span / (resolution - 1);
 // Standalone: the basic stage gives sky, sun and ambient light; the terrain is the ground.
 const stage = createBasicStage({scene, ground: false, shadows: true, shadowExtent: half});
 const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
-  const x = index % resolution - half, z = Math.floor(index / resolution) - half;
-  return Math.sin(x * .11) * Math.cos(z * .09) * 1.6 + Math.sin(x * .031 + z * .05) * .8;
+  const x = (index % resolution) * sampleSpacing - half;
+  const z = Math.floor(index / resolution) * sampleSpacing - half;
+  const [ridgeX, ridgeZ] = RELIEF.ridgeFrequency;
+  const [hillX, hillZ] = RELIEF.hillFrequency;
+  return Math.sin(x * ridgeX) * Math.cos(z * ridgeZ) * RELIEF.ridgeHeight
+    + Math.sin(x * hillX + z * hillZ) * RELIEF.hillHeight;
 });
 const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0};
-const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules});
-const {layerArray, detail, rock} = await loadTerrainTextures(renderer);
+const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
+const {layerArray, detail, rock, snowMaterial} = await loadTerrainTextures(renderer, {snowDetail: true});
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;   // no water on this page
 const surfaceWeather = createSurfaceWeather();
-const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: 512, directional: true});
-const groundMaterial = createTerrainMaterial({}, {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, tracks, trackContrast: .5});
+const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: TRACK.maskResolution, directional: true});
+const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial};
+const groundMaterial = createTerrainMaterial({}, {...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast});
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
 ground.receiveShadow = true;
 scene.add(ground);
 
+const boulderGeometry = new THREE.DodecahedronGeometry(BOULDER.radius, BOULDER.detail);
+const boulderMaterial = createTerrainMaterial({map: rock, roughness: BOULDER.roughness}, {
+  ...terrainMaterialOptions, contactBand: BOULDER.contactBand, puddles: 0,
+});
+for (const {x, z, scale, yaw} of BOULDERS) {
+  const boulder = new THREE.Mesh(boulderGeometry, boulderMaterial);
+  boulder.position.set(x, field.heightAt(x, z), z);
+  boulder.scale.set(...scale);
+  boulder.rotation.y = yaw;
+  boulder.castShadow = boulder.receiveShadow = true;
+  scene.add(boulder);
+}
+
 // Surface: manual wetness and snow (no weather here), tracks painted with the pointer.
-const surface = {wetness: 0, snow: 0, paintTracks: false};
-const applySurface = () => surfaceWeather.set(surface);
+const surface = {wetness: 0, snow: false, paintTracks: false};
+function applySurface() {
+  surfaceWeather.set({wetness: surface.wetness, snow: Number(surface.snow)});
+  field.setSnowCover(surface.snow);
+  stage.sun.shadow.needsUpdate = true;
+}
 const gui = createBenchPanel('Terrain');
 stageControls(gui, stage, {wind: false});
 terrainControls(gui, {rules, appearance, onLayersChanged() { field.updateRules(rules); }});
 const surfaceFolder = gui.addFolder('Surface');
 surfaceFolder.add(surface, 'wetness', 0, 1, .01).name('Wetness and puddles').onChange(applySurface);
-surfaceFolder.add(surface, 'snow', 0, 1, .01).name('Snow cover').onChange(applySurface);
-surfaceFolder.add(surface, 'paintTracks').name('Paint tracks (drag)').onChange(on => { controls.enabled = !on; lastTrackPoint = undefined; });
-surfaceFolder.add({clear: () => tracks.clear()}, 'clear').name('Clear tracks');
+surfaceFolder.add(surface, 'snow').name('3D snow cover').onChange(applySurface);
+surfaceFolder.add(surface, 'paintTracks').name('Paint tracks (drag)').onChange(on => { controls.enabled = !on; endStroke(); });
+surfaceFolder.add({clear() {
+  endStroke();
+  tracks.clear();
+  field.resetDeformation();
+  stage.sun.shadow.needsUpdate = true;
+}}, 'clear').name('Reset tracks and terrain');
 
 const raycaster = new THREE.Raycaster(), canvas = renderer.domElement, trackEvents = new AbortController();
 let lastTrackPoint;
+let distanceToStamp = TRACK.spacing;
+function endStroke() {
+  lastTrackPoint = undefined;
+  distanceToStamp = TRACK.spacing;
+}
 function paintTrack(event) {
-  if (!surface.paintTracks || !(event.buttons & 1)) { lastTrackPoint = undefined; return; }
+  if (!surface.paintTracks || !(event.buttons & 1)) {
+    endStroke();
+    return;
+  }
   aimRay(raycaster, event, canvas, camera);
   const hit = raycaster.intersectObject(ground)[0]?.point;
-  if (hit) tracks.stamp(lastTrackPoint ?? hit, hit, TRACK_RADIUS);
+  if (!hit) {
+    endStroke();
+    return;
+  }
+
+  tracks.stamp(lastTrackPoint ?? hit, hit, TRACK.radius);
+  if (!lastTrackPoint) {
+    field.deform(hit.x, hit.z, TRACK.radius, TRACK.depth);
+  } else {
+    const dx = hit.x - lastTrackPoint.x, dz = hit.z - lastTrackPoint.z;
+    const length = Math.hypot(dx, dz);
+    for (; distanceToStamp <= length; distanceToStamp += TRACK.spacing) {
+      const fraction = distanceToStamp / length;
+      field.deform(lastTrackPoint.x + dx * fraction, lastTrackPoint.z + dz * fraction, TRACK.radius, TRACK.depth);
+    }
+    distanceToStamp -= length;
+  }
   lastTrackPoint = hit;
 }
 for (const type of ['pointerdown', 'pointermove']) canvas.addEventListener(type, paintTrack, {signal: trackEvents.signal});
-for (const type of ['pointerup', 'pointerleave', 'pointercancel']) canvas.addEventListener(type, () => { lastTrackPoint = undefined; }, {signal: trackEvents.signal});
+for (const type of ['pointerup', 'pointerleave', 'pointercancel']) canvas.addEventListener(type, endStroke, {signal: trackEvents.signal});
 
 const unbindResize = bindResize(renderer, camera);
 let lastUI = 0;
 startFrameLoop(renderer, (dt, now) => {
+  if (field.flushDeformation()) stage.sun.shadow.needsUpdate = true;
   controls.update(); stage.update(camera);
   surfaceWeather.update(dt, null);   // null: keeps the manual levels, still animates the rain streaks
   renderer.render(scene, camera);
-  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${surface.wetness.toFixed(2)} · snow ${surface.snow.toFixed(2)}`; }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${surface.wetness.toFixed(2)} · snow ${surface.snow ? 'on' : 'off'}`; }
 });
 document.body.dataset.ready = 'true';
 window.terrainBench = {field, rules, appearance, surfaceWeather, tracks, stage, scene, camera, renderer};
 onLeave(() => {
   renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort();
+  snowMaterial.normal.dispose(); snowMaterial.roughness.dispose();
+  boulderGeometry.dispose(); boulderMaterial.dispose();
   tracks.dispose(); field.dispose(); groundMaterial.dispose(); layerArray.dispose(); detail.dispose(); rock.dispose();
   stage.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
 });

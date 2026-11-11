@@ -7,15 +7,16 @@ const BYTE = 255;              // 8-bit weight and coverage scale
 const BASE_LAYERS = 4;         // grass, rock, snow, mud: one RGBA weight texel; layer 4 (forest floor) has its own map
 const FOREST_LAYER = 4;
 const MAX_DIG = .65;           // m below the original surface a deformation may dig
-// The mesh bounds are padded once to cover every edit: down by MAX_DIG, up by the deepest snow drift (.31 + .12 m).
-const EDIT_ENVELOPE = Object.freeze({below: MAX_DIG, above: .43});
+// Maximum undisturbed drift depth in metres. The optional track rim extends the edit envelope.
+const MAX_SNOW_DEPTH = .43;
+const SNOW_RIM = {start: .7, peak: .95, end: 1.2, displacedShare: .5, maxRise: .12};
 const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
 const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: recompute all normals at once
 // Snow cover: depth = (drift + variation x sin(x f + cos(z f))) x smoothstep(flatness); shown above coverage[0] m.
 const SNOW = Object.freeze({drift: .31, variation: .12, frequency: [.18, .14], flatness: [.55, .95], coverage: [.015, .11]});
 
 // Heights are row-major along +X and +Z, in metres. The mesh and shaders share this grid.
-export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings} = {}) {
+export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, snowTrackRims = false} = {}) {
  const [nx, nz] = resolution ?? [];
  if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
@@ -32,8 +33,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  geometry.computeVertexNormals();
  // All edits stay inside this envelope, so local edits need no bounds scan.
  geometry.computeBoundingBox();
- geometry.boundingBox.min.y -= EDIT_ENVELOPE.below;
- geometry.boundingBox.max.y += EDIT_ENVELOPE.above;
+ geometry.boundingBox.min.y -= MAX_DIG;
+ geometry.boundingBox.max.y += MAX_SNOW_DEPTH + (snowTrackRims ? SNOW_RIM.maxRise : 0);
  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
  const heightMap = createDataTexture(samples, nx, nz, {format: THREE.RedFormat, type: THREE.FloatType});
  const weights = new Uint8Array(samples.length * 4);
@@ -134,7 +135,34 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
     volume += (previous - samples[index]) * stepX * stepZ;
    }
   }
+  if (snowEnabled && snowTrackRims && volume > 0) {
+   raiseSnowRim(gx, gz, radius, volume / (stepX * stepZ), onSample);
+  }
   return volume;
+ }
+ function raiseSnowRim(gx, gz, radius, removedDepth, onSample) {
+  const candidates = [];
+  let totalWeight = 0;
+  const reach = radius * SNOW_RIM.end;
+  for (let z = Math.max(0, Math.ceil(gz - reach / stepZ)); z <= Math.min(nz - 1, Math.floor(gz + reach / stepZ)); z++) {
+   for (let x = Math.max(0, Math.ceil(gx - reach / stepX)); x <= Math.min(nx - 1, Math.floor(gx + reach / stepX)); x++) {
+    const distance = Math.hypot((x - gx) * stepX, (z - gz) * stepZ) / radius;
+    const weight = THREE.MathUtils.smoothstep(distance, SNOW_RIM.start, SNOW_RIM.peak)
+      * (1 - THREE.MathUtils.smoothstep(distance, SNOW_RIM.peak, SNOW_RIM.end));
+    if (weight <= 0) continue;
+    candidates.push({index: z * nx + x, weight});
+    totalWeight += weight;
+   }
+  }
+  if (!totalWeight) return;
+  const rimDepth = removedDepth * SNOW_RIM.displacedShare / totalWeight;
+  for (const {index, weight} of candidates) {
+   const depth = Math.min(MAX_SNOW_DEPTH + SNOW_RIM.maxRise, snow[index] + rimDepth * weight);
+   const next = Math.fround(soil[index] + depth);
+   if (next <= samples[index]) continue;
+   snow[index] = next - soil[index];
+   writeHeight(index, next, onSample);
+  }
  }
  function flushDeformation() {
   if (maxX < 0) return false;

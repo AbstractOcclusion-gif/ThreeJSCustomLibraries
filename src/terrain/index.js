@@ -16,6 +16,10 @@ export function createTerrainAppearance() {
 
 // Triplanar sampling adapted from Glider's stunt/cart/terrain-material.js.
 const TERRAIN_GLSL = /* glsl */`
+#ifdef TERRAIN_SNOW_DETAIL
+uniform sampler2D terrainSnowNormal, terrainSnowRoughness;
+uniform float terrainSnowNormalStrength;
+#endif
 uniform sampler2D terrainHeights, terrainLayers, terrainDetail;
 #ifdef TERRAIN_LAYER_ARRAY
 uniform highp sampler2DArray terrainLayerArray;
@@ -174,7 +178,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, ...surface
+ field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, ...surface
 } = {}) {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
@@ -185,6 +189,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (contactBand !== undefined && (!Number.isFinite(contactBand) || contactBand < 0)) throw Error('Contact band must be a non-negative distance');
  if (!layerArray && field.forestMap && !layers.forest?.isTexture) throw Error('Terrain forest cover needs a forest floor texture');
  const material = createWeatherSurfaceMaterial(parameters, surface);
+ if (snowMaterial) material.defines = {...material.defines, TERRAIN_SNOW_DETAIL: 1};
  if (field.forestMap) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  const compileSurface = material.onBeforeCompile;
@@ -198,6 +203,9 @@ export function createTerrainMaterial(parameters = {}, {
   terrainRockScale: appearance.rockScale ?? {value: .55},
   terrainDetailStrength: appearance.detailStrength, terrainHeightBlend: appearance.heightBlend, terrainWaterLevel: appearance.waterLevel,
   terrainShoreWidth: appearance.shoreWidth, terrainShoreWetness: appearance.shoreWetness,
+  terrainSnowNormal: {value: snowMaterial?.normal ?? null},
+  terrainSnowRoughness: {value: snowMaterial?.roughness ?? null},
+  terrainSnowNormalStrength: {value: snowMaterial?.normalStrength ?? 1},
   terrainSnowCover: field.snowCover ?? {value: false}, terrainSnowDepth: {value: field.snowMap ?? null},
  };
  material.onBeforeCompile = shader => {
@@ -208,6 +216,27 @@ export function createTerrainMaterial(parameters = {}, {
    .replace('snowCoverage *= 1.0 - track * .92;', `
     if (terrainSnowCover && !terrainProp) snowCoverage = textureLod(terrainSnowDepth, (terrainGrid + .5) / terrainSize, 0.0).r;
     else snowCoverage *= 1.0 - track * .92;
+   `)
+   .replace('roughnessFactor = mix(roughnessFactor, .83, snowCoverage);', `
+    #ifdef TERRAIN_SNOW_DETAIL
+    vec2 snowUv = terrainP.xz * vec2(1.0, -1.0);
+    vec3 snowNormal = texture2D(terrainSnowNormal, snowUv).xyz * 2.0 - 1.0;
+    vec3 snowDetail = vec3(snowNormal.x, snowNormal.z - 1.0, -snowNormal.y);
+    vec3 snowSurfaceNormal = normalize(terrainNormal + terrainSnowNormalStrength * snowDetail);
+    normal = normalize(mix(normal, transformDirection(snowSurfaceNormal, viewMatrix), snowCoverage));
+    // Sparse, fine grains sharpen reflected highlights. Fade them before
+    // they become subpixel so distant snow does not shimmer as the camera moves.
+    const float snowGrainFrequency = 95.0;
+    const float snowGrainRoughness = .42;
+    vec2 snowGrainUv = vSurfaceWorld.xz * snowGrainFrequency;
+    float grainVisibility = 1.0 - smoothstep(.35, 1.0, length(fwidth(snowGrainUv)));
+    float grain = smoothstep(.72, .9, valueNoise(vec3(snowGrainUv, 0.0))) * grainVisibility;
+    float snowRoughness = texture2D(terrainSnowRoughness, snowUv).r;
+    snowRoughness = mix(snowRoughness, min(snowRoughness, snowGrainRoughness), grain);
+    roughnessFactor = mix(roughnessFactor, snowRoughness, snowCoverage);
+    #else
+    roughnessFactor = mix(roughnessFactor, .83, snowCoverage);
+    #endif
    `)
    .replace('mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage)', 'mix(diffuseColor.rgb, terrainSnowAlbedo, snowCoverage)')
    .replace('float wet = surfaceWeather.x', 'float wet = max(surfaceWeather.x, shoreWet)');
