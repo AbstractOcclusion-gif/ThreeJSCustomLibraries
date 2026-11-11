@@ -49,7 +49,7 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
     for (const [dx, dz] of NEIGHBORS) {
       const nextX = x + dx, nextZ = z + dz;
       if (nextX < 0 || nextX >= width || nextZ < 0 || nextZ >= height) continue;
-      visit(nextZ * width + nextX);
+      visit(nextZ * width + nextX, dx, dz);
     }
   }
 
@@ -107,6 +107,38 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
     texture.needsUpdate = true;
   }
 
+  // Route one cell's worth of water to its steepest lower mesh neighbor.
+  // Strictly descending edges let each node forward its area after all upstream nodes have arrived.
+  function bakeFlow() {
+    const receiver = new Int32Array(heights.length).fill(-1);
+    const area = new Float32Array(heights.length).fill(stepX * stepZ);
+    const upstream = new Uint8Array(heights.length);
+    const diagonal = Math.hypot(stepX, stepZ);
+    for (let index = 0; index < heights.length; index++) {
+      let steepest = 0;
+      visitNeighbors(index, (next, dx, dz) => {
+        const length = dx && dz ? diagonal : dx ? stepX : stepZ;
+        const grade = (heights[index] - heights[next]) / length;
+        if (grade <= steepest) return;
+        steepest = grade;
+        receiver[index] = next;
+      });
+      if (receiver[index] >= 0) upstream[receiver[index]]++;
+    }
+
+    let count = 0;
+    for (let index = 0; index < heights.length; index++) {
+      if (upstream[index] === 0) frontier[count++] = index;
+    }
+    for (let head = 0; head < count; head++) {
+      const index = frontier[head], next = receiver[index];
+      if (next < 0) continue;
+      area[next] += area[index];
+      if (--upstream[next] === 0) frontier[count++] = next;
+    }
+    return {receiver, area};
+  }
+
   function sample(x, z, target) {
     const gx = (x - field.bounds.x) / stepX, gz = (z - field.bounds.y) / stepZ;
     if (gx < 0 || gz < 0 || gx > width - 1 || gz > height - 1) return false;
@@ -124,5 +156,5 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
   }
 
   rebuild();
-  return {texture, rebuild, sample, dispose: () => texture.dispose()};
+  return {texture, rebuild, sample, bakeFlow, dispose: () => texture.dispose()};
 }

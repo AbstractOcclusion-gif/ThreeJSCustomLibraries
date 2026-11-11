@@ -4,77 +4,128 @@ import {seededRandom} from '../core/hash.js';
 import {createTrackMask} from '../core/track-mask.js';
 
 const FLOW = {
-  minimumGrade: .065,
-  speedPerGrade: 3.2, // m/s per metre of drop per horizontal metre
-  maxSpeed: 2.1,
-  startsPerSecond: 160,
-  maxHeads: 384,
+  // Square metres of contributing ground needed for a visible stream.
+  sourceArea: 3.5,
+  fullWidthArea: 38,
+  radius: [.13, .38],
+  speedPerGrade: 3.2,
+  speed: [.12, 2.1], // metres per second
+  startsPerSecond: 145,
+  maxHighlights: 320,
   lifespan: [1.6, 3.4],
   fadeIn: .2,
   fadeOut: .45,
-  stallFade: .2,
+  endFade: .2,
   submergedDepth: .012,
 };
-const FOOTPRINT = {headRadius: .17, tailRadius: .115, tailSeconds: .22, tailStrength: .48};
-const {lerp, smoothstep} = MathUtils;
+const HIGHLIGHT = {headRadius: .12, tailRadius: .085, tailSeconds: .22, tailStrength: .48};
+const {clamp, lerp, smoothstep} = MathUtils;
 
-// Persistent surface beads. The terrain owns their height and supplies the
-// grade; the track mask rasterizes their wet heads and trailing films.
 export function createTerrainRunoff({field, drainage, resolution = 512, seed = 1}) {
   const {x, y: z, z: width, w: depth} = field.bounds;
-  const mask = createTrackMask({origin: [x, z], size: [width, depth], resolution});
+  const {data: heights, width: columns, height: rows} = field.heightMap.image;
+  const stepX = width / (columns - 1), stepZ = depth / (rows - 1);
+  const maskOptions = {origin: [x, z], size: [width, depth], resolution};
+  const channels = createTrackMask(maskOptions);
+  const highlights = createTrackMask(maskOptions);
+  const coverage = {value: 0};
   const random = seededRandom(seed);
   const clock = createFixedStep();
   const sample = new Vector4();
   const beads = [];
-  let spawnCredit = 0, painted = false;
+  const links = new Map();
+  let starts = [], spawnCredit = 0, painted = false;
 
-  function isSubmerged(height, fill) {
-    return sample.w > sample.z && lerp(sample.z, sample.w, fill) - height > FLOW.submergedDepth;
+  function pointAt(index) {
+    return {x: x + index % columns * stepX, z: z + Math.floor(index / columns) * stepZ};
+  }
+
+  function rebuild() {
+    const {receiver, area} = drainage.bakeFlow();
+    channels.clear();
+    highlights.clear();
+    painted = false;
+    links.clear();
+    for (let index = 0; index < receiver.length; index++) {
+      const next = receiver[index];
+      if (next < 0 || area[index] < FLOW.sourceArea) continue;
+      const from = pointAt(index), to = pointAt(next);
+      const length = Math.hypot(to.x - from.x, to.z - from.z);
+      const grade = (heights[index] - heights[next]) / length;
+      const speed = clamp(grade * FLOW.speedPerGrade, ...FLOW.speed);
+      const radius = lerp(...FLOW.radius, smoothstep(area[index], FLOW.sourceArea, FLOW.fullWidthArea));
+      channels.stamp(from, to, radius);
+      links.set(index, {index, from, to, next, length, speed});
+    }
+    starts = [...links.values()];
+    for (const bead of beads) {
+      if (!bead.link) continue;
+      const updated = links.get(bead.link.index);
+      if (updated?.next === bead.link.next) {
+        bead.link = updated;
+      } else {
+        bead.link = null;
+        bead.life = Math.min(bead.life, bead.age + FLOW.endFade);
+      }
+    }
+  }
+
+  function isSubmerged(point, fill) {
+    if (fill <= 0 || !drainage.sample(point.x, point.z, sample) || sample.w <= sample.z) return false;
+    return lerp(sample.z, sample.w, fill) - field.heightAt(point.x, point.z) > FLOW.submergedDepth;
   }
 
   function spawn(fill) {
-    const px = x + random() * width, pz = z + random() * depth;
-    if (!drainage.sample(px, pz, sample) || Math.hypot(sample.x, sample.y) < FLOW.minimumGrade) return;
-    if (isSubmerged(field.heightAt(px, pz), fill)) return;
+    const link = starts[Math.floor(random() * starts.length)];
+    if (!link) return;
+    const fraction = random();
+    const head = {x: lerp(link.from.x, link.to.x, fraction), z: lerp(link.from.z, link.to.z, fraction)};
+    if (isSubmerged(head, fill)) return;
     beads.push({
-      head: {x: px, z: pz},
-      tail: {x: px, z: pz},
-      age: 0,
-      life: lerp(...FLOW.lifespan, random()),
-      stalled: false,
+      link, head, tail: {...head}, distance: fraction * link.length,
+      age: 0, life: lerp(...FLOW.lifespan, random()),
     });
   }
 
   function advance(bead, dt, fill) {
     bead.age += dt;
     if (bead.age >= bead.life) return false;
-    if (bead.stalled) return true;
+    if (!bead.link) return true;
+
     const {head, tail} = bead;
-    const height = field.heightAt(head.x, head.z);
-    if (!drainage.sample(head.x, head.z, sample)) return false;
-    const grade = Math.hypot(sample.x, sample.y);
-    const displacement = dt * Math.min(FLOW.speedPerGrade, FLOW.maxSpeed / Math.max(grade, FLOW.minimumGrade));
-    const nextX = head.x + sample.x * displacement;
-    const nextZ = head.z + sample.y * displacement;
-    const nextHeight = field.heightAt(nextX, nextZ);
-    if (nextHeight === undefined) return false;
-    if (grade < FLOW.minimumGrade || nextHeight >= height || isSubmerged(height, fill)) {
-      bead.stalled = true;
-      bead.life = Math.min(bead.life, bead.age + FLOW.stallFade);
-      return true;
-    }
-    const catchup = 1 - Math.exp(-dt / FOOTPRINT.tailSeconds);
+    const catchup = 1 - Math.exp(-dt / HIGHLIGHT.tailSeconds);
     tail.x = lerp(tail.x, head.x, catchup);
     tail.z = lerp(tail.z, head.z, catchup);
-    head.x = nextX;
-    head.z = nextZ;
+
+    let time = dt;
+    while (bead.link && time > 0) {
+      const {length, speed, from, to, next} = bead.link;
+      const remaining = length - bead.distance;
+      const traveled = Math.min(remaining, time * speed);
+      bead.distance += traveled;
+      time -= traveled / speed;
+      const fraction = bead.distance / length;
+      head.x = lerp(from.x, to.x, fraction);
+      head.z = lerp(from.z, to.z, fraction);
+      if (traveled < remaining) break;
+      bead.link = links.get(next);
+      bead.distance = 0;
+    }
+    if (!bead.link || isSubmerged(head, fill)) {
+      bead.link = null;
+      bead.life = Math.min(bead.life, bead.age + FLOW.endFade);
+    }
     return true;
   }
 
+  rebuild();
   return {
-    texture: mask.texture,
-    update(dt, {rain, amount, puddleFill}) {
+    texture: highlights.texture,
+    film: channels.texture,
+    coverage,
+    rebuild,
+    update(dt, {supply, amount, puddleFill, wetness = supply}) {
+      coverage.value = amount * smoothstep(wetness, 0, 1);
       let advanced = false;
       clock.advance(dt, step => {
         advanced = true;
@@ -83,23 +134,26 @@ export function createTerrainRunoff({field, drainage, resolution = 512, seed = 1
           if (advance(bead, step, puddleFill)) beads[count++] = bead;
         }
         beads.length = count;
-        spawnCredit += step * rain * amount * FLOW.startsPerSecond;
+        spawnCredit += step * supply * amount * FLOW.startsPerSecond;
         while (spawnCredit >= 1) {
           spawnCredit--;
-          if (beads.length < FLOW.maxHeads) spawn(puddleFill);
+          if (beads.length < FLOW.maxHighlights) spawn(puddleFill);
         }
       });
       if (!advanced) return;
-      if (painted) mask.clear();
+      if (painted) highlights.clear();
       painted = beads.length > 0 && amount > 0;
       if (!painted) return;
       for (const bead of beads) {
         const fade = smoothstep(bead.age, 0, FLOW.fadeIn) * smoothstep(bead.life - bead.age, 0, FLOW.fadeOut);
         const strength = fade * amount;
-        mask.stamp(bead.tail, bead.head, FOOTPRINT.tailRadius, strength * FOOTPRINT.tailStrength);
-        mask.stamp(bead.head, bead.head, FOOTPRINT.headRadius, strength);
+        highlights.stamp(bead.tail, bead.head, HIGHLIGHT.tailRadius, strength * HIGHLIGHT.tailStrength);
+        highlights.stamp(bead.head, bead.head, HIGHLIGHT.headRadius, strength);
       }
     },
-    dispose: () => mask.dispose(),
+    dispose() {
+      channels.dispose();
+      highlights.dispose();
+    },
   };
 }

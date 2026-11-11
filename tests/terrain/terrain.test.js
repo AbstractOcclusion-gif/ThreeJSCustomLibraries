@@ -77,8 +77,8 @@ test('runoff beads move downhill without a phase reset and move faster on steepe
    return weightedX / weight * extent / width;
   }
   try {
-   const rain = {rain: .007, amount: 1, puddleFill: 0};
-   const dry = {...rain, rain: 0};
+   const rain = {supply: .007, amount: 1, puddleFill: 0};
+   const dry = {...rain, supply: 0};
    for (let frame = 0; frame < 66; frame++) runoff.update(step, rain);
    const first = centerOfWetMark();
    for (let frame = 0; frame < 12; frame++) runoff.update(step, dry);
@@ -94,4 +94,57 @@ test('runoff beads move downhill without a phase reset and move faster on steepe
   }
  }
  assert.ok(travelOnSlope(.5) > travelOnSlope(.25));
+});
+
+test('the baked runoff network merges tributaries and carries their contributing area downstream', () => {
+ const resolution = 5;
+ const indexAt = (x, z) => z * resolution + x;
+ const heights = new Float32Array(resolution ** 2).fill(9);
+ const left = indexAt(1, 2), right = indexAt(3, 2), junction = indexAt(2, 2);
+ const lower = indexAt(2, 3), outlet = indexAt(2, 4);
+ heights[left] = heights[right] = 5;
+ heights[junction] = 2;
+ heights[lower] = 1;
+ heights[outlet] = 0;
+ const field = createTerrainField({size: [4, 4], resolution: [resolution, resolution], heights});
+ const drainage = createTerrainDrainage(field);
+ try {
+  const {receiver, area} = drainage.bakeFlow();
+  assert.equal(receiver[left], junction);
+  assert.equal(receiver[right], junction);
+  assert.equal(receiver[junction], lower);
+  assert.equal(receiver[lower], outlet);
+  assert.ok(area[junction] > area[left] + area[right]);
+  assert.ok(area[outlet] > area[lower] && area[lower] > area[junction]);
+ } finally {
+  drainage.dispose();
+  field.dispose();
+ }
+});
+
+test('melting removes snow from a packed rut and leaves the underlying soil unchanged', () => {
+ const resolution = 9;
+ const heights = new Float32Array(resolution ** 2);
+ const field = createTerrainField({size: [8, 8], resolution: [resolution, resolution], heights, snowTrackRims: true});
+ try {
+  field.deform(4, 4, .5, .1);
+  field.flushDeformation();
+  const soil = field.heightAt(4, 4);
+  field.setSnowCover(true);
+  field.deform(4, 4, .8, .5);
+  field.flushDeformation();
+  const packed = field.heightAt(4, 4);
+  assert.ok(packed > soil);
+  const melt = field.meltSnow(.02);
+  assert.ok(melt.removed > 0 && melt.remaining > 0);
+  assert.ok(field.heightAt(4, 4) < packed);
+  assert.ok(field.heightAt(4, 4) > soil);
+  const thaw = field.meltSnow(1);
+  field.flushDeformation();
+  assert.equal(thaw.remaining, 0);
+  assert.equal(field.snowCover.value, false);
+  assert.equal(field.heightAt(4, 4), soil);
+ } finally {
+  field.dispose();
+ }
 });

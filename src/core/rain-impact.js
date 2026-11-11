@@ -6,6 +6,8 @@ vec2 rainImpactGradient(vec2 world, float time, float amount, float footprint) {
  const float cyclesPerSecond = 1.55;
  const float maxRadius = .22;
  const float ringWidth = .035;
+ const float arrivalFade = .09;
+ const float intensityFade = .13;
  vec2 grid = world * cellsPerMeter;
  vec2 cell = floor(grid);
  float arrival = hash12(cell);
@@ -17,7 +19,8 @@ vec2 rainImpactGradient(vec2 world, float time, float amount, float footprint) {
  float distance = length(delta);
  float resolution = 1.0 - smoothstep(ringWidth, .18, footprint * cellsPerMeter);
  float ring = (distance - age * maxRadius) / ringWidth;
- float envelope = (1.0 - age) * exp(-ring * ring) * resolution;
- return delta / max(distance, .001) * sin(ring * 2.0) * envelope * step(chance, amount);
+ float life = smoothstep(0.0, arrivalFade, age) * (1.0 - smoothstep(.35, 1.0, age));
+ float envelope = life * exp(-ring * ring) * resolution;
+ return delta / max(distance, .001) * sin(ring * 2.0) * envelope * smoothstep(0.0, intensityFade, amount - chance);
 }
 `;

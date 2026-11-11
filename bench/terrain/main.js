@@ -12,12 +12,16 @@ import {loadTerrainTextures} from './textures.js';
 import {terrainControls} from './controls.js';
 import {createTerrainRunoff} from '../../src/terrain/runoff.js';
 import {createTerrainBasins} from './basins.js';
+import {stampFootstepTrail} from './footsteps.js';
+import {createTerrainImpacts} from './impacts.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
 const TERRAIN = {span: 64, resolution: 257};
 const RELIEF = {ridgeHeight: 4.2, ridgeFrequency: [.14, .12], hillHeight: 2, hillFrequency: [.055, .07]};
+const SNOW_MELT = {metresPerSecond: .025, updateInterval: .3, bakeInterval: 1.5, runoffShare: .7};
 const TRACK = {radius: .8, spacing: .28, depth: .11, contrast: .5, maskResolution: 512};
+const FOOTSTEP_DEMO = {from: {x: 11, z: 11}, to: {x: 2, z: 4}};
 const BOULDER = {radius: 1.25, detail: 2, contactBand: .65, roughness: .87};
 const SNOW_CAP = {edgeHeight: .44, fullHeight: .78, thickness: .22, color: '#e4edf2', roughness: .83};
 const BOULDERS = [
@@ -50,7 +54,7 @@ const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forest
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
 const drainage = createTerrainDrainage(field);
 const runoff = createTerrainRunoff({field, drainage});
-let drainageDirty = false;
+let drainageDirty = false, meltDrainageDirty = false, meltFlowDirty = false, meltBakeElapsed = 0;
 const {layerArray, detail, rock, snowMaterial} = await loadTerrainTextures(renderer, {snowDetail: true});
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;   // each puddle has its own local fill level
@@ -66,6 +70,7 @@ const groundMaterial = createTerrainMaterial({}, {
   ...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast,
   drainage: {texture: drainage.texture, fill: puddleFill},
   runoffTexture: runoff.texture,
+  runoffFilm: {texture: runoff.film, coverage: runoff.coverage},
   puddleSky: stage.skyUniforms,
 });
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
@@ -110,6 +115,7 @@ const rockWeather = createSurfaceWeather();
 const boulderMaterial = createTerrainMaterial({map: rock, roughness: BOULDER.roughness}, {
   ...terrainMaterialOptions, weather: rockWeather, contactBand: BOULDER.contactBand, puddles: 0,
 });
+const impacts = createTerrainImpacts({scene, field, tracks, material: boulderMaterial});
 const snowCaps = [];
 for (const {x, z, scale, yaw} of BOULDERS) {
   const boulder = new THREE.Mesh(boulderGeometry, boulderMaterial);
@@ -126,11 +132,22 @@ for (const {x, z, scale, yaw} of BOULDERS) {
 }
 
 // Surface: manual wetness and snow (no weather here), tracks painted with the pointer.
-const rainWetness = createSurfaceWeather();
-const surface = {wetness: 0, puddles: 0, snow: false, snowDepth: SNOW_DEPTH_SCALE.initial, paintTracks: false};
+const surfaceWater = createSurfaceWeather();
+const surface = {wetness: 0, puddles: 0, snow: false, melt: 0, snowDepth: SNOW_DEPTH_SCALE.initial, paintTracks: false};
+let capMeltShare = 1, meltDepth = 0, meltElapsed = 0;
+function resizeSnowCaps() {
+  const previous = snowCapGeometry;
+  snowCapGeometry = createSnowCapGeometry(boulderGeometry, surface.snowDepth * capMeltShare);
+  for (const cap of snowCaps) cap.geometry = snowCapGeometry;
+  previous.dispose();
+  stage.sun.shadow.needsUpdate = true;
+}
 function applySurface() {
   surfaceWeather.set({wetness: surface.wetness, snow: Number(surface.snow)});
-  if (field.setSnowCover(surface.snow)) drainageDirty = true;
+  if (surface.snow !== field.snowCover.value && impacts.setSurface(surface.snow ? 'snow' : 'mud')) {
+    drainageDirty = true;
+    if (surface.snow) resizeSnowCaps();
+  }
   rockWeather.set({wetness: surface.wetness});
   for (const cap of snowCaps) cap.visible = surface.snow;
   stage.sun.shadow.needsUpdate = true;
@@ -140,25 +157,37 @@ stageControls(gui, stage, {wind: false});
 terrainControls(gui, {rules, appearance, onLayersChanged() { field.updateRules(rules); }});
 const surfaceFolder = gui.addFolder('Surface');
 surfaceFolder.add(surface, 'wetness', 0, 1, .01).name('Ground wetness').onChange(applySurface);
-surfaceFolder.add(surface, 'snow').name('3D snow cover').onChange(applySurface);
+surfaceFolder.add(surface, 'snow').name('3D snow cover').listen().onChange(applySurface);
 surfaceFolder.add(surface, 'snowDepth', SNOW_DEPTH_SCALE.min, SNOW_DEPTH_SCALE.max, .05)
   .name('Snow depth ×').onFinishChange(scale => {
-    if (field.setSnowDepthScale(scale)) drainageDirty = true;
-    const previous = snowCapGeometry;
-    snowCapGeometry = createSnowCapGeometry(boulderGeometry, scale);
-    for (const cap of snowCaps) cap.geometry = snowCapGeometry;
-    previous.dispose();
-    stage.sun.shadow.needsUpdate = true;
+    if (field.setSnowDepthScale(scale, impacts.onHeightSample)) drainageDirty = true;
+    resizeSnowCaps();
   });
 surfaceFolder.add(snowTransmission, 'value', 0, 1, .01).name('Snow light transmission');
 surfaceFolder.add(surface, 'paintTracks').name('Paint tracks (drag)').onChange(on => { controls.enabled = !on; endStroke(); });
+function enableTestSnow() {
+  if (surface.snow) return;
+  surface.snow = true;
+  applySurface();
+}
+surfaceFolder.add({roll() {
+  enableTestSnow();
+  impacts.launch('sphere', 'snow');
+}}, 'roll').name('Roll ball in snow');
+surfaceFolder.add({walk() {
+  enableTestSnow();
+  stampFootstepTrail({field, tracks, ...FOOTSTEP_DEMO, onSample: impacts.onHeightSample});
+}}, 'walk').name('Stamp footsteps in snow');
 surfaceFolder.add({clear() {
   endStroke();
-  tracks.clear();
-  if (field.resetDeformation()) drainageDirty = true;
+  if (impacts.reset()) drainageDirty = true;
+  capMeltShare = 1;
+  meltDepth = meltElapsed = 0;
+  if (surface.snow) resizeSnowCaps();
   stage.sun.shadow.needsUpdate = true;
 }}, 'clear').name('Reset tracks and terrain');
 const rainFolder = gui.addFolder('Rain and runoff');
+rainFolder.add(surface, 'melt', 0, 1, .05).name('Snow melt');
 rainFolder.add(rainAmount, 'value', 0, 1, .05).name('Rain on surfaces');
 rainFolder.add(rills, 'value', 0, 1, .05).name('Downhill runoff');
 rainFolder.add(surface, 'puddles', 0, 1, .05).name('Puddle fill');
@@ -184,13 +213,13 @@ function paintTrack(event) {
 
   tracks.stamp(lastTrackPoint ?? hit, hit, TRACK.radius);
   if (!lastTrackPoint) {
-    field.deform(hit.x, hit.z, TRACK.radius, TRACK.depth);
+    field.deform(hit.x, hit.z, TRACK.radius, TRACK.depth, impacts.onHeightSample);
   } else {
     const dx = hit.x - lastTrackPoint.x, dz = hit.z - lastTrackPoint.z;
     const length = Math.hypot(dx, dz);
     for (; distanceToStamp <= length; distanceToStamp += TRACK.spacing) {
       const fraction = distanceToStamp / length;
-      field.deform(lastTrackPoint.x + dx * fraction, lastTrackPoint.z + dz * fraction, TRACK.radius, TRACK.depth);
+      field.deform(lastTrackPoint.x + dx * fraction, lastTrackPoint.z + dz * fraction, TRACK.radius, TRACK.depth, impacts.onHeightSample);
     }
     distanceToStamp -= length;
   }
@@ -201,35 +230,77 @@ for (const type of ['pointerup', 'pointerleave', 'pointercancel']) canvas.addEve
 
 const unbindResize = bindResize(renderer, camera);
 let lastUI = 0;
+function updateMelt(dt) {
+  if (!surface.snow || surface.melt <= 0) return 0;
+  const supply = surface.melt * SNOW_MELT.runoffShare;
+  if (lastTrackPoint) return supply;
+  meltElapsed += dt;
+  meltDepth += dt * surface.melt * SNOW_MELT.metresPerSecond;
+  if (meltElapsed >= SNOW_MELT.updateInterval) {
+    const result = field.meltSnow(meltDepth, impacts.onHeightSample);
+    meltDepth = meltElapsed = 0;
+    if (result?.removed > 0) {
+      field.flushDeformation();
+      stage.sun.shadow.needsUpdate = true;
+      meltDrainageDirty = meltFlowDirty = true;
+      if (result.remaining > 0) {
+        capMeltShare *= result.remaining / (result.remaining + result.removed);
+        resizeSnowCaps();
+      } else {
+        surface.snow = false;
+        capMeltShare = 1;
+        applySurface();
+      }
+    }
+  }
+  return surface.snow ? supply : 0;
+}
+
 startFrameLoop(renderer, (dt, now) => {
-  if (field.flushDeformation()) {
+  if (impacts.update(dt)) {
     stage.sun.shadow.needsUpdate = true;
     drainageDirty = true;
   }
-  if (drainageDirty && !lastTrackPoint) {
-    drainage.rebuild();
+  const meltSupply = updateMelt(dt);
+  if (meltDrainageDirty) meltBakeElapsed += dt;
+  const meltNeedsBake = meltDrainageDirty && (!meltSupply || meltBakeElapsed >= SNOW_MELT.bakeInterval);
+  const meltFlowNeedsBake = meltFlowDirty && !meltSupply;
+  if (!lastTrackPoint && !impacts.moving) {
+    if (drainageDirty || meltNeedsBake) {
+      drainage.rebuild();
+      meltDrainageDirty = false;
+      meltBakeElapsed = 0;
+    }
+    // Keep the channels steady while snow is thinning. Refresh their routes
+    // after the melt stops, or immediately after a track changes the bed.
+    if (drainageDirty || meltFlowNeedsBake) {
+      runoff.rebuild();
+      meltFlowDirty = false;
+    }
     drainageDirty = false;
   }
   controls.update(); stage.update(camera);
-  rainWetness.update(dt, {rain: rainAmount.value});
-  const rain = rainWetness.levels.value.x;
-  const wetness = Math.max(surface.wetness, rain);
+  const waterSupply = Math.min(1, rainAmount.value + meltSupply);
+  surfaceWater.update(dt, {rain: waterSupply});
+  const water = surfaceWater.levels.value.x;
+  const wetness = Math.max(surface.wetness, water);
   surfaceWeather.set({wetness});
   rockWeather.set({wetness});
   surfaceWeather.update(dt, null);
   rockWeather.update(dt, null);
-  puddleFill.value = Math.min(1, surface.puddles + rain);
-  runoff.update(dt, {rain: rainAmount.value, amount: rills.value, puddleFill: puddleFill.value});
+  puddleFill.value = Math.min(1, surface.puddles + water);
+  runoff.update(dt, {supply: waterSupply, wetness: water, amount: rills.value, puddleFill: puddleFill.value});
   renderer.render(scene, camera);
-  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${surface.wetness.toFixed(2)} · snow ${surface.snow ? 'on' : 'off'}`; }
+  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${wetness.toFixed(2)} · snow ${surface.snow ? 'on' : 'off'}`; }
 });
 document.body.dataset.ready = 'true';
-window.terrainBench = {field, rules, appearance, surfaceWeather, tracks, drainage, rainAmount, rills, puddleFill, stage, scene, camera, renderer};
+window.terrainBench = {field, rules, appearance, surfaceWeather, tracks, drainage, impacts, rainAmount, rills, puddleFill, stage, scene, camera, renderer};
 onLeave(() => {
   renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort();
   snowMaterial.normal.dispose(); snowMaterial.roughness.dispose();
   boulderGeometry.dispose(); boulderMaterial.dispose();
   snowCapGeometry.dispose(); snowCapMaterial.dispose();
+  impacts.dispose();
   runoff.dispose();
   drainage.dispose();
   tracks.dispose(); field.dispose(); groundMaterial.dispose(); layerArray.dispose(); detail.dispose(); rock.dispose();

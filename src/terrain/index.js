@@ -62,8 +62,19 @@ float terrainPuddle(vec2 grid, vec2 size, float groundHeight) {
 #endif
 #ifdef TERRAIN_RUNOFF_MAP
 uniform sampler2D terrainRunoff;
+#ifdef TERRAIN_RUNOFF_FILM
+uniform sampler2D terrainRunoffFilm;
+uniform float terrainRunoffCoverage;
+#endif
 float terrainRunoffHeight(vec2 uv) {
- return textureLod(terrainRunoff, uv, 0.0).r;
+ float pulse = textureLod(terrainRunoff, uv, 0.0).r;
+ #ifdef TERRAIN_RUNOFF_FILM
+ const float highlightRelief = .45;
+ float film = textureLod(terrainRunoffFilm, uv, 0.0).r * terrainRunoffCoverage;
+ return film * (1.0 + pulse * highlightRelief);
+ #else
+ return pulse;
+ #endif
 }
 #endif
 #ifdef TERRAIN_PUDDLE_SKY
@@ -210,7 +221,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, drainage, runoffTexture, puddleSky, ...surface
+ field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, drainage, runoffTexture, runoffFilm, puddleSky, ...surface
 } = {}) {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
@@ -221,6 +232,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (contactBand !== undefined && (!Number.isFinite(contactBand) || contactBand < 0)) throw Error('Contact band must be a non-negative distance');
  if (!layerArray && field.forestMap && !layers.forest?.isTexture) throw Error('Terrain forest cover needs a forest floor texture');
  const material = createWeatherSurfaceMaterial(parameters, surface);
+ if (runoffTexture && runoffFilm) material.defines = {...material.defines, TERRAIN_RUNOFF_FILM: 1};
  if (runoffTexture) material.defines = {...material.defines, TERRAIN_RUNOFF_MAP: 1};
  if (drainage) material.defines = {...material.defines, TERRAIN_DRAINAGE: 1};
  if (drainage && puddleSky) material.defines = {...material.defines, TERRAIN_PUDDLE_SKY: 1};
@@ -232,6 +244,8 @@ export function createTerrainMaterial(parameters = {}, {
   ...(drainage && puddleSky),
   terrainDrainage: {value: drainage?.texture ?? null},
   terrainRunoff: {value: runoffTexture ?? null},
+  terrainRunoffFilm: {value: runoffFilm?.texture ?? null},
+  terrainRunoffCoverage: runoffFilm?.coverage ?? {value: 0},
   terrainPuddleFill: drainage?.fill ?? {value: 0},
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap}, terrainBounds: {value: field.bounds},
   terrainLayerArray: {value: layerArray ?? null},
@@ -268,8 +282,14 @@ export function createTerrainMaterial(parameters = {}, {
     } else snowCoverage *= 1.0 - track * .92;
    `)
    .replace('float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));', `
+    float runoffFilmCoverage = 0.0;
+    #ifdef TERRAIN_RUNOFF_FILM
+    runoffFilmCoverage = textureLod(terrainRunoffFilm, terrainUV, 0.0).r * terrainRunoffCoverage;
+    const float wetSnowDarkening = .4;
+    snowCoverage *= 1.0 - runoffFilmCoverage * wetSnowDarkening;
+    #endif
     #ifdef TERRAIN_RUNOFF_MAP
-    float runoffSlope = terrainRunoffHeight(terrainUV) * (1.0 - snowCoverage);
+    float runoffSlope = min(1.0, terrainRunoffHeight(terrainUV)) * (1.0 - snowCoverage);
     #else
     float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
     #endif
@@ -313,6 +333,7 @@ export function createTerrainMaterial(parameters = {}, {
     diffuseColor.rgb *= 1.0 - .38 * puddle;
    `)
    .replace('vec3 filmNormal = transformDirection', `
+    film = max(film, runoffFilmCoverage);
     #ifdef TERRAIN_DRAINAGE
     const float puddleRingScale = .48;
     const float puddleRingStrength = 1.8;
@@ -366,11 +387,12 @@ export function createTerrainMaterial(parameters = {}, {
       * thinSnow * backlight * grazingLight * terrainSnowTransmission;
     #endif
     #ifdef TERRAIN_PUDDLE_SKY
-    if (puddle > 0.0) {
+    float waterReflection = max(puddle, runoffFilmCoverage * (1.0 - snowCoverage));
+    if (waterReflection > 0.0) {
      const float waterFresnel = .02;
      float fresnel = waterFresnel + (1.0 - waterFresnel) * pow(1.0 - saturate(dot(normal, geometryViewDir)), 5.0);
      vec3 reflected = inverseTransformDirection(reflect(-geometryViewDir, normal), viewMatrix);
-     outgoingLight = mix(outgoingLight, sky(reflected, 0.0), puddle * fresnel);
+     outgoingLight = mix(outgoingLight, sky(reflected, 0.0), waterReflection * fresnel);
     }
     #endif
     #include <opaque_fragment>

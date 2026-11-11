@@ -227,6 +227,29 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   }
   return flushDeformation();
  }
+ function meltSnow(depth, onSample) {
+  if (!Number.isFinite(depth) || depth < 0) throw Error('Snow melt depth must be finite and non-negative');
+  if (!snowEnabled || depth === 0) return null;
+  let removed = 0, remaining = 0;
+  for (let index = 0; index < snow.length; index++) {
+   const previous = snow[index];
+   if (previous <= 0) continue;
+   snow[index] = Math.max(0, previous - depth);
+   removed += previous - snow[index];
+   remaining += snow[index];
+   if (packedSnowDepth) {
+    packedSnowDepth[index] = Math.min(snow[index], Math.max(0, packedSnowDepth[index] - depth * PACKED_SNOW_DEPTH_SHARE));
+   }
+   writeHeight(index, soil[index] + snow[index], onSample);
+  }
+  if (remaining === 0) {
+   snowEnabled = false;
+   snowCover.value = false;
+   snow = undefined;
+   packedSnowDepth = undefined;
+  }
+  return {removed, remaining};
+ }
  function setSnowCover(enabled, onSample) {
   if (enabled === snowEnabled) return false;
   if (enabled && !snow) {
@@ -248,6 +271,6 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, forestMap, snowMap, snowCover, heightAt, layerWeightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale,
+ return {geometry, bounds, heightMap, weightMap, forestMap, snowMap, snowCover, heightAt, layerWeightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
   dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); snowMap.dispose(); }};
 }
