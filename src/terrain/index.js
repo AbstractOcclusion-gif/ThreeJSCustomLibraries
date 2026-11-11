@@ -339,7 +339,7 @@ export function createTerrainMaterial(parameters = {}, {
     film = max(film, runoffFilmCoverage);
     #ifdef TERRAIN_DRAINAGE
     const float puddleRingScale = .48;
-    const float puddleRingStrength = 1.8;
+    const float puddleRingStrength = 1.2;
     vec2 puddleRings = rainImpactGradient(vSurfaceWorld.xz * puddleRingScale,
       surfaceTime, surfaceRainAmount, rainFootprint * puddleRingScale);
     rainGradient = mix(rainGradient, puddleRings * puddleRingStrength, puddle);

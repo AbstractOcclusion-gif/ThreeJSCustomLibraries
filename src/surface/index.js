@@ -130,7 +130,13 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     snowCoverage *= 1.0 - track * .92;
     float wet = surfaceWeather.x * (1.0 - snowCoverage);
     diffuseColor.rgb *= (1.0 - .42 * wet) * (1.0 - track * min(1.0, surfaceTrackContrast + .18 * wet));
-    roughnessFactor = mix(roughnessFactor, max(.12, roughnessFactor * .4), wet);
+    const float wetGroundRoughnessScale = .4;
+    float filmRoughnessScale = wetGroundRoughnessScale;
+    #ifdef SURFACE_RAIN_IMPACTS
+    const float rainyGroundRoughnessScale = .65;
+    filmRoughnessScale = mix(wetGroundRoughnessScale, rainyGroundRoughnessScale, surfaceRainAmount);
+    #endif
+    roughnessFactor = mix(roughnessFactor, max(.12, roughnessFactor * filmRoughnessScale), wet);
     float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
     if (surfaceRunoff > 0.0 && wet > .1 && runoffSlope > 0.0) {
      float streak = surfaceRainStreaks(vSurfaceWorld) * surfaceRunoff * runoffSlope * smoothstep(.1, .72, wet);
@@ -149,7 +155,7 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     #ifdef SURFACE_RAIN_IMPACTS
     float rainFootprint = length(fwidth(vSurfaceWorld.xz));
     if (surfaceRainAmount > 0.0) {
-     const float filmImpactStrength = .3;
+     const float filmImpactStrength = .065;
      float film = max(puddle, wet * smoothstep(.55, .95, up));
      vec2 rainGradient = rainImpactGradient(vSurfaceWorld.xz, surfaceTime, surfaceRainAmount, rainFootprint);
      vec3 filmNormal = transformDirection(vec3(rainGradient.x, 0.0, rainGradient.y), viewMatrix);
