@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
-import {createTerrainAppearance, createTerrainField, createTerrainMaterial} from '../../src/terrain/index.js';
+import {createTerrainAppearance, createTerrainField, createTerrainMaterial, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
@@ -48,6 +48,8 @@ const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;   // no water on this page
 const surfaceWeather = createSurfaceWeather();
 const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: TRACK.maskResolution, directional: true});
+const snowTransmission = {value: .2};
+snowMaterial.transmission = snowTransmission;
 const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial};
 const groundMaterial = createTerrainMaterial({}, {...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast});
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
@@ -57,7 +59,7 @@ scene.add(ground);
 const boulderGeometry = new THREE.DodecahedronGeometry(BOULDER.radius, BOULDER.detail);
 // Keep the original rock triangles under the cap. The outer surface rejoins
 // the rock where all three vertices have zero snow depth.
-function createSnowCapGeometry(rockGeometry) {
+function createSnowCapGeometry(rockGeometry, depthScale) {
   const positions = rockGeometry.getAttribute('position');
   const vertices = [];
   const triangle = Array.from({length: 3}, () => new THREE.Vector3());
@@ -65,7 +67,7 @@ function createSnowCapGeometry(rockGeometry) {
     let covered = false;
     for (const [offset, vertex] of triangle.entries()) {
       vertex.fromBufferAttribute(positions, start + offset);
-      const depth = SNOW_CAP.thickness * THREE.MathUtils.smoothstep(
+      const depth = SNOW_CAP.thickness * depthScale * THREE.MathUtils.smoothstep(
         vertex.y / BOULDER.radius, SNOW_CAP.edgeHeight, SNOW_CAP.fullHeight,
       );
       if (depth > 0) {
@@ -83,7 +85,7 @@ function createSnowCapGeometry(rockGeometry) {
   cap.computeVertexNormals();
   return cap;
 }
-const snowCapGeometry = createSnowCapGeometry(boulderGeometry);
+let snowCapGeometry = createSnowCapGeometry(boulderGeometry, SNOW_DEPTH_SCALE.initial);
 const snowCapMaterial = createTerrainMaterial({color: SNOW_CAP.color, roughness: SNOW_CAP.roughness}, {
   ...terrainMaterialOptions, contactBand: 0, puddles: 0,
 });
@@ -108,7 +110,7 @@ for (const {x, z, scale, yaw} of BOULDERS) {
 }
 
 // Surface: manual wetness and snow (no weather here), tracks painted with the pointer.
-const surface = {wetness: 0, snow: false, paintTracks: false};
+const surface = {wetness: 0, snow: false, snowDepth: SNOW_DEPTH_SCALE.initial, paintTracks: false};
 function applySurface() {
   surfaceWeather.set({wetness: surface.wetness, snow: Number(surface.snow)});
   field.setSnowCover(surface.snow);
@@ -122,6 +124,16 @@ terrainControls(gui, {rules, appearance, onLayersChanged() { field.updateRules(r
 const surfaceFolder = gui.addFolder('Surface');
 surfaceFolder.add(surface, 'wetness', 0, 1, .01).name('Wetness and puddles').onChange(applySurface);
 surfaceFolder.add(surface, 'snow').name('3D snow cover').onChange(applySurface);
+surfaceFolder.add(surface, 'snowDepth', SNOW_DEPTH_SCALE.min, SNOW_DEPTH_SCALE.max, .05)
+  .name('Snow depth ×').onFinishChange(scale => {
+    field.setSnowDepthScale(scale);
+    const previous = snowCapGeometry;
+    snowCapGeometry = createSnowCapGeometry(boulderGeometry, scale);
+    for (const cap of snowCaps) cap.geometry = snowCapGeometry;
+    previous.dispose();
+    stage.sun.shadow.needsUpdate = true;
+  });
+surfaceFolder.add(snowTransmission, 'value', 0, 1, .01).name('Snow light transmission');
 surfaceFolder.add(surface, 'paintTracks').name('Paint tracks (drag)').onChange(on => { controls.enabled = !on; endStroke(); });
 surfaceFolder.add({clear() {
   endStroke();

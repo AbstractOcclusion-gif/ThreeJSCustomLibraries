@@ -9,6 +9,7 @@ const FOREST_LAYER = 4;
 const MAX_DIG = .65;           // m below the original surface a deformation may dig
 // Maximum undisturbed drift depth in metres. The optional track rim extends the edit envelope.
 const MAX_SNOW_DEPTH = .43;
+export const SNOW_DEPTH_SCALE = Object.freeze({min: .25, max: 2, initial: 1});
 const PACKED_SNOW_DEPTH_SHARE = .4;
 const SNOW_RIM = {start: .7, peak: .95, end: 1.2, displacedShare: .5, maxRise: .12};
 const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
@@ -35,7 +36,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  // All edits stay inside this envelope, so local edits need no bounds scan.
  geometry.computeBoundingBox();
  geometry.boundingBox.min.y -= MAX_DIG;
- geometry.boundingBox.max.y += MAX_SNOW_DEPTH + (snowTrackRims ? SNOW_RIM.maxRise : 0);
+ geometry.boundingBox.max.y += (MAX_SNOW_DEPTH + SNOW_RIM.maxRise) * SNOW_DEPTH_SCALE.max;
  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
  const heightMap = createDataTexture(samples, nx, nz, {format: THREE.RedFormat, type: THREE.FloatType});
  const weights = new Uint8Array(samples.length * 4);
@@ -86,6 +87,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  let minX = nx, minZ = nz, maxX = -1, maxZ = -1;
  const soil = samples.slice();
  let snow, packedSnowDepth, snowEnabled = false;
+ let snowDepthScale = SNOW_DEPTH_SCALE.initial;
  const snowCover = {value: false};
  const snowMask = new Uint8Array(samples.length);
  let snowMaskDirty = false;
@@ -158,7 +160,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   if (!totalWeight) return;
   const rimDepth = removedDepth * SNOW_RIM.displacedShare / totalWeight;
   for (const {index, weight} of candidates) {
-   const depth = Math.min(MAX_SNOW_DEPTH + SNOW_RIM.maxRise, snow[index] + rimDepth * weight);
+   const depth = Math.min((MAX_SNOW_DEPTH + SNOW_RIM.maxRise) * snowDepthScale, snow[index] + rimDepth * weight);
    const next = Math.fround(soil[index] + depth);
    if (next <= samples[index]) continue;
    snow[index] = next - soil[index];
@@ -210,6 +212,21 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   if (restoreSnow) return setSnowCover(true, onSample);
   return flushDeformation();
  }
+ function setSnowDepthScale(scale, onSample) {
+  if (!Number.isFinite(scale) || scale < SNOW_DEPTH_SCALE.min || scale > SNOW_DEPTH_SCALE.max) {
+   throw Error('Snow depth scale is outside the supported range');
+  }
+  if (scale === snowDepthScale) return false;
+  const ratio = scale / snowDepthScale;
+  snowDepthScale = scale;
+  if (!snow) return false;
+  for (let index = 0; index < snow.length; index++) {
+   snow[index] *= ratio;
+   if (packedSnowDepth) packedSnowDepth[index] *= ratio;
+   if (snowEnabled) writeHeight(index, soil[index] + snow[index], onSample);
+  }
+  return flushDeformation();
+ }
  function setSnowCover(enabled, onSample) {
   if (enabled === snowEnabled) return false;
   if (enabled && !snow) {
@@ -218,7 +235,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    for (let index = 0; index < snow.length; index++) {
     const x = index % nx, z = Math.floor(index / nx);
     const drift = SNOW.drift + SNOW.variation * Math.sin(x * SNOW.frequency[0] + Math.cos(z * SNOW.frequency[1]));
-    snow[index] = drift * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], ...SNOW.flatness);
+    snow[index] = drift * snowDepthScale * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], ...SNOW.flatness);
     if (packedSnowDepth) packedSnowDepth[index] = snow[index] * PACKED_SNOW_DEPTH_SHARE;
    }
   }
@@ -231,6 +248,6 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, forestMap, snowMap, snowCover, heightAt, layerWeightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover,
+ return {geometry, bounds, heightMap, weightMap, forestMap, snowMap, snowCover, heightAt, layerWeightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale,
   dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); snowMap.dispose(); }};
 }

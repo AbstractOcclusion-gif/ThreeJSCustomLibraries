@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {createWeatherSurfaceMaterial} from '../surface/index.js';
 import {TERRAIN_LAYERS} from './terrain-rules.js';
-export {createTerrainField} from './field.js';
+export {createTerrainField, SNOW_DEPTH_SCALE} from './field.js';
 export {TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
 export {valueNoise} from '../core/value-noise.js';
 export {OceanCoastTerrain, TERRAIN_DEFAULTS as OCEAN_COAST_DEFAULTS, WET_DEFAULTS as OCEAN_COAST_WET_DEFAULTS} from './coast.js';
@@ -18,7 +18,7 @@ export function createTerrainAppearance() {
 const TERRAIN_GLSL = /* glsl */`
 #ifdef TERRAIN_SNOW_DETAIL
 uniform sampler2D terrainSnowNormal, terrainSnowRoughness;
-uniform float terrainSnowNormalStrength;
+uniform float terrainSnowNormalStrength, terrainSnowTransmission;
 #endif
 uniform sampler2D terrainHeights, terrainLayers, terrainDetail;
 #ifdef TERRAIN_LAYER_ARRAY
@@ -213,6 +213,7 @@ export function createTerrainMaterial(parameters = {}, {
   terrainShoreWidth: appearance.shoreWidth, terrainShoreWetness: appearance.shoreWetness,
   terrainSnowNormal: {value: snowMaterial?.normal ?? null},
   terrainSnowRoughness: {value: snowMaterial?.roughness ?? null},
+  terrainSnowTransmission: snowMaterial?.transmission ?? {value: 0},
   terrainSnowNormalStrength: {value: snowMaterial?.normalStrength ?? 1},
   terrainSnowCover: field.snowCover ?? {value: false}, terrainSnowDepth: {value: field.snowMap ?? null},
  };
@@ -266,6 +267,19 @@ export function createTerrainMaterial(parameters = {}, {
     roughnessFactor = mix(roughnessFactor, .83, snowCoverage);
     #endif
     diffuseColor.rgb = mix(diffuseColor.rgb, terrainSnowAlbedo, snowCoverage);
+   `)
+   .replace('#include <opaque_fragment>', `
+    #if defined(TERRAIN_SNOW_DETAIL) && NUM_DIR_LIGHTS > 0
+    // Thin snow scatters some directional light toward the viewer.
+    vec3 snowLight = directionalLights[0].direction;
+    float backlight = max(dot(-geometryViewDir, snowLight), 0.0);
+    float grazingLight = 1.0 - abs(dot(surfaceGeometricNormal, snowLight));
+    float thinSnow = terrainSnowCover && !terrainProp ? 1.0 - snowCoverage : .5;
+    const vec3 snowScatterTint = vec3(.52, .74, 1.0);
+    outgoingLight += directionalLights[0].color * snowScatterTint * snowCoverage
+      * thinSnow * backlight * grazingLight * terrainSnowTransmission;
+    #endif
+    #include <opaque_fragment>
    `)
    .replace('float wet = surfaceWeather.x', 'float wet = max(surfaceWeather.x, shoreWet)');
  };
