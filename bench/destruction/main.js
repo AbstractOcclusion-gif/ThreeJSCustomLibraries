@@ -3,7 +3,7 @@ import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createThreeStructureView} from '../../src/destruction/three.js';
-import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {createDemolition} from './physics.js';
 import {createFixedStep} from '../../src/core/fixed-step.js';
 import '../bench.css';
@@ -110,8 +110,7 @@ startFrameLoop(renderer, dt => {
   controls.update();
   renderer.render(scene, camera);
 });
-window.addEventListener('pagehide', event => {
-  if (event.persisted) return;
+onLeave(() => {
   renderer.setAnimationLoop(null);
   view.dispose();
   run.dispose();

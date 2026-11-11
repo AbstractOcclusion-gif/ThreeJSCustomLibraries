@@ -47,15 +47,63 @@ test('noise volumes validate bytes and reject failed or cancelled loads',async()
  const signal=AbortSignal.abort();await assert.rejects(loadCloudNoise('https://example.invalid/',{fetch,signal}),/aborted/);
 });
 test('offscreen weather map restores the caller render state, also on failure',()=>{
- const original={name:'host target'},viewport=new THREE.Vector4(2,3,40,50),scissor=new THREE.Vector4(6,7,20,30);
- for(const fail of [false,true]){
-  let target=original,face=4,level=2,v=viewport.clone(),s=scissor.clone(),scissorTest=true;
-  const renderer={getRenderTarget:()=>target,getActiveCubeFace:()=>face,getActiveMipmapLevel:()=>level,getViewport:out=>out.copy(v),getScissor:out=>out.copy(s),getScissorTest:()=>scissorTest,
-   setRenderTarget(t,f=0,l=0){target=t;face=f;level=l;v.set(0,0,256,256);},setViewport:value=>v.copy(value),setScissor:value=>s.copy(value),setScissorTest:value=>scissorTest=value,
-   render(){if(fail)throw Error('GPU failure');}};
-  const uniforms=createCloudUniforms();if(fail)assert.throws(()=>createCloudWeatherMap(renderer,uniforms),/GPU failure/);
-  else{const map=createCloudWeatherMap(renderer,uniforms);assert.equal(uniforms.tCloudWeather.value,map.texture);map.dispose();}
-  assert.equal(target,original);assert.equal(face,4);assert.equal(level,2);assert.deepEqual(v,viewport);assert.deepEqual(s,scissor);assert.equal(scissorTest,true);
+ const viewport = new THREE.Vector4(2, 3, 40, 50);
+ const scissor = new THREE.Vector4(6, 7, 20, 30);
+ const canvasViewport = new THREE.Vector4(0, 0, 800, 600);
+ const canvasScissor = new THREE.Vector4(0, 0, 400, 300);
+ const original = {viewport, scissor, scissorTest: true};
+ for (const fail of [false, true]) {
+  let target = original, face = 4, level = 2;
+  const logicalViewport = canvasViewport.clone(), logicalScissor = canvasScissor.clone();
+  const activeViewport = viewport.clone(), activeScissor = scissor.clone();
+  let logicalScissorTest = false, activeScissorTest = true;
+  const renderer = {
+   getRenderTarget: () => target,
+   getActiveCubeFace: () => face,
+   getActiveMipmapLevel: () => level,
+   getViewport: out => out.copy(logicalViewport),
+   getScissor: out => out.copy(logicalScissor),
+   getScissorTest: () => logicalScissorTest,
+   setRenderTarget(next, nextFace = 0, nextLevel = 0) {
+    target = next;
+    face = nextFace;
+    level = nextLevel;
+    activeViewport.copy(target?.viewport ?? logicalViewport);
+    activeScissor.copy(target?.scissor ?? logicalScissor);
+    activeScissorTest = target?.scissorTest ?? logicalScissorTest;
+   },
+   setViewport(value) {
+    logicalViewport.copy(value);
+    activeViewport.copy(value);
+   },
+   setScissor(value) {
+    logicalScissor.copy(value);
+    activeScissor.copy(value);
+   },
+   setScissorTest(value) {
+    logicalScissorTest = activeScissorTest = value;
+   },
+   render() {
+    if (fail) throw Error('GPU failure');
+   },
+  };
+  const uniforms = createCloudUniforms();
+  if (fail) {
+   assert.throws(() => createCloudWeatherMap(renderer, uniforms), /GPU failure/);
+  } else {
+   const map = createCloudWeatherMap(renderer, uniforms);
+   assert.equal(uniforms.tCloudWeather.value, map.texture);
+   map.dispose();
+  }
+  assert.equal(target, original);
+  assert.equal(face, 4);
+  assert.equal(level, 2);
+  assert.deepEqual(activeViewport, viewport);
+  assert.deepEqual(activeScissor, scissor);
+  assert.equal(activeScissorTest, true);
+  assert.deepEqual(logicalViewport, canvasViewport);
+  assert.deepEqual(logicalScissor, canvasScissor);
+  assert.equal(logicalScissorTest, false);
  }
 });
 test('precipitation is bounded, isolated and releases its scene nodes/resources',()=>{

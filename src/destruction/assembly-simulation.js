@@ -1,3 +1,4 @@
+import {POSE} from './pose-layout.js';
 import {isRopeBridge} from './bridge-suspension.js';
 import {isCableBridge} from './bridge-stays.js';
 import {CABLE_PRESETS} from './cable.js';
@@ -12,6 +13,12 @@ import {ConnectedSAPBroadphase} from './cannon-broadphase.js';
 import {importDestructible} from './destructible.js';
 import {createBreakableFloors} from './floors.js';
 import {createRubbleBands} from './rubble-bands.js';
+
+const CABLE_STEP = 1 / 120;
+const HEAVY_STEP = 1 / 240;
+const STANDARD_STEP = 1 / 480;
+const SOLVER_ITERATIONS = {cable: 64, heavy: 12, standard: 30};
+const SAG_SMOOTHING_SECONDS = .3;
 
 // Standalone masonry composes the existing panel runtime without inventing a
 // supporting frame. The host still owns the world and its fixed-step clock.
@@ -35,12 +42,21 @@ export function createAssemblySimulation({scene='building15',floors=true,claddin
  if(scene==='cable'&&isCableBridge(cableOptions.setup)&&!isRopeBridge(cableOptions.setup)&&!assets.slab)throw Error('The bridge test requires the authored slab asset');
  const cableDefinition=scene==='cable'?createCableRigDefinition(cableOptions):null;
  if(cableDefinition){if(cableOptions.loadMass!==undefined&&(!Number.isFinite(cableOptions.loadMass)||cableOptions.loadMass<5||cableOptions.loadMass>500))throw Error('Load mass must be 5–500 kg');const {slack=.08,preset='rope',segments=16,breakStrength=5000}=cableOptions;if(!(driver?.name==='Jolt'||cableOptions.setup==='transmission'&&(!driver||typeof driver.setExternalLoads==='function'))||!CABLE_PRESETS[preset]||!Number.isFinite(slack)||slack<.01||slack>.3||!Number.isInteger(segments)||segments<4||segments>24||!Number.isFinite(breakStrength)||breakStrength<=0)throw Error('Invalid cable lab settings: a supported cable backend, 4–24 links, 1–30% slack and positive strength required');}
- const world=new C.World({gravity:new C.Vec3(0,-9.82,0),allowSleep:true});world.solver=cableDefinition&&!driver?new CachedInertiaSolver():new ActiveBodySolver();world.solver.iterations=30;world.solver.tolerance=1e-7;world.broadphase=cableDefinition&&!driver?new ConnectedSAPBroadphase(world):new C.SAPBroadphase(world);world.broadphase.useBoundingBoxes=true;Object.assign(world.defaultContactMaterial,{friction:.5,restitution:.03,contactEquationRelaxation:16});
+ const world=new C.World({gravity:new C.Vec3(0,-9.82,0),allowSleep:true});world.solver=cableDefinition&&!driver?new CachedInertiaSolver():new ActiveBodySolver();world.solver.tolerance=1e-7;world.broadphase=cableDefinition&&!driver?new ConnectedSAPBroadphase(world):new C.SAPBroadphase(world);world.broadphase.useBoundingBoxes=true;Object.assign(world.defaultContactMaterial,{friction:.5,restitution:.03,contactEquationRelaxation:16});
  const ground=new C.Body({mass:0,shape:new C.Plane(),collisionFilterGroup:1});ground.quaternion.setFromEuler(-Math.PI/2,0,0);ground.updateAABB();world.addBody(ground);
  const cableScene=scene==='cable',bridge=scene==='bridge',stories=scene==='building15'?15:scene==='building10'?10:3,definition=cableScene?cableDefinition:authoredDefinition?structuredClone(authoredDefinition):scene==='brick-house'?createBrickHouseDefinition({assets}):STEEL_SHAPES.includes(scene)?createSteelShapeDefinition({...shape,form:scene}):bridge?createBridgeFrameDefinition():scene==='house'?createHouseDefinition({assets}):createBuildingFrameDefinition({stories,floors,cladding,bays,assets});world.broadphase.axisIndex=bridge?0:1;
  if(!(Number.isFinite(chipsBelowKg)&&chipsBelowKg>=0))throw Error('chipsBelowKg must be a non-negative number');for(const row of definition.floors??[])if(row.assetId){row.collisionLOD=collisionLOD;row.chipsBelowKg=chipsBelowKg;}
- if(definition.metadata.heavyStep!=null&&(!Number.isFinite(definition.metadata.heavyStep)||definition.metadata.heavyStep<1/480||definition.metadata.heavyStep>1/120))throw Error('Invalid authored rigid assembly step');
- const dt=cableScene?1/120:definition.metadata.heavy?(material==='brittle'&&driver?.rigidStep?driver.rigidStep:driver?.heavyStep??definition.metadata.heavyStep??1/240):1/480;world.solver.iterations=cableScene&&!driver?64:definition.metadata.heavy?12:30;
+ if(definition.metadata.heavyStep!=null&&(!Number.isFinite(definition.metadata.heavyStep)||definition.metadata.heavyStep<STANDARD_STEP||definition.metadata.heavyStep>CABLE_STEP))throw Error('Invalid authored rigid assembly step');
+ let dt = STANDARD_STEP;
+ if (cableScene) {
+  dt = CABLE_STEP;
+ } else if (definition.metadata.heavy) {
+  dt = driver?.heavyStep ?? definition.metadata.heavyStep ?? HEAVY_STEP;
+  if (material === 'brittle' && driver?.rigidStep) dt = driver.rigidStep;
+ }
+ world.solver.iterations = cableScene && !driver
+  ? SOLVER_ITERATIONS.cable
+  : definition.metadata.heavy ? SOLVER_ITERATIONS.heavy : SOLVER_ITERATIONS.standard;
  const system=scene==='masonry'?masonrySystem(world,definition,assets,fractureEnabled):createBendableStructure({world,definition,material,fractureEnabled,assets,strength}),supports=bridge?[-24,24].map(x=>({position:[x,4.875,0],size:[2.4,9.75,12.5]})):definition.nodes.filter(n=>n.anchor).map(n=>({position:[n.position[0],-(definition.metadata.footingSize?.[1]??.2)/2,n.position[2]],size:definition.metadata.footingSize??[1,.2,1]}));
  // These authored footings lie below grade and are tied to ground anchors.
  // A ground-plane penetration must not push them through their own anchors.
@@ -49,7 +65,7 @@ export function createAssemblySimulation({scene='building15',floors=true,claddin
  for(const s of supports)world.addBody(new C.Body({mass:0,shape:new C.Box(new C.Vec3(...s.size.map(n=>n/2))),position:new C.Vec3(...s.position),collisionFilterGroup:1}));
  // Seconds. Rendered frame displacement follows the solve with this time constant: load
  // redistribution after a member is lost reads as a quick dip instead of a snap.
- const sagState=new Map(),SAG_SMOOTHING=.3;let inspection=null,accumulator=0,lastAxisCheck=-1,disposed=false,pendingEnergy=0,lastPhysicsMs=0,lastSteps=0,lastSimDelta=0,droppedSeconds=0,lastImpact=null;const shots=[],sentPanels=new Map(),sentRetired=new Set(),sentPoses=new WeakMap();
+ const sagState=new Map();let inspection=null,accumulator=0,lastAxisCheck=-1,disposed=false,pendingEnergy=0,lastPhysicsMs=0,lastSteps=0,lastSimDelta=0,droppedSeconds=0,lastImpact=null;const shots=[],sentPanels=new Map(),sentRetired=new Set(),sentPoses=new WeakMap();
  // Effect events for the host: chips leaving the simulation, measured impacts and crushed panels, with world points.
  const pendingEvents=[];
  system.subscribe(event=>{if(event.type==='floor:impact')pendingEnergy=Math.max(pendingEnergy,event.energy);if(event.point&&['floor:chips','floor:impact','floor:fractured','floor:landing'].includes(event.type)&&pendingEvents.length<256)pendingEvents.push({type:event.type,time:event.time,panelId:event.panelId,groupId:event.groupId,point:event.point,velocity:event.velocity??null,mass:event.mass??0,energy:event.energy??0,speed:event.speed??0,kind:event.kind??null});});
@@ -101,10 +117,52 @@ function removeShot(shot){if(shot.joint)world.removeConstraint(shot.joint);world
   snapshot(recycled,{delta=false}={}){
    // One pre-sized transferable pose buffer: every part, four shards per slab and the
    // impactor budget fit without reallocating while a collapse adds bodies.
-   const dynamic=world.bodies.filter(b=>b.mass>0),poseBodies=world.bodies.filter(b=>b.mass>0||b.retired&&!sentRetired.has(b.id)),needed=poseBodies.length*9*4,capacity=(world.bodies.length+4*system.floors.panels.length+16)*9*4,buffer=recycled?.byteLength>=needed?recycled:new ArrayBuffer(Math.max(needed,capacity)),poses=new Float32Array(buffer);let poseCount=0;
+   const dynamic=world.bodies.filter(b=>b.mass>0),poseBodies=world.bodies.filter(b=>b.mass>0||b.retired&&!sentRetired.has(b.id)),needed=poseBodies.length * POSE.STRIDE * Float32Array.BYTES_PER_ELEMENT,capacity=(world.bodies.length+4*system.floors.panels.length+16) * POSE.STRIDE * Float32Array.BYTES_PER_ELEMENT,buffer=recycled?.byteLength>=needed?recycled:new ArrayBuffer(Math.max(needed,capacity)),poses=new Float32Array(buffer);let poseCount=0;
    // Retirement removes a part from later dynamic snapshots. Send its final pose
    // once first, so interpolation cannot leave its visible collider behind.
-   for(let i=0;i<poseBodies.length;i++){const b=poseBodies[i],o=poseCount*9;poses[o]=b.id;poses[o+1]=b.sleepState;let d=sag?driver?.displacementOf?.(b):null;if(sag){const prev=sagState.get(b),target=d??[0,0,0];if(prev){const k=1-Math.exp(-Math.max(0,lastSimDelta)/SAG_SMOOTHING);for(let i=0;i<3;i++)prev[i]+=(target[i]-prev[i])*k;d=prev;}else{sagState.set(b,target.slice());d=target;}}poses[o+2]=b.position.x+(d?d[0]*sag:0);poses[o+3]=b.position.y+(d?d[1]*sag:0);poses[o+4]=b.position.z+(d?d[2]*sag:0);poses[o+5]=b.quaternion.x;poses[o+6]=b.quaternion.y;poses[o+7]=b.quaternion.z;poses[o+8]=b.quaternion.w;if(delta){let previous=sentPoses.get(b),changed=!previous||b.retired&&!sentRetired.has(b.id);if(!changed)for(let j=0;j<9;j++)if(previous[j]!==poses[o+j]){changed=true;break;}if(!changed)continue;if(!previous){previous=new Float32Array(9);sentPoses.set(b,previous);}for(let j=0;j<9;j++)previous[j]=poses[o+j];}poseCount++;if(b.retired)sentRetired.add(b.id);}
+   const sagBlend = 1 - Math.exp(-Math.max(0, lastSimDelta) / SAG_SMOOTHING_SECONDS);
+   for (const body of poseBodies) {
+    const offset = poseCount * POSE.STRIDE;
+    let displacement = null;
+    if (sag) {
+     const target = driver?.displacementOf?.(body) ?? [0, 0, 0];
+     displacement = sagState.get(body);
+     if (displacement) {
+      for (let axis = 0; axis < displacement.length; axis++) {
+       displacement[axis] += (target[axis] - displacement[axis]) * sagBlend;
+      }
+     } else {
+      displacement = target;
+      sagState.set(body, target.slice());
+     }
+    }
+
+    poses[offset + POSE.ID] = body.id;
+    poses[offset + POSE.SLEEP] = body.sleepState;
+    poses[offset + POSE.X] = body.position.x + (displacement ? displacement[0] * sag : 0);
+    poses[offset + POSE.Y] = body.position.y + (displacement ? displacement[1] * sag : 0);
+    poses[offset + POSE.Z] = body.position.z + (displacement ? displacement[2] * sag : 0);
+    poses[offset + POSE.QX] = body.quaternion.x;
+    poses[offset + POSE.QY] = body.quaternion.y;
+    poses[offset + POSE.QZ] = body.quaternion.z;
+    poses[offset + POSE.QW] = body.quaternion.w;
+
+    if (delta) {
+     let previous = sentPoses.get(body);
+     let changed = !previous || (body.retired && !sentRetired.has(body.id));
+     for (let field = 0; !changed && field < POSE.STRIDE; field++) {
+      changed = previous[field] !== poses[offset + field];
+     }
+     if (!changed) continue;
+     if (!previous) {
+      previous = new Float32Array(POSE.STRIDE);
+      sentPoses.set(body, previous);
+     }
+     for (let field = 0; field < POSE.STRIDE; field++) previous[field] = poses[offset + field];
+    }
+    poseCount++;
+    if (body.retired) sentRetired.add(body.id);
+   }
    const fractures=[];for(const p of system.floors.panels){const revision=p.revision??(p.broken?1:0);if(revision>0&&sentPanels.get(p.id)!==revision){sentPanels.set(p.id,revision);fractures.push({id:p.id,revision,broken:p.broken,groups:p.groups?.map(groupData),pieces:p.groups?.flatMap(g=>g.pieceIds),fragments:p.fragments.map(groupData),...(p.asset?.masonry?{frozen:frozenData(p)}:{})});}}
    const cableStates=cables.map(c=>c.snapshot());
    const hinges=new Uint8Array(system.members.reduce((n,m)=>n+m.hinges.length,0));{let h=0;for(const m of system.members)for(const x of m.hinges)hinges[h++]=(x.broken?1:0)|(x.yielded?2:0);}const stats={cableBudget:cableRig?.budget,cableStates,cable:cableStates[0],inspection,lastImpact,stress:driver?.stress?{...driver.stress}:null,backend:driver?.name??'Cannon',solverBodies:driver?.solverBodies??world.bodies.length,frozen:rubble?.count??driver?.frozen??0,rubbleBands:rubble?.bands.size??0,rubbleColliders:rubble?.colliders??0,masonry:scene==='masonry'?{revision:3,chunks:system.floors.groups.filter(g=>g.detached&&g.pieceIds.length>1).length,looseUnits:system.floors.groups.filter(g=>g.detached&&g.pieceIds.length===1).length}:undefined,collisionShapes:driver?.collisionShapes??world.bodies.reduce((n,b)=>n+b.shapes.length,0),collisionLOD,time:world.time,broken:system.broken,yielded:system.yielded,permanentRotation:system.permanentRotation,totalMass:system.totalMass+(cableRig?.mass??0),floorBreaks:system.floors.broken,sleeping:system.sleeping&&cables.every(c=>c.sleeping)&&(cableRig?.payloads??[]).every(p=>p.body.sleepState===C.Body.SLEEPING),awake:dynamic.filter(b=>b.sleepState!==C.Body.SLEEPING).length,bodies:dynamic.length,physicsMs:lastPhysicsMs,steps:lastSteps,simDelta:lastSimDelta,fixedStep:dt,backlog:accumulator,droppedSeconds};const energy=pendingEnergy;pendingEnergy=0;inspection=null;

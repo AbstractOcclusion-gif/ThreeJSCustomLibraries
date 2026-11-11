@@ -4,7 +4,7 @@ import {createBenchPanel} from '../panel.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
@@ -262,8 +262,7 @@ startFrameLoop(renderer, (dt, now) => {
 });
 document.body.dataset.ready = 'true';
 
-window.addEventListener('pagehide', event => {
-  if (event.persisted) return;
+onLeave(() => {
   renderer.setAnimationLoop(null);
   rippleGesture.dispose();
   spray.dispose();

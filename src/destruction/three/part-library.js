@@ -35,7 +35,42 @@ export async function loadPartLibrary(url='/assets/structures/manifest.json',{su
     if(asset.assetId!==entry.id||asset.profileRevision!==catalogue.profiles.sha256)throw Error('Part identity or profile revision mismatch');
     if(atlases){gltf.scene.updateMatrixWorld(true);const inverse=new Matrix4().copy(gltf.scene.matrixWorld).invert();gltf.scene.traverse(mesh=>{if(mesh.isMesh)prepareSurfaceCoordinates(mesh.geometry,new Matrix4().multiplyMatrices(inverse,mesh.matrixWorld),{grainAxis:asset.part?.grainAxis??[1,0,0]});});}
     }catch(error){disposeUnshared(gltf);throw error;}
-    gltf.scene.traverse(mesh=>{if(!mesh.isMesh)return;resources.add(mesh.geometry);const shared=original=>{if(!materials.has(original.name)){materials.set(original.name,original);resources.add(original);if(original.map)prepareStructureAtlas(original.map);for(const v of Object.values(original))if(v?.isTexture)resources.add(v);if(atlases&&original.name==='structure_opaque'){const binding=bindSurfaceDetail(original,atlases);binding.setEnabled(surfacesEnabled);bindings.push(binding);}}else if(materials.get(original.name)!==original){for(const v of Object.values(original))if(v?.isTexture)v.dispose();original.dispose();}return materials.get(original.name);};mesh.material=Array.isArray(mesh.material)?mesh.material.map(shared):shared(mesh.material);});
+    const replaced = new Set();
+    const shareMaterial = original => {
+     const cached = materials.get(original.name);
+     if (cached) {
+      if (cached !== original) {
+       replaced.add(original);
+       for (const value of Object.values(original)) {
+        if (value?.isTexture) replaced.add(value);
+       }
+      }
+      return cached;
+     }
+
+     materials.set(original.name, original);
+     resources.add(original);
+     if (original.map) prepareStructureAtlas(original.map);
+     for (const value of Object.values(original)) {
+      if (value?.isTexture) resources.add(value);
+     }
+     if (atlases && original.name === 'structure_opaque') {
+      const binding = bindSurfaceDetail(original, atlases);
+      binding.setEnabled(surfacesEnabled);
+      bindings.push(binding);
+     }
+     return original;
+    };
+    gltf.scene.traverse(mesh => {
+     if (!mesh.isMesh) return;
+     resources.add(mesh.geometry);
+     mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map(shareMaterial)
+      : shareMaterial(mesh.material);
+    });
+    for (const resource of replaced) {
+     if (!resources.has(resource)) resource.dispose();
+    }
     return{asset,gltf};
    })().catch(error=>{cache.delete(entry.id);throw error;}));
    return cache.get(entry.id);

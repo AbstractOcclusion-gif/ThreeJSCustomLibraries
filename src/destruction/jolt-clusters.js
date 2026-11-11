@@ -148,7 +148,33 @@ export function createJoltClusterDriver(J,{staticZoneStories=0,dynamicFrame=2,fi
    // A hinged frame column is a pin between heavy blocks: give it the frame mass and an isotropic
    // tensor (its own slender-bar tensor leaves the hinge springs explicit-unstable in torsion).
    const props=massProperties(parts);let boost=1;if(framed&&plasticMember(parts[0])&&props.mass<FRAME_COLUMN_MASS){boost=FRAME_COLUMN_MASS/props.mass;props.mass*=boost;const t=props.tensor.map(v=>v*boost),top=Math.max(t[0],t[4],t[8]);t[0]=t[4]=t[8]=top;props.tensor=t;}
-   const proxy=new C.Body({mass:supported?0:props.mass,position:props.position,velocity:supported?new C.Vec3():props.velocity,angularVelocity:supported?new C.Vec3():props.angularVelocity,collisionFilterGroup:parts.some(b=>b.collisionFilterGroup===2)?2:parts[0].collisionFilterGroup,collisionFilterMask:parts.some(b=>b.collisionFilterMask!==0)?3:0,allowSleep:true});proxy._massTensor=props.tensor;proxy._originalSingle=parts.length===1?parts[0]:null;if(proxy._originalSingle){proxy.quaternion.copy(parts[0].quaternion);proxy.quaternion.normalize();const i=parts[0].inertia;proxy._massTensor=parts[0]._massTensor?.slice()??[i.x,0,0,0,i.y,0,0,0,i.z];proxy.material=parts[0].material;if(boost>1){const t=proxy._massTensor.map(v=>v*boost),top=Math.max(t[0],t[4],t[8]);t[0]=t[4]=t[8]=top;proxy._massTensor=t;}}proxy._partIDs=[];proxy._partMap=new Map();
+   const proxy = new C.Body({
+    mass: supported ? 0 : props.mass,
+    position: props.position,
+    velocity: supported ? new C.Vec3() : props.velocity,
+    angularVelocity: supported ? new C.Vec3() : props.angularVelocity,
+    collisionFilterGroup: parts.some(body => body.collisionFilterGroup === 2) ? 2 : parts[0].collisionFilterGroup,
+    collisionFilterMask: parts.some(body => body.collisionFilterMask !== 0) ? 3 : 0,
+    allowSleep: true,
+   });
+   proxy._massTensor = props.tensor;
+   const single = parts.length === 1 ? parts[0] : null;
+   proxy._originalSingle = single;
+   if (single) {
+    proxy.quaternion.copy(single.quaternion);
+    proxy.quaternion.normalize();
+    const {x, y, z} = single.inertia;
+    proxy._massTensor = single._massTensor?.slice() ?? [x, 0, 0, 0, y, 0, 0, 0, z];
+    proxy.material = single.material;
+    if (boost > 1) {
+     const tensor = proxy._massTensor.map(value => value * boost);
+     const dominantInertia = Math.max(tensor[0], tensor[4], tensor[8]);
+     tensor[0] = tensor[4] = tensor[8] = dominantInertia;
+     proxy._massTensor = tensor;
+    }
+   }
+   proxy._partIDs = [];
+   proxy._partMap = new Map();
    proxy._structureSupported=supported||framed;
    // A dynamic-frame zone is one link of a jointed chain: freezing links one by one makes the chain
    // creep and re-release, so these rely on native island sleeping instead.

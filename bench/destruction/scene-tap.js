@@ -1,3 +1,4 @@
+import {onLeave} from '../kit/page-lifecycle.js';
 // A drag that returns to its origin and a two-finger pinch are never taps.
 export function bindSceneTap(element,onTap){
  const pointers=new Set();let start=null;
@@ -9,5 +10,5 @@ export function bindSceneTap(element,onTap){
  for(const [type,fn]of [['pointerdown',down],['pointermove',move],['pointerup',up],['pointercancel',cancel],['lostpointercapture',cancel]])element.addEventListener(type,fn);
  addEventListener('blur',blur);
  const dispose=()=>{for(const[type,fn]of [['pointerdown',down],['pointermove',move],['pointerup',up],['pointercancel',cancel],['lostpointercapture',cancel]])element.removeEventListener(type,fn);removeEventListener('blur',blur);};
- addEventListener('pagehide',dispose,{once:true});return dispose;
+ onLeave(dispose);return dispose;
 }

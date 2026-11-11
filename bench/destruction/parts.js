@@ -1,3 +1,5 @@
+import {onLeave, startFrameLoop} from '../kit/page-lifecycle.js';
+import {createFixedStep} from '../../src/core/fixed-step.js';
 import {setupMobileControls} from './mobile-controls.js';
 import {bindSceneTap} from './scene-tap.js';
 import {createBrowserPerformance} from './browser-performance.js';
@@ -19,6 +21,11 @@ import {createThreeFracturedChunkView} from '../../src/destruction/three/chunks.
 import {createBreakableFloors} from '../../src/destruction/floors.js';
 import {createDebrisFX} from '../../src/destruction/three/debris-fx.js';
 
+const HOUSE_OPTION_PREFIX = '__house__';
+const STAIRS_OPTION = '__stairs__';
+const DEBRIS_VISIBILITY = {abovePlayer: 15, belowPlayer: 25, maxDistance: 30, boundsRadius: 3};
+const CAMERA_FRAMING = {mobileWidth: 700, maxOffset: 120, offsetFraction: .15};
+
 const $=id=>document.getElementById(id),renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(2,devicePixelRatio));renderer.shadowMap.enabled=true;document.body.prepend(renderer.domElement);
 setupMobileControls($('part-controls'),$('toggle-controls'));
 const scene=new T.Scene();scene.background=new T.Color('#15212a');scene.add(new T.HemisphereLight(0xe4f0ff,0x665848,2));const light=new T.DirectionalLight(0xffffff,3);light.position.set(5,9,6);scene.add(light);
@@ -28,20 +35,35 @@ const ground=new T.Mesh(new T.PlaneGeometry(100,100),new T.MeshStandardMaterial(
 ground.receiveShadow=true;
 const supportGeometry=new T.BoxGeometry(.18,.5,.18),supportMaterial=new T.MeshStandardMaterial({color:0x82929b}),sphere=new T.SphereGeometry(.13,16,12),metal=new T.MeshStandardMaterial({color:0xdda95d,metalness:.6,roughness:.3});
 let fx=null,debrisBindings=null,currentResources=[];
-const fxFrustum=new T.Frustum(),fxMatrix=new T.Matrix4(),fxBounds=new T.Sphere(new T.Vector3(),3);
-function relevantFX(point){const playerY=Number($('playerY').value)||0;if(point.y>playerY+15||point.y<playerY-25||camera.position.distanceToSquared(point)>30*30)return false;fxBounds.center.copy(point);return fxFrustum.intersectsSphere(fxBounds);}
+const fxFrustum=new T.Frustum(),fxMatrix=new T.Matrix4(),fxBounds=new T.Sphere(new T.Vector3(),DEBRIS_VISIBILITY.boundsRadius);
+function relevantFX(point) {
+  const playerY = Number($('playerY').value) || 0;
+  const {abovePlayer, belowPlayer, maxDistance} = DEBRIS_VISIBILITY;
+  if (point.y > playerY + abovePlayer || point.y < playerY - belowPlayer) return false;
+  if (camera.position.distanceToSquared(point) > maxDistance ** 2) return false;
+  fxBounds.center.copy(point);
+  return fxFrustum.intersectsSphere(fxBounds);
+}
 const debrisColours=Object.fromEntries(Object.entries(STRUCTURE_MATERIALS).map(([id,profile])=>[id,new T.Color().setRGB(...profile.atlas.interior).getHex()]));
 createDebrisFX(scene,{colours:debrisColours,isRelevant:relevantFX}).then(effects=>{if(disposed){effects.dispose();return;}fx=effects;fx.setGround(()=>0);debrisBindings=createStructureDebrisBindings(fx);for(const resource of currentResources)debrisBindings.register(resource);}).catch(error=>console.warn('Debris effects unavailable:',error));
-let client=null,tileView=null,library,world,floors,view,rows=[],supports=[],supportBodies=[],shots=[],build=0,accumulator=0,selectedEntry,disposed=false;
+const floorStep = createFixedStep({step: 1 / 240, maxSteps: 16});
+let client=null,tileView=null,library,world,floors,view,rows=[],supports=[],supportBodies=[],shots=[],build=0,selectedEntry,disposed=false;
 const browserPerf=createBrowserPerformance({renderer,readState:()=>({selection:{house:new URLSearchParams(location.search).get('house'),backend:new URLSearchParams(location.search).get('backend'),surfaces:$('surfaces').checked},backend:client?.stats.backend,simTime:client?.stats.time,solverBodies:client?.stats.solverBodies,awake:client?.stats.awake,broken:client?.stats.broken,floorBreaks:client?.stats.floorBreaks,backlog:client?.stats.backlog})});
-addEventListener('pagehide',()=>{if(disposed)return;browserPerf?.dispose();disposed=true;build++;clear();fx?.dispose();debrisBindings?.dispose();library?.dispose();controls.dispose();renderer.setAnimationLoop(null);light.shadow.dispose();renderer.dispose();for(const resource of [supportGeometry,supportMaterial,sphere,metal,ground.geometry,ground.material,grid.geometry,grid.material])resource.dispose();});
+onLeave(()=>{if(disposed)return;browserPerf?.dispose();disposed=true;build++;removeEventListener('resize',resize);clear();fx?.dispose();debrisBindings?.dispose();library?.dispose();controls.dispose();renderer.setAnimationLoop(null);light.shadow.dispose();renderer.dispose();for(const resource of [supportGeometry,supportMaterial,sphere,metal,ground.geometry,ground.material,grid.geometry,grid.material])resource.dispose();});
 function facadeReveal({point,areaM2,thicknessM}){fx?.chipsBurst({point,mass:Math.min(8,areaM2*thicknessM*STRUCTURE_MATERIALS.render.densityKgM3),kind:'render'});}
 function clear(){client?.dispose();client=null;tileView?.dispose();tileView=null;view?.dispose();floors?.dispose?.();for(const mesh of supports)scene.remove(mesh);for(const shot of shots)scene.remove(shot.mesh);supports=[];supportBodies=[];shots=[];currentResources=[];fx?.clear();world=null;view=null;floors=null;}
 async function rebuild(){
  const revision=++build;clear();$('facadeControl').hidden=true;$('descent').hidden=true;$('status').textContent='Preparing authored part…';
  try{
-  if($('part').value==='__stairs__'){await rebuildStairs(revision);return;}
-  if($('part').value.startsWith('__house__')){await rebuildHouse($('part').value.slice(9),revision);return;}
+  const selection = $('part').value;
+  if (selection === STAIRS_OPTION) {
+    await rebuildStairs(revision);
+    return;
+  }
+  if (selection.startsWith(HOUSE_OPTION_PREFIX)) {
+    await rebuildHouse(selection.slice(HOUSE_OPTION_PREFIX.length), revision);
+    return;
+  }
   const seed=Number($('seed').value),bay=$('part').value==='__bay__';
   const instances=bay?resolveFarmhouseBay(library.catalogue,seed):[{entry:library.resolve({...JSON.parse($('part').value),seed,placementId:'specimen'}),foundation:true}];
   const resources=await Promise.all(instances.map(i=>library.load(i.entry)));if(revision!==build||disposed)return;
@@ -75,7 +97,7 @@ async function rebuild(){
    });
   }else{floors=createBreakableFloors({world,rows,members,assets,onEvent:event=>fx?.handle([event])});view=createThreeFracturedChunkView({system:{floors},scene,assets:renderAssets});}
   $('descent').hidden=!masonry;$('playerY').value='0';
-  const position=bay?[0,1.7,0]:rows[0].position,radius=bay?4:Math.max(...resources[0].asset.part.sizeM,1);controls.target.fromArray(position);camera.position.set(radius*1.3,position[1]+radius*.5,radius*2);controls.update();accumulator=0;
+  const position=bay?[0,1.7,0]:rows[0].position,radius=bay?4:Math.max(...resources[0].asset.part.sizeM,1);controls.target.fromArray(position);camera.position.set(radius*1.3,position[1]+radius*.5,radius*2);controls.update();floorStep.reset();
   $('status').textContent=bay?`Farmhouse wall/timber bay · ${instances.length} parts · ${resources.reduce((n,r)=>n+r.asset.pieces.length,0)} chunks. Foundations support the walls; walls carry the timber.`:`${selectedEntry.id} · ${resources[0].asset.masonry?resources[0].asset.masonry.clusters.length+' clusters / '+selectedEntry.physicalChunks+' units':selectedEntry.physicalChunks+' chunks'} · ${resources[0].asset.massKg.toFixed(1)} kg. Click to impact or drop the mass.`;
  }catch(error){if(revision===build)$('status').textContent=error.message;console.error(error);}
 }
@@ -121,7 +143,116 @@ $('surfaces').onchange=()=>library?.setSurfaceDetail($('surfaces').checked);
 $('playerY').onchange=()=>{const y=Number($('playerY').value);if(Number.isFinite(y))client?.command({type:'playerHeight',y});};
 $('reset').onclick=rebuild;$('part').onchange=rebuild;$('seed').onchange=rebuild;$('drop').onclick=()=>{if(client){fire(currentResources[0]?.asset.masonry?new T.Vector3().fromArray(rows[0].position).add(new T.Vector3(0,rows[0].halfExtents[1],0)):new T.Vector3(0,4.7,0),true);return;}if(floors)fire($('part').value==='__bay__'?new T.Vector3(0,3.5,0):new T.Vector3().fromArray(rows[0].position).add(new T.Vector3(0,selectedEntry.sizeMm[1]/2000,0)),true);};
 $('release').onclick=()=>{if(client){client.command({type:'releaseFoundations'});return;}if(!floors)return;for(const panel of floors.panels)panel.releaseFoundation?.();for(const panel of floors.panels)for(const attachment of panel.attachments){attachment.disabled=true;attachment.bond.alive=false;world.removeConstraint(attachment.bond.joint);attachment.group.body.wakeUp();}for(const body of supportBodies)world.removeBody(body);for(const mesh of supports)scene.remove(mesh);supportBodies=[];supports=[];$('status').textContent='Support joints released. Remaining contacts carry the load.';};
-function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;if(innerWidth<=700)camera.clearViewOffset();else camera.setViewOffset(innerWidth,innerHeight,-Math.min(120,innerWidth*.15),0,innerWidth,innerHeight);camera.updateProjectionMatrix();}addEventListener('resize',resize);resize();
-let previous=performance.now();renderer.setAnimationLoop(now=>{browserPerf?.beginFrame(now);const elapsed=Math.min(.05,(now-previous)/1000);previous=now;if(document.hidden)return;if(client){client.advance(elapsed);client.update(now);view?.update();tileView?.update();tileView?.tick(elapsed);for(const shot of shots){shot.mesh.position.copy(shot.body.position);shot.mesh.quaternion.copy(shot.body.quaternion);}}else if(world&&floors){accumulator+=elapsed;for(let i=0;i<16&&accumulator>=1/240;i++){floors.beforeStep(1/240);world.step(1/240);floors.afterStep();accumulator-=1/240;}view.update();for(const shot of shots){shot.mesh.position.copy(shot.body.position);shot.mesh.quaternion.copy(shot.body.quaternion);}}view?.tick?.(elapsed);controls.update();camera.updateMatrixWorld();fxFrustum.setFromProjectionMatrix(fxMatrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));fx?.tick(elapsed);browserPerf?.beforeRender();renderer.render(scene,camera);browserPerf?.afterRender(now);});
-try{library=await loadPartLibrary(import.meta.env.BASE_URL + 'assets/structures/manifest.json');if(disposed){library.dispose();}else{$('surfaces').checked=new URLSearchParams(location.search).get('surfaces')!=='0';library.setSurfaceDetail($('surfaces').checked);$('part').add(new Option('TEST · Destructible stairs + landing','__stairs__'));for(const house of CATALOGUE_HOUSES)$('part').add(new Option(house.name,'__house__'+house.id));const choices=new Map();for(const entry of library.catalogue.assets){const key=JSON.stringify({type:entry.type,materialId:entry.materialId,sizeMm:entry.sizeMm,...(entry.type.startsWith('test.masonry.')?{variant:entry.variant}:{})});if(!choices.has(key)){const label=entry.type.startsWith('test.masonry.')?`TEST · ${entry.materialId==='stone_rubble'?'Rounded stone':entry.materialId==='stone_dressed'?'Stone block':'Brick'} ${entry.type.endsWith('window')?'window + lintel':'solid'} · ${entry.variant===2?'Revealing facade':entry.materialId==='stone_rubble'?'Authored cells':entry.variant===0?'Geometry Nodes':'Bisect'}`:`${entry.type} · ${entry.materialId} · ${entry.sizeMm.join('×')} mm`;const option=new Option(label,key);$('part').add(option);choices.set(key,true);}}const first=[...$('part').options].find(o=>!o.value.startsWith('__')&&JSON.parse(o.value).type==='wall.straight');const params=new URLSearchParams(location.search),requested=params.get('specimen')?.replace(/^facade-/,''),wantFacade=params.get('specimen')?.startsWith('facade-');const requestedType=(requested?.startsWith('rounded')?'test.masonry.rounded.':requested?.startsWith('stone')?'test.masonry.stone.':'test.masonry.')+(requested?.endsWith('window')?'window':'solid');const specimen=[...$('part').options].find(o=>o.value.includes(JSON.stringify(requestedType))&&(!wantFacade||JSON.parse(o.value).variant===2)&&(!params.has('variant')||JSON.parse(o.value).variant===Number(params.get('variant'))));if(/^(brick|stone|rounded)/.test(requested??'')&&specimen)$('part').value=specimen.value;else if(first)$('part').value=first.value;if(params.get('specimen')==='stairs')$('part').value='__stairs__';if(params.get('house')&&CATALOGUE_HOUSES.some(h=>h.id===params.get('house')))$('part').value='__house__'+params.get('house');if(params.get('catalogueOnly')==='1')for(const option of [...$('part').options])if(option.value.startsWith('__'))option.remove();await rebuild();}}catch(error){if(!disposed)$('status').textContent=error.message;}
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  const {mobileWidth, maxOffset, offsetFraction} = CAMERA_FRAMING;
+  if (innerWidth <= mobileWidth) {
+    camera.clearViewOffset();
+  } else {
+    const offset = Math.min(maxOffset, innerWidth * offsetFraction);
+    camera.setViewOffset(innerWidth, innerHeight, -offset, 0, innerWidth, innerHeight);
+  }
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+startFrameLoop(renderer, (elapsed, now) => {
+  browserPerf?.beginFrame(now);
+  if (client) {
+    client.advance(elapsed);
+    client.update(now);
+    view?.update();
+    tileView?.update();
+    tileView?.tick(elapsed);
+  } else if (world && floors) {
+    floorStep.advance(elapsed, step => {
+      floors.beforeStep(step);
+      world.step(step);
+      floors.afterStep();
+    });
+    view.update();
+  }
+  if (client || (world && floors)) {
+    for (const {mesh, body} of shots) {
+      mesh.position.copy(body.position);
+      mesh.quaternion.copy(body.quaternion);
+    }
+  }
+  view?.tick?.(elapsed);
+  controls.update();
+  camera.updateMatrixWorld();
+  fxFrustum.setFromProjectionMatrix(fxMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  fx?.tick(elapsed);
+  browserPerf?.beforeRender();
+  renderer.render(scene, camera);
+  browserPerf?.afterRender(now);
+});
+function specimenLabel(entry) {
+  const material = entry.materialId === 'stone_rubble' ? 'Rounded stone'
+    : entry.materialId === 'stone_dressed' ? 'Stone block' : 'Brick';
+  const opening = entry.type.endsWith('window') ? 'window + lintel' : 'solid';
+  let technique = 'Bisect';
+  if (entry.variant === 2) technique = 'Revealing facade';
+  else if (entry.materialId === 'stone_rubble') technique = 'Authored cells';
+  else if (entry.variant === 0) technique = 'Geometry Nodes';
+  return ['TEST · ' + material, opening, '·', technique].join(' ');
+}
+
+function populateCatalogue(select, params) {
+  select.add(new Option('TEST · Destructible stairs + landing', STAIRS_OPTION));
+  for (const house of CATALOGUE_HOUSES) {
+    select.add(new Option(house.name, HOUSE_OPTION_PREFIX + house.id));
+  }
+
+  const choices = new Set();
+  let firstWall, requestedSpecimen;
+  const specimen = params.get('specimen');
+  const requested = specimen?.replace(/^facade-/, '');
+  const wantsFacade = specimen?.startsWith('facade-');
+  let requestedType = 'test.masonry.';
+  if (requested?.startsWith('rounded')) requestedType += 'rounded.';
+  else if (requested?.startsWith('stone')) requestedType += 'stone.';
+  requestedType += requested?.endsWith('window') ? 'window' : 'solid';
+
+  for (const entry of library.catalogue.assets) {
+    const {type, materialId, sizeMm, variant} = entry;
+    const isSpecimen = type.startsWith('test.masonry.');
+    const key = JSON.stringify(isSpecimen ? {type, materialId, sizeMm, variant} : {type, materialId, sizeMm});
+    if (choices.has(key)) continue;
+    choices.add(key);
+    const label = isSpecimen ? specimenLabel(entry) : type + ' · ' + materialId + ' · ' + sizeMm.join('×') + ' mm';
+    select.add(new Option(label, key));
+
+    if (type === 'wall.straight') firstWall ??= key;
+    if (type === requestedType && (!wantsFacade || variant === 2)
+      && (!params.has('variant') || variant === Number(params.get('variant')))) requestedSpecimen ??= key;
+  }
+
+  if (/^(brick|stone|rounded)/.test(requested ?? '') && requestedSpecimen) select.value = requestedSpecimen;
+  else if (firstWall) select.value = firstWall;
+  if (specimen === 'stairs') select.value = STAIRS_OPTION;
+  const house = params.get('house');
+  if (CATALOGUE_HOUSES.some(entry => entry.id === house)) select.value = HOUSE_OPTION_PREFIX + house;
+  if (params.get('catalogueOnly') === '1') {
+    for (const option of [...select.options]) {
+      if (option.value.startsWith('__')) option.remove();
+    }
+  }
+}
+
+try {
+  library = await loadPartLibrary(import.meta.env.BASE_URL + 'assets/structures/manifest.json');
+  if (disposed) {
+    library.dispose();
+  } else {
+    const params = new URLSearchParams(location.search);
+    $('surfaces').checked = params.get('surfaces') !== '0';
+    library.setSurfaceDetail($('surfaces').checked);
+    populateCatalogue($('part'), params);
+    await rebuild();
+  }
+} catch (error) {
+  if (!disposed) $('status').textContent = error.message;
+}
 

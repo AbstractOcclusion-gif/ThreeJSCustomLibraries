@@ -10,7 +10,7 @@ import {createDemoLife} from '../kit/life.js';
 import {createDemoStructures} from '../kit/structures.js';
 import {createCameraShots} from '../kit/shots.js';
 import {createFixedStep} from '../../src/core/fixed-step.js';
-import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS, onLeave} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {loadOceanLace} from '../kit/assets.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -221,8 +221,7 @@ Surface at camera ${a.valid ? a.height.toFixed(2) + ' m' : 'sampling…'}${float
 });
 document.body.dataset.ready = 'true';
 window.oceanBench = {ocean, weather, scene, camera, renderer, probes, island, structures, controls, shots};
-addEventListener('pagehide', event => {
-  if (event.persisted) return;
+onLeave(() => {
   disposed = true;
   renderer.setAnimationLoop(null);
   unbindResize();

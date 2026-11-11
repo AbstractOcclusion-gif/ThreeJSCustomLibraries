@@ -9,7 +9,7 @@ import {createDataTexture} from '../../src/core/data-texture.js';
 import '../bench.css';
 import '../ui-demo.js';
 import {detectAssets} from '../kit/assets.js';
-import {bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
+import {bindResize, startFrameLoop, STATUS_REFRESH_MS, onLeave} from '../kit/page.js';
 
 const $ = id => document.getElementById(id), errors = [], events = [];
 function showError(error) { errors.push(String(error)); $('error').hidden = false; $('error').textContent = String(error); console.error(error); }
@@ -178,5 +178,5 @@ startFrameLoop(renderer, (dt, now) => {
     syncControls(); if ($('developer').open) devPanel.refresh(); lastUI = now;
   }
 });
-addEventListener('pagehide', () => { renderer.setAnimationLoop(null); unbindResize(); devPanel.dispose(); view.dispose(); controls.dispose(); geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); soilMap.dispose(); renderer.dispose(); }, {once: true});
+onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); devPanel.dispose(); view.dispose(); controls.dispose(); geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); soilMap.dispose(); renderer.dispose(); });
 window.weatherBench = {system, view, devPanel, renderer, scene, camera, events, errors};

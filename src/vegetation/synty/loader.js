@@ -13,21 +13,38 @@ const getJson = async (url, fetcher, signal) => { const r = await fetcher(url, {
 
 export async function loadSyntyVegetation({baseUrl, loader = new THREE.TextureLoader(), fetch: fetcher = globalThis.fetch} = {}) {
   if (!baseUrl) throw Error('loadSyntyVegetation needs baseUrl');
-  const [grassLods, parts, atlasLayout, atlas] = await Promise.all([
+  const [atlasResult, ...dataResults] = await Promise.allSettled([
+    loader.loadAsync(join(baseUrl, 'specimen-atlas.png')),
     getJson(join(baseUrl, 'grass.json'), fetcher), getJson(join(baseUrl, 'specimens.json'), fetcher),
-    getJson(join(baseUrl, 'specimen-atlas.json'), fetcher), loader.loadAsync(join(baseUrl, 'specimen-atlas.png')),
+    getJson(join(baseUrl, 'specimen-atlas.json'), fetcher),
   ]);
+  const failure = dataResults.find(result => result.status === 'rejected') ?? (atlasResult.status === 'rejected' ? atlasResult : null);
+  if (failure) {
+    if (atlasResult.status === 'fulfilled') atlasResult.value.dispose();
+    throw failure.reason;
+  }
+  const [grassLods, parts, atlasLayout] = dataResults.map(result => result.value);
+  const atlas = atlasResult.value;
   atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = 4;
-  const [grassRect, ...specimenRects] = atlasLayout;
-  const [u, v, width, height] = grassRect;
-  const grassGeometries = grassLods.map(({position, uv, bend}) => {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv.map((value, index) => index % 2 === 0 ? u + width * value : v + height * value), 2));
-    geometry.setAttribute('bendWeight', new THREE.Float32BufferAttribute(bend, 1));
-    geometry.computeVertexNormals();
-    return geometry;
-  });
+  const grassGeometries = [];
+  let specimenRects;
+  try {
+    const [grassRect, ...rects] = atlasLayout;
+    specimenRects = rects;
+    const [u, v, width, height] = grassRect;
+    for (const {position, uv, bend} of grassLods) {
+      const geometry = new THREE.BufferGeometry();
+      grassGeometries.push(geometry);
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv.map((value, index) => index % 2 === 0 ? u + width * value : v + height * value), 2));
+      geometry.setAttribute('bendWeight', new THREE.Float32BufferAttribute(bend, 1));
+      geometry.computeVertexNormals();
+    }
+  } catch (error) {
+    for (const geometry of grassGeometries) geometry.dispose();
+    atlas.dispose();
+    throw error;
+  }
   const atlasRects = Object.fromEntries(['bushTrunk', 'birchTrunk', 'leaf', 'branch'].map((name, index) => [name, specimenRects[index]]));
   return {atlas, grassGeometries, parts, atlasRects, atlasLayout, dispose() { for (const g of grassGeometries) g.dispose(); atlas.dispose(); }};
 }

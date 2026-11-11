@@ -84,7 +84,7 @@ everything in the last column is optional and has a calm, clear-noon default.
 | `flocking` | — | three | `modelsUrl` / `models`, `surfaceHeight` / `floorHeight` callbacks |
 | `surface` | — | three | — |
 | `terrain` | `surface` | three | `lighting` hook (coast), water `shoreBinding` |
-| `vegetation` | — | three | `environment` in `grass.update` / `specimens.update` |
+| `vegetation` | — | three | `environment` (`setEnvironment` on grass and specimens, or per call in `update`) |
 | `trees` | — | three | `lighting` hook, `environment` (`setEnvironment`) |
 | `boundaries` | `trees` (hedges) | three | `lighting` hook, `environment` (`setEnvironment`), `assets` |
 | `cable` | — | three, cannon-es | `environment` (`setEnvironment`) |
@@ -93,8 +93,19 @@ everything in the last column is optional and has a calm, clear-noon default.
 | `ui` | — | none | load `three-kit/ui/theme.css` |
 
 `particles/water` takes `THREE` as an argument (rather than importing it) so its tests can inject a fake loader.
-Per-frame methods are named `update(dt)`; `tick` remains as an alias where it existed. The camera director's `tick(dt)` is a
-different thing: it returns the time scale.
+Conventions:
+- `update(dt)` is the per-frame call, with variable frame time. `step(dt)` advances exactly one fixed physics step (boat,
+  buoyancy, spray pump, sim-window, sphere interactor); drive it with `createFixedStep`. Cable's `beforeStep` / `afterStep`
+  wrap the host's own `world.step`. Fire, chips, puffs and prefabs expose `tick` as an alias of `update`.
+  Destruction views and debris effects also expose `tick(dt)` to advance effects. The camera director's `tick(dt)`
+  returns the time scale.
+- Most `create*()` factories return plain objects. Use `new` for classes such as `LeavedTrees`, `OceanCoastTerrain`,
+  `Motes`, `SprayPump`, the ocean internals and the weather simulation's `Weather` / `DayCycle`.
+- Asset-loading factories such as `createPuffs`, `createParticlePrefab`, `createFishFlock`, `createDebrisFX` and
+  `loadPartLibrary` return promises.
+- Objects that react to the environment take it with `setEnvironment(env)` and hold it by reference; some also accept it
+  as a creation option or per call. The exception is `createPrecipitation`, which reads it per call in
+  `update(dt, environment, position)` (the weather adapter drives it).
 
 ### Basic stage
 

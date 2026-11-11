@@ -22,10 +22,11 @@ export function createRenderScope(renderer, {clearColor = true, scissorOff = tru
       return draw();
     } finally {
       depth--;
-      renderer.setRenderTarget(s.target, s.face, s.level);
       renderer.setViewport(s.viewport);
       renderer.setScissor(s.scissor);
       renderer.setScissorTest(s.scissorTest);
+      // Rebinding applies the target-local viewport and scissor in target pixels.
+      renderer.setRenderTarget(s.target, s.face, s.level);
       if (clearColor) renderer.setClearColor(s.color, s.alpha);
       s.target = null;
     }

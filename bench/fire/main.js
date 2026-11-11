@@ -4,7 +4,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createFireSystem} from '../../src/fire/index.js';
 import {createParticlePrefab} from '../../src/particles/index.js';
-import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import {environmentControls} from '../kit/controls.js';
 import '../bench.css';
@@ -131,8 +131,7 @@ startFrameLoop(renderer, (dt, now) => {
 });
 document.body.dataset.ready = 'true';
 
-window.addEventListener('pagehide', event => {
-  if (event.persisted) return;
+onLeave(() => {
   renderer.setAnimationLoop(null);
   for (const {fx, plank, trim} of crates) { fx.dispose(); plank.dispose(); trim.dispose(); }
   for (const resource of [cube, ground.geometry, ground.material]) resource.dispose();

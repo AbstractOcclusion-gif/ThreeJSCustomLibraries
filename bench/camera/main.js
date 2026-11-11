@@ -6,7 +6,7 @@ import {createCameraCollision} from '../../src/camera/collision.js';
 import {createCameraPanel} from '../../src/camera/panel.js';
 import '../../src/camera/panel.css';
 import '../ui-demo.js';
-import {bindResize, startFrameLoop} from '../kit/page.js';
+import {bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 const renderer=new T.WebGLRenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;document.body.append(renderer.domElement);
 const scene=new T.Scene();scene.background=new T.Color('#a7c3c9');scene.add(new T.HemisphereLight(0xffffff,0x617451,2));const sun=new T.DirectionalLight(0xffe6c2,2.5);sun.position.set(6,12,8);scene.add(sun);
 const camera=new T.PerspectiveCamera(55,innerWidth/innerHeight,.1,300);camera.position.set(12,8,-14);
@@ -30,4 +30,4 @@ startFrameLoop(renderer,dt=>{
  scene.updateMatrixWorld(true);post.render(scene,camera,dt);panel.update();
 });
 const unbindResize=bindResize(renderer,camera);
-addEventListener('pagehide',()=>{renderer.setAnimationLoop(null);unbindResize();panel.dispose();if(replay.active)replay.end(camera);replay.clear();post.dispose();const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[])materials.add(m);});for(const g of geometries)g.dispose();for(const m of materials)m.dispose();scene.clear();sun.dispose();renderer.dispose();},{once:true});
+onLeave(() => {renderer.setAnimationLoop(null);unbindResize();panel.dispose();if(replay.active)replay.end(camera);replay.clear();post.dispose();const geometries=new Set(),materials=new Set();scene.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[])materials.add(m);});for(const g of geometries)g.dispose();for(const m of materials)m.dispose();scene.clear();sun.dispose();renderer.dispose();});

@@ -100,7 +100,32 @@ export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIsland
   if(slot>=8192)throw Error('Jolt structure body budget exceeded');setup.mCollisionGroup.SetGroupFilter(groupFilter);setup.mCollisionGroup.SetGroupID(1);setup.mCollisionGroup.SetSubGroupID(slot);setup.mUserData=b.id+1;setup.mFriction=b.material?.friction>=0?b.material.friction:.5;setup.mRestitution=b.material?.restitution>=0?b.material.restitution:.03;
   setup.mLinearDamping=-Math.log(1-b.linearDamping);setup.mAngularDamping=-Math.log(1-b.angularDamping);setup.mMaxLinearVelocity=500;setup.mMaxAngularVelocity=100;setup.mMotionQuality=b.mass>0&&b.shapes[0] instanceof C.Sphere&&b.hubIndex===undefined?J.EMotionQuality_LinearCast:J.EMotionQuality_Discrete;
   put(setup.mLinearVelocity,b.velocity);put(setup.mAngularVelocity,b.angularVelocity);
-  if(b.mass>0){setup.mMassPropertiesOverride.mMass=b.mass;if(b._massTensor){setup.mOverrideMassProperties=J.EOverrideMassProperties_MassAndInertiaProvided;const matrix=new J.Mat44(),column=new J.Vec4(0,0,0,0);for(let c=0;c<4;c++){column.Set(c<3?b._massTensor[c]:0,c<3?b._massTensor[3+c]:0,c<3?b._massTensor[6+c]:0,c===3?1:0);matrix.SetColumn4(c,column);}setup.mMassPropertiesOverride.mInertia=matrix;J.destroy(column);J.destroy(matrix);}else{setup.mOverrideMassProperties=J.EOverrideMassProperties_CalculateInertia;b.shapes[0].calculateLocalInertia(b.mass,b.inertia);b.invInertia.set(b.inertia.x?1/b.inertia.x:0,b.inertia.y?1/b.inertia.y:0,b.inertia.z?1/b.inertia.z:0);b.updateInertiaWorld(true);}}
+  if (b.mass > 0) {
+   setup.mMassPropertiesOverride.mMass = b.mass;
+   if (b._massTensor) {
+    setup.mOverrideMassProperties = J.EOverrideMassProperties_MassAndInertiaProvided;
+    const matrix = new J.Mat44();
+    const column = new J.Vec4(0, 0, 0, 0);
+    try {
+     for (let axis = 0; axis < 3; axis++) {
+      column.Set(b._massTensor[axis], b._massTensor[3 + axis], b._massTensor[6 + axis], 0);
+      matrix.SetColumn4(axis, column);
+     }
+     column.Set(0, 0, 0, 1);
+     matrix.SetColumn4(3, column);
+     setup.mMassPropertiesOverride.mInertia = matrix;
+    } finally {
+     J.destroy(column);
+     J.destroy(matrix);
+    }
+   } else {
+    setup.mOverrideMassProperties = J.EOverrideMassProperties_CalculateInertia;
+    b.shapes[0].calculateLocalInertia(b.mass, b.inertia);
+    const {x, y, z} = b.inertia;
+    b.invInertia.set(x ? 1 / x : 0, y ? 1 / y : 0, z ? 1 / z : 0);
+    b.updateInertiaWorld(true);
+   }
+  }
   const native=api.CreateBody(setup);J.destroy(setup);api.AddBody(native.GetID(),b.mass>0?J.EActivation_Activate:J.EActivation_DontActivate);bodies.set(b,{native,slot,partIDs,partMask,dynamic:b.mass>0,layer:layer(b),radius:b.shapes[0]?.radius,linearDamping:b.linearDamping,angularDamping:b.angularDamping,v:b.velocity.clone(),w:b.angularVelocity.clone()});byId.set(b.id+1,b);byNativeId.set(native.GetID().GetIndexAndSequenceNumber(),b);
  }
  function removeBody(b){const record=bodies.get(b);if(!record)return;releaseAround(b);if(record.frozen)frozenCount--;byNativeId.delete(record.native.GetID().GetIndexAndSequenceNumber());api.RemoveBody(record.native.GetID());api.DestroyBody(record.native.GetID());freeSlots.push(record.slot);bodies.delete(b);byId.delete(b.id+1);}

@@ -1,3 +1,4 @@
+import {onLeave} from '../kit/page-lifecycle.js';
 import './mobile-controls.css';
 
 // Reuse each page's controls and handlers; only the panel's visibility changes.
@@ -8,6 +9,6 @@ export function setupMobileControls(panel,button){
  const change=()=>setOpen(!small.matches);
  small.addEventListener('change',change);change();
  const dispose=()=>{small.removeEventListener('change',change);button.onclick=null;};
- addEventListener('pagehide',dispose,{once:true});
+ onLeave(dispose);
 }
 

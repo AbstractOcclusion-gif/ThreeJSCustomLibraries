@@ -4,6 +4,7 @@ import {createPuffs} from '../../particles/puffs.js';
 export {createChips,createPuffs};
 // Mass-driven debris burst tuning: chips per kilogram with bounds, chip size by mass, pop strength by speed.
 const BURST={perKg:.25,min:4,max:40,sizeRefKg:60,gMin:4,gMax:30,gPerSpeed:2};
+const LANDING_CELL_METERS = .6;
 const COLOURS={slab:0x9a9a9a,wall:0xb8b0a4,window:0xbfe3ee,default:0x9a9a9a};
 // Debris effects for the structure library: chips (instanced), dust and smoke puffs (sprites). The host
 // feeds it simulation events; it never touches physics. Textures load from the stunt FX assets.
@@ -34,7 +35,27 @@ export async function createDebrisFX(scene,{chips:chipOptions={},puffs:puffOptio
    // the same panel/step must not create a second cloud at the chunk centre.
    const hits=new Set(events.filter(e=>e.type==='floor:impact'&&e.kind==='brick').map(e=>`${e.panelId}:${e.time}`)),cells=new Set();
    const ordered=[...events.filter(e=>e.type!=='floor:landing'),...events.filter(e=>e.type==='floor:landing')];
-   for(const e of ordered){if(!e.point)continue;if(e.type==='floor:chips')this.chipsBurst(e);else if(e.type==='floor:impact')this.impact(e);else if(e.type==='floor:fractured'&&!(e.kind==='brick'&&hits.has(`${e.panelId}:${e.time}`)))this.fracture(e);else if(e.type==='floor:landing'){const key=e.point.map(n=>Math.floor(n/.6)).join(':');if(!cells.has(key)){cells.add(key);this.landing(e);}}}
+   for (const event of ordered) {
+    if (!event.point) continue;
+    switch (event.type) {
+     case 'floor:chips':
+      this.chipsBurst(event);
+      break;
+     case 'floor:impact':
+      this.impact(event);
+      break;
+     case 'floor:fractured':
+      if (event.kind !== 'brick' || !hits.has(`${event.panelId}:${event.time}`)) this.fracture(event);
+      break;
+     case 'floor:landing': {
+      const cell = event.point.map(coordinate => Math.floor(coordinate / LANDING_CELL_METERS)).join(':');
+      if (cells.has(cell)) break;
+      cells.add(cell);
+      this.landing(event);
+      break;
+     }
+    }
+   }
   },
   tick(dt){accepted=0;chips.tick(dt);for(const pool of pools.values())pool.tick(dt);puffs.tick(dt); },
   get activeChips(){return activeChips();},

@@ -9,7 +9,7 @@ import {createDataTexture} from '../../src/core/data-texture.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createChannelSurface, createFlowBake, createFreezeTexture, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
-import {benchRenderer, bindResize, startFrameLoop} from '../kit/page.js';
+import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
@@ -430,8 +430,7 @@ startFrameLoop(renderer, (dt, now) => {
 }});
 document.body.dataset.ready = 'true';
 window.allToolsDemo = {scene, camera, renderer, controls, weather, life, structures, shots};
-addEventListener('pagehide', event => {
- if (event.persisted) return;
+onLeave(() => {
  renderer.setAnimationLoop(null);
  unbindResize();
  weather.view.dispose();
@@ -456,4 +455,4 @@ addEventListener('pagehide', event => {
  tracks.dispose();
  for (const resource of [...proceduralLayers, detail, groundMaterial, rockMaterial, plainRock, rockGeometry]) resource.dispose();
  renderer.dispose();
-}, {once: true});
+});
