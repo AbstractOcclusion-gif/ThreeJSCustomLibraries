@@ -25,6 +25,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
   bankSunColor: {value: new THREE.Color()},
   bankSunStrength: {value: 0},
   bankSettings: {value: new THREE.Vector4()},
+  bankShape: {value: new THREE.Vector4()},
   bankOffset: {value: new THREE.Vector2()},
   bankTime: {value: 0},
   wakeHead: {value: new THREE.Vector4()},
@@ -48,13 +49,13 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    uniform float shaftStrength;
    uniform vec3 bankColor, bankSunColor;
    uniform float bankSunStrength;
-   uniform vec4 bankSettings;
+   uniform vec4 bankSettings;   // density, falloff height (m), noise scale (m), base elevation (m)
+   uniform vec4 bankShape;      // coverage, puffiness, sun glow, samples per pixel
    uniform vec2 bankOffset;
    uniform float bankTime;
    uniform vec4 wakeHead;
    uniform vec3 wakeTail;
    ${CLOUD_GLSL}
-   const int VIEW_STEPS = 16;
 
    float bankHash(vec3 p) {
     p = fract(p * .1031);
@@ -73,14 +74,32 @@ export function createSunScattering(cloudUniforms, sunDirection) {
          mix(bankHash(cell+y+z), bankHash(cell+x+y+z), f.x), f.y), f.z);
    }
 
-   float bankExtinction(vec3 p) {
+   // Extinction per metre. light (0..1) is how much sky and sun reach the sample: tops are bright, dense cores dark.
+   float bankExtinction(vec3 p, out float light) {
+    const float billowFrequency = 4.3;     // billows per large fog shape
+    const float billowWeight = .34;        // how far billows carve the shape at full puffiness
+    const float lowestTop = .4;            // top height of the thinnest fog, as a share of the falloff height
+    const float topRange = 1.3;            // extra top height under the thickest fog
+    const vec2 softEdge = vec2(.36, .12);  // shape range from clear to full fog: smooth blanket, sharp puffs
+    const float coreShade = .38;           // light left in the densest core
+    light = 1.0;
     float elevation = (p.y - bankSettings.w) / bankSettings.y;
-    float h = max(0.0, elevation);
-    if (h >= 3.0) return 0.0;
+    if (elevation >= 3.0) return 0.0;
+    float coverage = bankShape.x, puffiness = bankShape.y;
     vec3 q = vec3((p.xz - bankOffset) / bankSettings.z, elevation * .6);
     float roll = bankNoise(q * .83 + vec3(13.0, 7.0, -bankTime * .075)) - .5;
     q += vec3(.28, -.2, .7) * roll;
-    float shape = bankNoise(q) * .72 + bankNoise(q * 2.03 + vec3(17.0, 17.0, 17.0 - bankTime * .12)) * .28;
+    float body = bankNoise(q) * .72 + bankNoise(q * 2.03 + vec3(17.0, 17.0, 17.0 - bankTime * .12)) * .28;
+    // Billows: rounded lumps where the fine noise folds, like the tops of cumulus.
+    float billow = 1.0 - abs(bankNoise(q * billowFrequency + vec3(5.0, 31.0, bankTime * .2)) * 2.0 - 1.0);
+    float shape = body + (billow - .5) * billowWeight * puffiness;
+    // Thick fog stands taller than thin fog, so the top is lumpy instead of level.
+    float top = mix(1.0, lowestTop + topRange * body, puffiness);
+    float h = max(0.0, elevation) / top;
+    float start = mix(.78, .18, coverage);
+    float fill = smoothstep(start, start + mix(softEdge.x, softEdge.y, puffiness), shape) * exp(-h * h);
+    float rise = clamp(h, 0.0, 1.0);
+    light = mix(coreShade, 1.0, rise) * mix(1.0, coreShade, fill * puffiness * (1.0 - rise));
     float wake = 1.0;
     if (wakeHead.w > 0.0) {
      vec3 axis = wakeTail - wakeHead.xyz;
@@ -89,7 +108,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
      float distanceToWake = length(relative - axis * t) / wakeHead.w;
      wake -= .9 * (1.0 - t) * (1.0 - smoothstep(.2, 1.0, distanceToWake));
     }
-    return bankSettings.x * exp(-h * h) * smoothstep(.36, .72, shape) * wake;
+    return bankSettings.x * fill * wake;
    }
 
    void main() {
@@ -138,22 +157,25 @@ export function createSunScattering(cloudUniforms, sunDirection) {
     float transmittance = 1.0;
     float bankTransmittance = 1.0;
     float bankSun = 0.0;
+    float bankShade = 0.0;
     float bankLight = bankSunStrength * smoothstep(.01, .06, sunDirection.y);
     float scattering = 0.0;
-    for (int i = 0; i < VIEW_STEPS; i++) {
-     float a = float(i) / float(VIEW_STEPS);
-     float b = float(i + 1) / float(VIEW_STEPS);
+    int steps = int(bankShape.w);
+    for (int i = 0; i < steps; i++) {
+     float a = float(i) / bankShape.w;
+     float b = float(i + 1) / bankShape.w;
      // Keep nearby fog detail when the depth ray runs all the way to the sky.
      if (bankSettings.x > 0.0) { a *= a; b *= b; }
      float stepLength = (b - a) * distanceToSurface;
      vec3 p = origin + direction * (a * distanceToSurface + offset * stepLength);
-     float bankT = 1.0;
-     if (bankSettings.x > 0.0) bankT = exp(-bankExtinction(p) * stepLength);
+     float bankT = 1.0, bankLit = 1.0;
+     if (bankSettings.x > 0.0) bankT = exp(-bankExtinction(p, bankLit) * stepLength);
      float bankOpacity = 1.0 - bankT;
      float visibility = 0.0;
      if (shaftStrength > 0.0 || (bankLight > 0.0 && bankOpacity > 0.0)) visibility = cloudGroundTransmittance(p, sunDirection);
      // Keep a broad warm contribution from the sky in cloud shadow.
-     bankSun += bankTransmittance * bankOpacity * mix(.35, 1.0, visibility);
+     bankSun += bankTransmittance * bankOpacity * bankLit * mix(.35, 1.0, visibility);
+     bankShade += bankTransmittance * bankOpacity * bankLit;
      if (shaftStrength > 0.0) {
       float localT = exp(-.0025 * exp(-max(p.y, 0.0) / 95.0) * stepLength);
       scattering += transmittance * bankTransmittance * (1.0 - localT) * visibility;
@@ -161,8 +183,8 @@ export function createSunScattering(cloudUniforms, sunDirection) {
      }
      bankTransmittance *= bankT;
     }
-    vec3 fogged = mix(bankColor, color, bankTransmittance);
-    fogged += (bankSunColor - bankColor) * (bankSun * bankLight * mix(.7, 1.0, smoothstep(-.2, .9, mu)));
+    vec3 fogged = color * bankTransmittance + bankColor * bankShade;
+    fogged += max(bankSunColor - bankColor, 0.0) * (bankSun * bankLight * bankShape.z * mix(.7, 1.0, smoothstep(-.2, .9, mu)));
     gl_FragColor = vec4(fogged + scatterColor * (scattering * phase * horizonFade * .16), 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -175,7 +197,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
  const screenCamera = new THREE.Camera();
  const size = new THREE.Vector2();
  return {
-  render(renderer, scene, camera, color, strength, fogColor, sunColor, sunStrength, banks, offset, time, wakeHead, wakeTail, input) {
+  render(renderer, scene, camera, color, strength, fogColor, sunColor, sunStrength, banks, shape, offset, time, wakeHead, wakeTail, input) {
    if (!input) {
     renderer.getDrawingBufferSize(size);
     if (size.x === 0 || size.y === 0) return;
@@ -197,6 +219,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    uniforms.bankSunColor.value.copy(sunColor);
    uniforms.bankSunStrength.value = sunStrength;
    uniforms.bankSettings.value.copy(banks);
+   uniforms.bankShape.value.copy(shape);
    uniforms.bankOffset.value.copy(offset);
    uniforms.bankTime.value = time;
    uniforms.wakeHead.value.copy(wakeHead);

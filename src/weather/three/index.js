@@ -20,7 +20,10 @@ const SKY_PRESET=Object.freeze({clear:0,overcast:2,night:3,nightDaylight:.05,ove
 // lights at moonShare of the night light; hemisphere = (base + sunGain x sunlight) x the night-to-day level.
 const LIGHT=Object.freeze({minDaylight:.02,skyAmbient:.3,moonShare:.55,ambientBase:.3,ambientSunGain:.7});
 const VISIBILITY_TRANSMITTANCE=.02;   // exponential fog keeps 2 % of the light at the weather's visibility distance
-const BANK=Object.freeze({drift:.25,base:.55,max:2});   // fog bank: share of the wind it drifts at; density x min(max, base + bank)
+// Fog bank: density x min(max, base + bank). Its billows churn at churn[0] + churn[1] x wind (m/s) times real time.
+// Its colour leans sunShare of the way from the ambient sky toward the sun tint, so banks warm up at dusk.
+const BANK=Object.freeze({base:.55,max:2,churn:[.6,.07],sunShare:.35});
+const SHAFT_STEPS=16;                 // air samples per pixel when only the sun shafts are drawn
 const SHAFT_MIN_SUN=.01;              // sun direction y: below this no sun shafts or bank glow
 // Lightning: automatic flashes above stormFrom storm weight, distance [min, span] m, interval x [min, span], flash seconds;
 // a strike starts strikeAbove m over the hit or cloudShare into the cloud layer; the bolt strength is divided by boltScale.
@@ -51,7 +54,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  const dynamic=new DynamicSky(settings,uniforms,{renderer,camera:{position:worldPosition},environment:environment??defaultEnvironment,assetBaseUrl:assets,fetch,loadTexture});
  const cloudShadows=createCloudShadows(dynamic.cloudUniforms);
  let scattering;
- const bankOffset=new THREE.Vector2(),bankSettings=new THREE.Vector4();
+ const bankOffset=new THREE.Vector2(),bankSettings=new THREE.Vector4(),bankShape=new THREE.Vector4(),bankColor=new THREE.Color(),bankAmbient=new THREE.Color();
  const wakeHead=new THREE.Vector4(),wakeTail=new THREE.Vector3();
  let bankTime=0;
  let rain=precipitationConfig===false?null:createPrecipitation(group,precipitationConfig);
@@ -127,8 +130,11 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    shared.light.copy(lightTint).multiplyScalar(ambientLight);shared.daylight=d.daylight;shared.rain=w.rain;shared.snow=w.snow;
    if(look.fog)fogObject.density=Math.sqrt(-Math.log(VISIBILITY_TRANSMITTANCE))*w.density/(w.visibility*look.visibilityScale);
    if(look.heightFog){
-    bankTime+=dt;
-    const heading=THREE.MathUtils.degToRad(w.windHeading),drift=w.wind*dt*BANK.drift;
+    bankTime+=dt*(BANK.churn[0]+BANK.churn[1]*w.wind);
+    const heading=THREE.MathUtils.degToRad(w.windHeading),drift=w.wind*dt*look.bankDrift;
+    // The sky lights the bank: its ambient colour, warmed by the sun tint, at the fog's own brightness.
+    bankAmbient.copy(hemi.color).lerp(sunTint,BANK.sunShare*d.daylight).multiplyScalar(ambientLight);
+    bankColor.copy(fogObject.color).lerp(bankAmbient,look.bankAmbientTint);
     bankOffset.x+=Math.cos(heading)*drift;bankOffset.y+=Math.sin(heading)*drift;
    }
    rain?.update(dt,shared,worldPosition);
@@ -175,8 +181,9 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    }
    scattering??=createSunScattering(dynamic.cloudUniforms,sunDir);
    bankSettings.set(bankDensity,look.bankHeight,look.bankScale,look.bankLevel);
+   bankShape.set(look.bankCoverage,look.bankPuffiness,look.bankSunGlow,bankDensity>0?look.bankSteps:SHAFT_STEPS);
    const bankSunStrength=bankDensity>0&&sunDir.y>SHAFT_MIN_SUN&&!system.day.moonLit?Math.min(1,Math.sqrt(sun.intensity/APPEARANCE_DEFAULTS.sunIntensity)):0;
-   scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,fogObject.color,sun.color,bankSunStrength,bankSettings,bankOffset,bankTime,wakeHead,wakeTail,input);
+   scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,look.heightFog?bankColor:fogObject.color,sun.color,bankSunStrength,bankSettings,bankShape,bankOffset,bankTime,wakeHead,wakeTail,input);
   },
   dispose(){
    if(disposed)return;disposed=true;cloudShadows.dispose();bolt?.dispose();scattering?.dispose();dynamic.dispose();rain?.dispose();dome.geometry.dispose();dome.material.dispose();scene.remove(group);

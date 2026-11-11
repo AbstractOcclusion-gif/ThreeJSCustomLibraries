@@ -58,13 +58,19 @@ export const SKY_FIELDS={
   captureInterval:number('Sky capture interval · s',.05,30,.05),lightingInterval:number('Lighting refresh interval · s',.1,60,.1),
  },
 };
-export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0});
+export const APPEARANCE_DEFAULTS=Object.freeze({fog:true,fogColor:'#bcd3ce',visibilityScale:1,sunColor:'#fff0d5',sunIntensity:2.7,hemiColor:'#c9e0ef',groundColor:'#53634b',hemiIntensity:1.2,cloudShadowStrength:1,sunShafts:false,shaftStrength:1,heightFog:false,bankDensity:.025,bankHeight:16,bankScale:100,bankLevel:0,bankCoverage:.55,bankPuffiness:.65,bankDrift:.5,bankAmbientTint:.7,bankSunGlow:1,bankSteps:24});
 export const APPEARANCE_FIELDS={
  cloudShadowStrength:number('Surface cloud shadow strength',0,1,.05,'Applies to materials registered as cloud shadow receivers.'),
  sunShafts:bool('Volumetric sunlight'),shaftStrength:number('Sun shaft strength',0,4,.05),
  heightFog:bool('3D height fog'),bankDensity:number('Bank density',0,.2,.001),
  bankHeight:number('Bank falloff height · m',1,200,1),bankScale:number('Bank noise scale · m',10,1000,1),
  bankLevel:number('Bank base elevation · m',-1000,1000,1),
+ bankCoverage:number('Bank coverage',0,1,.01,'How much of the ground the banks cover: 0 scattered wisps, 1 one blanket.'),
+ bankPuffiness:number('Bank puffiness',0,1,.01,'0 is a smooth blanket; 1 gives billows with lumpy, sharply lit tops.'),
+ bankDrift:number('Bank wind drift',0,1.5,.01,'Share of the wind speed the banks travel at.'),
+ bankAmbientTint:number('Bank ambient tint',0,1,.01,'How far the bank colour follows the sky light and the sun tint instead of the fog color.'),
+ bankSunGlow:number('Bank sun glow',0,3,.05,'Sunlight scattered by the banks.'),
+ bankSteps:choice('Bank quality · samples per pixel',[16,24,32,48]),
  fog:bool('Distance fog'),fogColor:color('Fog color'),visibilityScale:number('Visibility multiplier',.01,100,.01),
  sunColor:color('Sun / moon light color'),sunIntensity:number('Sun / moon base intensity',0,1000,.1),
  hemiColor:color('Ambient sky color'),groundColor:color('Ambient ground color'),hemiIntensity:number('Ambient base intensity',0,1000,.1),
