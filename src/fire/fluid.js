@@ -14,9 +14,10 @@ export const FLAME_FLUID_DEFAULTS = Object.freeze({
 // Units: the slice is 1 wide; speeds are slice widths per second.
 const SIM = Object.freeze({
   step: 1 / 60, maxSteps: 2,
-  buoyancy: 18,            // upward acceleration of fully hot air
-  cooling: 1.15,           // share of the heat lost per second: with buoyancy, this sets the flame height
+  buoyancy: 12,            // upward acceleration of fully hot air
+  cooling: 2.3,            // share of the heat lost per second: with buoyancy, this sets the flame height
   burnout: .22,            // heat lost per second whatever is left: thin wisps go out instead of lingering
+  edge: [.16, 6],          // within this share of the slice from its sides and top, heat is lost this much faster per second
   drag: .6,                // velocity lost per second
   curl: 1.4,               // vorticity confinement: how strongly small swirls are kept alive
   wind: 1.6,               // sideways acceleration at a wind input of 1
@@ -123,7 +124,10 @@ export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.re
       void main() {
         vec2 scale = vec2(1.0, 1.0 / uAspect);
         float heat = texture2D(tHeat, vUv - texture2D(tVelocity, vUv).xy * scale * uDt).r;
-        heat = max(0.0, heat * (1.0 - ${SIM.cooling.toFixed(2)} * uDt) - ${SIM.burnout.toFixed(2)} * uDt);
+        // A flame that nears the open border burns out before it gets there, so it is never cut off.
+        float border = min(min(vUv.x, 1.0 - vUv.x), 1.0 - vUv.y);
+        float quench = ${SIM.edge[1].toFixed(1)} * (1.0 - smoothstep(0.0, ${SIM.edge[0].toFixed(2)}, border));
+        heat = max(0.0, heat * (1.0 - (${SIM.cooling.toFixed(2)} + quench) * uDt) - ${SIM.burnout.toFixed(2)} * uDt);
         float along = (vUv.x - uSource.x) / uSource.y;
         float band = (1.0 - smoothstep(.75, 1.0, abs(along))) * (1.0 - smoothstep(0.0, ${SIM.sourceRows.toFixed(3)}, vUv.y));
         // Fuel does not burn evenly: hot spots wander along the band.
