@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {createTerrainDrainage, createTerrainField, valueNoise, OceanCoastTerrain} from '../../src/terrain/index.js';
 import {createTerrainRunoff} from '../../src/terrain/runoff.js';
+import {createTrackMask} from '../../src/surface/index.js';
 import {createLighting} from '../../src/core/lighting.js';
 
 test('terrain field validates its inputs, samples heights inside its bounds and disposes', () => {
@@ -145,6 +146,37 @@ test('melting removes snow from a packed rut and leaves the underlying soil unch
   assert.equal(field.snowCover.value, false);
   assert.equal(field.heightAt(4, 4), soil);
  } finally {
+  field.dispose();
+ }
+});
+
+test('a shallow downhill rut carries visible runoff below the general contributing-area threshold', () => {
+ const resolution = 33, span = 8, maskResolution = 128;
+ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => (index % resolution) * .04);
+ const field = createTerrainField({size: [span, span], resolution: [resolution, resolution], heights, snowTrackRims: true});
+ const tracks = createTrackMask({origin: [0, 0], size: [span, span], resolution: maskResolution, directional: true});
+ const drainage = createTerrainDrainage(field);
+ const runoff = createTerrainRunoff({field, drainage, tracks, resolution: maskResolution});
+ try {
+  assert.ok(runoff.film.image.data.every(value => value === 0));
+  field.setSnowCover(true);
+  tracks.stamp({x: 2, z: 4}, {x: 6, z: 4}, .31);
+  for (let x = 2; x <= 6; x += .25) field.deform(x, 4, .5, .08);
+  field.flushDeformation();
+  drainage.rebuild();
+  runoff.rebuild();
+  const film = runoff.film.image.data;
+  const sampleFilm = (x, z) => film[Math.floor(z / span * maskResolution) * maskResolution + Math.floor(x / span * maskResolution)];
+  assert.ok(sampleFilm(4, 4) > 0);
+  assert.ok(sampleFilm(4.5, 4) > 0);
+  assert.ok(sampleFilm(5, 4) > 0);
+  assert.equal(sampleFilm(4, 3), 0);
+  assert.equal(tracks.sample(4, 4), 1);
+  assert.equal(tracks.sample(4, 3), 0);
+ } finally {
+  runoff.dispose();
+  drainage.dispose();
+  tracks.dispose();
   field.dispose();
  }
 });

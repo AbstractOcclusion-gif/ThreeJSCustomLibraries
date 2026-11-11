@@ -21,6 +21,7 @@ const TERRAIN = {span: 64, resolution: 257};
 const RELIEF = {ridgeHeight: 4.2, ridgeFrequency: [.14, .12], hillHeight: 2, hillFrequency: [.055, .07]};
 const SNOW_MELT = {metresPerSecond: .025, updateInterval: .3, bakeInterval: 1.5, runoffShare: .7};
 const TRACK = {radius: .8, spacing: .28, depth: .11, contrast: .5, maskResolution: 512};
+const WET_TRACK_BAKE_INTERVAL = 1.25; // seconds between flow-map refreshes while the ball rolls
 const FOOTSTEP_DEMO = {from: {x: 11, z: 11}, to: {x: 2, z: 4}};
 const BOULDER = {radius: 1.25, detail: 2, contactBand: .65, roughness: .87};
 const SNOW_CAP = {edgeHeight: .44, fullHeight: .78, thickness: .22, color: '#e4edf2', roughness: .83};
@@ -53,13 +54,14 @@ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
 const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0};
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
 const drainage = createTerrainDrainage(field);
-const runoff = createTerrainRunoff({field, drainage});
 let drainageDirty = false, meltDrainageDirty = false, meltFlowDirty = false, meltBakeElapsed = 0;
+let rollingBakeElapsed = 0;
 const {layerArray, detail, rock, snowMaterial} = await loadTerrainTextures(renderer, {snowDetail: true});
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;   // each puddle has its own local fill level
 const surfaceWeather = createSurfaceWeather();
 const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: TRACK.maskResolution, directional: true});
+const runoff = createTerrainRunoff({field, drainage, tracks});
 const rainAmount = {value: 0};
 const rills = {value: 1};
 const puddleFill = {value: 0};
@@ -265,7 +267,11 @@ startFrameLoop(renderer, (dt, now) => {
   if (meltDrainageDirty) meltBakeElapsed += dt;
   const meltNeedsBake = meltDrainageDirty && (!meltSupply || meltBakeElapsed >= SNOW_MELT.bakeInterval);
   const meltFlowNeedsBake = meltFlowDirty && !meltSupply;
-  if (!lastTrackPoint && !impacts.moving) {
+  const rolling = impacts.moving;
+  const hasWater = rainAmount.value > 0 || meltSupply > 0 || puddleFill.value > 0;
+  if (rolling && drainageDirty && hasWater) rollingBakeElapsed += dt;
+  else rollingBakeElapsed = 0;
+  if (!lastTrackPoint && (!rolling || rollingBakeElapsed >= WET_TRACK_BAKE_INTERVAL)) {
     if (drainageDirty || meltNeedsBake) {
       drainage.rebuild();
       meltDrainageDirty = false;
@@ -278,6 +284,7 @@ startFrameLoop(renderer, (dt, now) => {
       meltFlowDirty = false;
     }
     drainageDirty = false;
+    rollingBakeElapsed = 0;
   }
   controls.update(); stage.update(camera);
   const waterSupply = Math.min(1, rainAmount.value + meltSupply);

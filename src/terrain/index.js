@@ -286,7 +286,9 @@ export function createTerrainMaterial(parameters = {}, {
     #ifdef TERRAIN_RUNOFF_FILM
     runoffFilmCoverage = textureLod(terrainRunoffFilm, terrainUV, 0.0).r * terrainRunoffCoverage;
     const float wetSnowDarkening = .4;
-    snowCoverage *= 1.0 - runoffFilmCoverage * wetSnowDarkening;
+    const float packedRutWetness = .85;
+    float waterOverSnow = mix(wetSnowDarkening, packedRutWetness, track);
+    snowCoverage *= 1.0 - runoffFilmCoverage * waterOverSnow;
     #endif
     #ifdef TERRAIN_RUNOFF_MAP
     float runoffSlope = min(1.0, terrainRunoffHeight(terrainUV)) * (1.0 - snowCoverage);
@@ -324,7 +326,8 @@ export function createTerrainMaterial(parameters = {}, {
    .replace('if (wet > .45 && surfacePuddles > 0.0) {', `
     #ifdef TERRAIN_DRAINAGE
     if (terrainPuddleFill > 0.0) {
-     puddle = terrainPuddle(terrainGrid, terrainSize, vSurfaceWorld.y) * (1.0 - snowCoverage);
+     puddle = terrainPuddle(terrainGrid, terrainSize, vSurfaceWorld.y);
+     snowCoverage *= 1.0 - puddle;
     #else
     if (wet > .45 && surfacePuddles > 0.0) {
    `)

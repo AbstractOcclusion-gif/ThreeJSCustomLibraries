@@ -18,10 +18,11 @@ const FLOW = {
   endFade: .2,
   submergedDepth: .012,
 };
+const RUT = {trackCoverage: .2, sourceArea: 0, fullWidthArea: 5, radius: [.11, .23], highlightShare: .45};
 const HIGHLIGHT = {headRadius: .12, tailRadius: .085, tailSeconds: .22, tailStrength: .48};
 const {clamp, lerp, smoothstep} = MathUtils;
 
-export function createTerrainRunoff({field, drainage, resolution = 512, seed = 1}) {
+export function createTerrainRunoff({field, drainage, tracks, resolution = 512, seed = 1}) {
   const {x, y: z, z: width, w: depth} = field.bounds;
   const {data: heights, width: columns, height: rows} = field.heightMap.image;
   const stepX = width / (columns - 1), stepZ = depth / (rows - 1);
@@ -34,7 +35,7 @@ export function createTerrainRunoff({field, drainage, resolution = 512, seed = 1
   const sample = new Vector4();
   const beads = [];
   const links = new Map();
-  let starts = [], spawnCredit = 0, painted = false;
+  let starts = [], rutStarts = [], spawnCredit = 0, painted = false;
 
   function pointAt(index) {
     return {x: x + index % columns * stepX, z: z + Math.floor(index / columns) * stepZ};
@@ -46,16 +47,25 @@ export function createTerrainRunoff({field, drainage, resolution = 512, seed = 1
     highlights.clear();
     painted = false;
     links.clear();
+    rutStarts = [];
     for (let index = 0; index < receiver.length; index++) {
       const next = receiver[index];
-      if (next < 0 || area[index] < FLOW.sourceArea) continue;
+      if (next < 0) continue;
       const from = pointAt(index), to = pointAt(next);
+      // Tracks lower the visibility threshold only. The receiver is still
+      // selected from the deformed terrain, including its raised snow rims.
+      const inRut = tracks && tracks.sample(from.x, from.z) >= RUT.trackCoverage
+        && tracks.sample(to.x, to.z) >= RUT.trackCoverage;
+      const profile = inRut ? RUT : FLOW;
+      if (area[index] < profile.sourceArea) continue;
       const length = Math.hypot(to.x - from.x, to.z - from.z);
       const grade = (heights[index] - heights[next]) / length;
       const speed = clamp(grade * FLOW.speedPerGrade, ...FLOW.speed);
-      const radius = lerp(...FLOW.radius, smoothstep(area[index], FLOW.sourceArea, FLOW.fullWidthArea));
+      const radius = lerp(...profile.radius, smoothstep(area[index], profile.sourceArea, profile.fullWidthArea));
       channels.stamp(from, to, radius);
-      links.set(index, {index, from, to, next, length, speed});
+      const link = {index, from, to, next, length, speed};
+      links.set(index, link);
+      if (inRut) rutStarts.push(link);
     }
     starts = [...links.values()];
     for (const bead of beads) {
@@ -76,7 +86,8 @@ export function createTerrainRunoff({field, drainage, resolution = 512, seed = 1
   }
 
   function spawn(fill) {
-    const link = starts[Math.floor(random() * starts.length)];
+    const candidates = rutStarts.length && random() < RUT.highlightShare ? rutStarts : starts;
+    const link = candidates[Math.floor(random() * candidates.length)];
     if (!link) return;
     const fraction = random();
     const head = {x: lerp(link.from.x, link.to.x, fraction), z: lerp(link.from.z, link.to.z, fraction)};
