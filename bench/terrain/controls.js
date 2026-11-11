@@ -1,4 +1,4 @@
-import {OCEAN_COAST_WET_DEFAULTS, TERRAIN_LAYERS, TERRAIN_PAINT_DEFAULTS, TERRAIN_PAINT_FIELDS} from '../../src/terrain/index.js';
+import {OCEAN_COAST_WET_DEFAULTS, SNOW_FIELDS, TERRAIN_LAYERS, TERRAIN_PAINT_DEFAULTS, TERRAIN_PAINT_FIELDS} from '../../src/terrain/index.js';
 
 export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
   const automatic = gui.addFolder('Automatic layers');
@@ -28,6 +28,71 @@ export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
   ]) {
     textures.add(appearance[key], 'value', min, max, step).name(label);
   }
+}
+
+// Snow layer settings (field.snowSettings). The track settings act on the next track; the others re-lay the snow.
+const SNOW_TRACK_KEYS = ['packedShare', 'rimShare', 'rimMaxRise'];
+export function snowBodyControls(gui, {field, onRelay}) {
+  const folder = gui.addFolder('Snow body (re-lays snow)');
+  const values = {...field.snowSettings};
+  for (const [key, spec] of Object.entries(SNOW_FIELDS)) {
+    if (SNOW_TRACK_KEYS.includes(key)) continue;
+    folder.add(values, key, spec.min, spec.max, spec.step).name(spec.label).onFinishChange(() => {
+      try {
+        field.configureSnow({[key]: values[key]});
+        onRelay();
+      } catch (error) {
+        console.warn(error.message);
+        Object.assign(values, field.snowSettings);
+        folder.controllers.forEach(controller => controller.updateDisplay());
+      }
+    });
+  }
+  return folder;
+}
+
+// How deep contacts sink into snow. A load is the share of the packable depth pressed out: 1 packs the snow fully,
+// down to the 'packed snow left' share of the fresh depth.
+export function snowTrackControls(gui, {field, paint, footstep, contact}) {
+  const folder = gui.addFolder('Snow tracks');
+  folder.add(paint, 'radius', .2, 2, .05).name('Painted track radius · m');
+  folder.add(paint, 'load', 0, 1, .01).name('Painted track sink');
+  folder.add(footstep, 'load', 0, 1, .01).name('Footstep sink');
+  folder.add(footstep, 'spacing', .3, 1.2, .01).name('Footstep stride · m');
+  folder.add(contact, 'load', 0, 1, .01).name('Rolling ball sink');
+  folder.add(contact, 'impactLoad', 0, 1, .01).name('Ball impact sink');
+  const settings = {...field.snowSettings};
+  for (const key of SNOW_TRACK_KEYS) {
+    const spec = SNOW_FIELDS[key];
+    folder.add(settings, key, spec.min, spec.max, spec.step).name(spec.label).onChange(value => field.configureSnow({[key]: value}));
+  }
+  return folder;
+}
+
+// Snow shading (createSnowLook). Colours are edited as hex strings and written to the shared uniforms.
+export function snowLookControls(gui, look) {
+  const folder = gui.addFolder('Snow look');
+  const colors = {tint: '#' + look.tint.value.getHexString(), shadowTint: '#' + look.shadowTint.value.getHexString()};
+  folder.addColor(colors, 'tint').name('Snow colour').onChange(value => look.tint.value.set(value));
+  folder.addColor(colors, 'shadowTint').name('Shade tint').onChange(value => look.shadowTint.value.set(value));
+  folder.add(look.scatter, 'value', 0, 1, .01).name('Light scatter');
+  folder.add(look.sparkle, 'value', 0, 2, .01).name('Sparkle');
+  folder.add(look.edgeBreakup, 'value', 0, 1, .01).name('Edge break-up');
+  folder.add(look.trackRelief, 'value', 0, .2, .005).name('Track edge relief · m');
+  return folder;
+}
+
+// Wet look shared by the terrain materials, how fast rain soaks and dries the ground, melt speed and puddle depth.
+export function wetnessControls(gui, {look, rates, melt, puddle, onPuddleDepth}) {
+  const folder = gui.addFolder('Wetness');
+  folder.add(look.wetDarkening, 'value', 0, .8, .01).name('Wet darkening');
+  folder.add(look.wetRoughness, 'value', .05, 1, .01).name('Wet roughness × (lower = glossier)');
+  folder.add(look.puddleDarkening, 'value', 0, .8, .01).name('Puddle darkening');
+  folder.add(rates, 'wetting', .01, 1, .01).name('Soaking speed · /s');
+  folder.add(rates, 'drying', 0, .5, .005).name('Drying speed · /s');
+  folder.add(melt, 'metresPerSecond', .001, .1, .001).name('Melt speed · m/s');
+  folder.add(puddle, 'maxDepth', .05, 1, .01).name('Puddle max depth · m').onFinishChange(onPuddleDepth);
+  return folder;
 }
 
 export function shorelineControls(gui, appearance) {

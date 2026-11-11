@@ -1,24 +1,56 @@
 import * as THREE from 'three';
 import {createTerrainRules} from './terrain-rules.js';
 import {createDataTexture} from '../core/data-texture.js';
+import {valueNoise} from '../core/value-noise.js';
 
 const MAX_RESOLUTION = 1025;   // samples per side
 const BYTE = 255;              // 8-bit weight and coverage scale
 const BASE_LAYERS = 4;         // grass, rock, snow, mud: one RGBA weight texel; layer 4 (forest floor) has its own map
 const FOREST_LAYER = 4;
 const MAX_DIG = .65;           // m below the original surface a deformation may dig
-// Maximum undisturbed drift depth in metres. The optional track rim extends the edit envelope.
-const MAX_SNOW_DEPTH = .43;
 export const SNOW_DEPTH_SCALE = Object.freeze({min: .25, max: 2, initial: 1});
-const PACKED_SNOW_DEPTH_SHARE = .4;
-const SNOW_RIM = {start: .7, peak: .95, end: 1.2, displacedShare: .5, maxRise: .12};
+// Snow layer settings. Depths are metres before the depth scale.
+export const SNOW_DEFAULTS = Object.freeze({
+ driftDepth: .31,      // mean undisturbed depth on flat ground
+ driftVariation: .12,  // drifts add or remove up to this much
+ driftSize: 7,         // width of a drift across the wind
+ driftHeading: 35,     // degrees the wind blows along: 0 = +X, 90 = +Z; drifts stretch this way
+ coverFrom: .015,      // the ground shows through below this depth
+ coverFull: .11,       // fully covered from this depth
+ packedShare: .4,      // share of the fresh depth left under a fully packed track: lower sinks deeper (needs snowTrackRims)
+ rimShare: .5,         // share of the displaced snow pushed up around a track
+ rimMaxRise: .12,      // highest a rim may stand above the deepest fresh drift
+});
+export const SNOW_FIELDS = Object.freeze({
+ driftDepth: {label: 'Drift depth · m', min: .02, max: .8, step: .01},
+ driftVariation: {label: 'Drift variation · m', min: 0, max: .4, step: .01},
+ driftSize: {label: 'Drift size · m', min: 1, max: 40, step: .5},
+ driftHeading: {label: 'Drift wind heading · °', min: 0, max: 360, step: 5},
+ coverFrom: {label: 'Ground shows below · m', min: 0, max: .1, step: .005},
+ coverFull: {label: 'Full cover from · m', min: .02, max: .4, step: .005},
+ packedShare: {label: 'Packed snow left under tracks', min: .05, max: 1, step: .01},
+ rimShare: {label: 'Snow pushed to track rims', min: 0, max: 1, step: .01},
+ rimMaxRise: {label: 'Rim max rise · m', min: 0, max: .3, step: .01},
+});
+export function validateSnow(values) {
+ for (const [key, value] of Object.entries(values)) {
+  const spec = SNOW_FIELDS[key];
+  if (!spec || !Number.isFinite(value) || value < spec.min || value > spec.max) throw Error('Invalid snow setting: ' + key);
+ }
+ return values;
+}
+// Highest the snow surface may stand above the soil at depth scale 1: bounds every snow edit.
+const MAX_SNOW_RISE = SNOW_FIELDS.driftDepth.max + SNOW_FIELDS.driftVariation.max + SNOW_FIELDS.rimMaxRise.max;
+// Track rim profile in shares of the track radius: rises from start, peaks, and ends.
+const SNOW_RIM = Object.freeze({start: .7, peak: .95, end: 1.2});
 const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
 const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: recompute all normals at once
-// Snow cover: depth = (drift + variation x sin(x f + cos(z f))) x smoothstep(flatness); shown above coverage[0] m.
-const SNOW = Object.freeze({drift: .31, variation: .12, frequency: [.18, .14], flatness: [.55, .95], coverage: [.015, .11]});
+// Snow cover: depth = (driftDepth + driftVariation x noise) x smoothstep(flatness). The noise is two octaves (the second
+// `octave` x finer and weighted `detail`), `stretch` x longer along the wind than across; seed is an offset from the terrain seed.
+const SNOW_DRIFT = Object.freeze({flatness: [.55, .95], stretch: 2.6, octave: 2.3, detail: .45, seed: 91});
 
 // Heights are row-major along +X and +Z, in metres. The mesh and shaders share this grid.
-export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, snowTrackRims = false} = {}) {
+export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, snow: snowOverrides, snowTrackRims = false} = {}) {
  const [nx, nz] = resolution ?? [];
  if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
@@ -27,6 +59,15 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  const original = samples.slice();
  if (!samples.every(Number.isFinite)) throw Error('Terrain heights must be finite');
  const rules = createTerrainRules(seed, {mudFromRunout: false, ...settings});
+ const snowSettings = {...SNOW_DEFAULTS};
+ const driftNoise = valueNoise(seed + SNOW_DRIFT.seed);
+ // Drift settings apply the next time snow is laid (resetDeformation); cover, packing and rim settings to the next edit.
+ function configureSnow(values = {}) {
+  const next = validateSnow({...snowSettings, ...values});
+  if (next.coverFull <= next.coverFrom) throw Error('Snow full cover depth must exceed the depth where the ground shows');
+  Object.assign(snowSettings, next);
+ }
+ configureSnow(snowOverrides);
  const [width, depth] = size, stepX = width / (nx - 1), stepZ = depth / (nz - 1);
  const geometry = new THREE.PlaneGeometry(width, depth, nx - 1, nz - 1).rotateX(-Math.PI / 2);
  geometry.translate(origin[0] + width / 2, 0, origin[1] + depth / 2);
@@ -36,7 +77,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  // All edits stay inside this envelope, so local edits need no bounds scan.
  geometry.computeBoundingBox();
  geometry.boundingBox.min.y -= MAX_DIG;
- geometry.boundingBox.max.y += (MAX_SNOW_DEPTH + SNOW_RIM.maxRise) * SNOW_DEPTH_SCALE.max;
+ geometry.boundingBox.max.y += MAX_SNOW_RISE * SNOW_DEPTH_SCALE.max;
  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
  const heightMap = createDataTexture(samples, nx, nz, {format: THREE.RedFormat, type: THREE.FloatType});
  const weights = new Uint8Array(samples.length * 4);
@@ -86,7 +127,9 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  }
  let minX = nx, minZ = nz, maxX = -1, maxZ = -1;
  const soil = samples.slice();
- let snow, packedSnowDepth, snowEnabled = false;
+ // freshSnow is the depth the layer would have untouched: tracks pack toward a share of it.
+ let snow, freshSnow, snowEnabled = false;
+ const packedFloor = index => snowTrackRims ? freshSnow[index] * snowSettings.packedShare : 0;
  let snowDepthScale = SNOW_DEPTH_SCALE.initial;
  const snowCover = {value: false};
  const snowMask = new Uint8Array(samples.length);
@@ -110,7 +153,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  function writeHeight(index, value, onSample) {
   samples[index] = value;
   positions.setY(index, samples[index]);
-  const coverage = snowEnabled ? Math.round(BYTE * THREE.MathUtils.smoothstep(snow[index], ...SNOW.coverage)) : 0;
+  const coverage = snowEnabled ? Math.round(BYTE * THREE.MathUtils.smoothstep(snow[index], snowSettings.coverFrom, snowSettings.coverFull)) : 0;
   if (snowMask[index] !== coverage) {
    snowMask[index] = coverage;
    snowMaskDirty = true;
@@ -120,8 +163,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   minX = Math.min(minX, x); maxX = Math.max(maxX, x);
   minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
  }
- function deform(x, z, radius, depth, onSample) {
-  if (![x, z, radius, depth].every(Number.isFinite) || radius <= 0 || depth <= 0) return 0;
+ // Lowers the samples within radius to nextHeight(index, falloff, previous). Returns the displaced volume in cubic metres.
+ function press(x, z, radius, onSample, nextHeight) {
   const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ;
   let volume = 0;
   for (let j = Math.max(0, Math.ceil(gz - radius / stepZ)); j <= Math.min(nz - 1, Math.floor(gz + radius / stepZ)); j++) {
@@ -129,9 +172,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
     const distance = Math.hypot((i - gx) * stepX, (j - gz) * stepZ);
     const index = j * nx + i, previous = samples[index];
     const falloff = 1 - THREE.MathUtils.smoothstep(distance / radius, DIG_FALLOFF_START, 1);
-    const minimum = snowEnabled ? soil[index] + (packedSnowDepth?.[index] ?? 0) : original[index] - MAX_DIG;
-    const next = Math.fround(Math.max(minimum, previous - depth * falloff));
-    if (next === previous) continue;
+    const next = Math.fround(nextHeight(index, falloff, previous));
+    if (next >= previous) continue;
     if (snowEnabled) snow[index] = next - soil[index];
     else soil[index] = next;
     writeHeight(index, next, onSample);
@@ -142,6 +184,25 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    raiseSnowRim(gx, gz, radius, volume / (stepX * stepZ), onSample);
   }
   return volume;
+ }
+ function deform(x, z, radius, depth, onSample) {
+  if (![x, z, radius, depth].every(Number.isFinite) || radius <= 0 || depth <= 0) return 0;
+  return press(x, z, radius, onSample, (index, falloff, previous) => {
+   const minimum = snowEnabled ? Math.min(previous, soil[index] + packedFloor(index)) : original[index] - MAX_DIG;
+   return Math.max(minimum, previous - depth * falloff);
+  });
+ }
+ // Packs the snow under a contact. load (0..1) is the share of the packable depth pressed out at the centre, so the sink
+ // follows the local snow depth and pressing again with the same load does not sink further.
+ function compactSnow(x, z, radius, load, onSample) {
+  if (![x, z, radius, load].every(Number.isFinite) || radius <= 0 || load < 0 || load > 1) {
+   throw Error('Snow compaction needs a finite position, a positive radius and a load from zero to one');
+  }
+  if (!snowEnabled || load === 0) return 0;
+  return press(x, z, radius, onSample, (index, falloff) => {
+   const packed = packedFloor(index);
+   return soil[index] + packed + (freshSnow[index] - packed) * (1 - load * falloff);
+  });
  }
  function raiseSnowRim(gx, gz, radius, removedDepth, onSample) {
   const candidates = [];
@@ -158,9 +219,10 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    }
   }
   if (!totalWeight) return;
-  const rimDepth = removedDepth * SNOW_RIM.displacedShare / totalWeight;
+  const rimDepth = removedDepth * snowSettings.rimShare / totalWeight;
+  const highest = (snowSettings.driftDepth + snowSettings.driftVariation + snowSettings.rimMaxRise) * snowDepthScale;
   for (const {index, weight} of candidates) {
-   const depth = Math.min((MAX_SNOW_DEPTH + SNOW_RIM.maxRise) * snowDepthScale, snow[index] + rimDepth * weight);
+   const depth = Math.min(highest, snow[index] + rimDepth * weight);
    const next = Math.fround(soil[index] + depth);
    if (next <= samples[index]) continue;
    snow[index] = next - soil[index];
@@ -202,7 +264,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  function resetDeformation(onSample) {
   soil.set(original);
   snow = undefined;
-  packedSnowDepth = undefined;
+  freshSnow = undefined;
   const restoreSnow = snowEnabled;
   snowEnabled = false;
   for (let index = 0; index < samples.length; index++) {
@@ -222,7 +284,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   if (!snow) return false;
   for (let index = 0; index < snow.length; index++) {
    snow[index] *= ratio;
-   if (packedSnowDepth) packedSnowDepth[index] *= ratio;
+   freshSnow[index] *= ratio;
    if (snowEnabled) writeHeight(index, soil[index] + snow[index], onSample);
   }
   return flushDeformation();
@@ -237,16 +299,14 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    snow[index] = Math.max(0, previous - depth);
    removed += previous - snow[index];
    remaining += snow[index];
-   if (packedSnowDepth) {
-    packedSnowDepth[index] = Math.min(snow[index], Math.max(0, packedSnowDepth[index] - depth * PACKED_SNOW_DEPTH_SHARE));
-   }
+   freshSnow[index] = Math.max(0, freshSnow[index] - depth);
    writeHeight(index, soil[index] + snow[index], onSample);
   }
   if (remaining === 0) {
    snowEnabled = false;
    snowCover.value = false;
    snow = undefined;
-   packedSnowDepth = undefined;
+   freshSnow = undefined;
   }
   return {removed, remaining};
  }
@@ -254,13 +314,17 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   if (enabled === snowEnabled) return false;
   if (enabled && !snow) {
    snow = new Float32Array(samples.length);
-   if (snowTrackRims) packedSnowDepth = new Float32Array(samples.length);
+   const heading = THREE.MathUtils.degToRad(snowSettings.driftHeading), windX = Math.cos(heading), windZ = Math.sin(heading);
    for (let index = 0; index < snow.length; index++) {
     const x = index % nx, z = Math.floor(index / nx);
-    const drift = SNOW.drift + SNOW.variation * Math.sin(x * SNOW.frequency[0] + Math.cos(z * SNOW.frequency[1]));
-    snow[index] = drift * snowDepthScale * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], ...SNOW.flatness);
-    if (packedSnowDepth) packedSnowDepth[index] = snow[index] * PACKED_SNOW_DEPTH_SHARE;
+    const worldX = bounds.x + x * stepX, worldZ = bounds.y + z * stepZ;
+    const along = (worldX * windX + worldZ * windZ) / (snowSettings.driftSize * SNOW_DRIFT.stretch);
+    const across = (worldZ * windX - worldX * windZ) / snowSettings.driftSize;
+    const wave = (driftNoise(along, across) + SNOW_DRIFT.detail * driftNoise(along * SNOW_DRIFT.octave, across * SNOW_DRIFT.octave)) / (1 + SNOW_DRIFT.detail);
+    const drift = Math.max(0, snowSettings.driftDepth + snowSettings.driftVariation * wave);
+    snow[index] = drift * snowDepthScale * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], ...SNOW_DRIFT.flatness);
    }
+   freshSnow = snow.slice();
   }
   snowEnabled = enabled;
   snowCover.value = enabled;
@@ -271,6 +335,6 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, forestMap, snowMap, snowCover, heightAt, layerWeightAt, updateRules, deform, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
+ return {geometry, bounds, heightMap, weightMap, forestMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, updateRules, deform, compactSnow, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
   dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); snowMap.dispose(); }};
 }

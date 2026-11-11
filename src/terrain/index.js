@@ -2,11 +2,23 @@ import * as THREE from 'three';
 import {SKY_GLSL} from '../core/sky.js';
 import {createWeatherSurfaceMaterial} from '../surface/index.js';
 import {TERRAIN_LAYERS} from './terrain-rules.js';
-export {createTerrainField, SNOW_DEPTH_SCALE} from './field.js';
+export {createTerrainField, SNOW_DEPTH_SCALE, SNOW_DEFAULTS, SNOW_FIELDS, validateSnow} from './field.js';
 export {createTerrainDrainage} from './drainage.js';
 export {TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
 export {valueNoise} from '../core/value-noise.js';
 export {OceanCoastTerrain, TERRAIN_DEFAULTS as OCEAN_COAST_DEFAULTS, WET_DEFAULTS as OCEAN_COAST_WET_DEFAULTS} from './coast.js';
+
+// Snow shading, shared by every snow-covered terrain material that receives the same look.
+export function createSnowLook() {
+ return {
+  tint: {value: new THREE.Color('#f2f6fa')},        // clean snow albedo
+  shadowTint: {value: new THREE.Color('#c4d8ff')},  // multiplies sky light on snow: blue shade
+  scatter: {value: .35},       // light carried through the snow: softens the terminator and glows against the sun
+  sparkle: {value: .6},        // brightness of the ice-crystal glints
+  edgeBreakup: {value: .6},    // thin snow settles in the ground's hollows first instead of fading evenly
+  trackRelief: {value: .06},   // m, depth of the fine track edge shading from the track mask
+ };
+}
 
 export function createTerrainAppearance() {
  return {
@@ -20,7 +32,8 @@ export function createTerrainAppearance() {
 const TERRAIN_GLSL = /* glsl */`
 #ifdef TERRAIN_SNOW_DETAIL
 uniform sampler2D terrainSnowNormal, terrainSnowRoughness;
-uniform float terrainSnowNormalStrength, terrainSnowTransmission;
+uniform float terrainSnowNormalStrength, terrainSnowScatter, terrainSnowSparkle, terrainSnowEdgeBreakup, terrainSnowTrackRelief;
+uniform vec3 terrainSnowTint, terrainSnowShadowTint;
 #endif
 uniform sampler2D terrainHeights, terrainLayers, terrainDetail;
 #ifdef TERRAIN_LAYER_ARRAY
@@ -79,6 +92,45 @@ float terrainRunoffHeight(vec2 uv) {
 #endif
 #ifdef TERRAIN_PUDDLE_SKY
 ${SKY_GLSL}
+#endif
+
+#ifdef TERRAIN_SNOW_DETAIL
+// Change of the track mask per metre along world X and Z: points toward the inside of a track.
+vec2 terrainTrackSlope(vec3 world) {
+ if (!surfaceHasTracks) return vec2(0.0);
+ vec2 uv = (world.xz - surfaceTrackBounds.xy) / surfaceTrackBounds.zw;
+ vec2 texel = 1.0 / vec2(textureSize(surfaceTracks, 0));
+ float east = texture2D(surfaceTracks, uv + vec2(texel.x, 0.0)).r, west = texture2D(surfaceTracks, uv - vec2(texel.x, 0.0)).r;
+ float south = texture2D(surfaceTracks, uv + vec2(0.0, texel.y)).r, north = texture2D(surfaceTracks, uv - vec2(0.0, texel.y)).r;
+ return vec2(east - west, south - north) / (2.0 * texel * surfaceTrackBounds.zw);
+}
+
+// Ice crystals. Each cell holds one facet tilted at random around the surface normal; it flashes when it mirrors
+// the sun toward the eye. Three cell sizes keep glints from the foreground to the distance; a glint stays about one
+// pixel wide whatever its cell size, and a level fades out before its cells become subpixel.
+float terrainSnowGlints(vec3 world, vec3 surfaceNormal, vec3 halfway, float footprint) {
+ const float finestCellsPerMeter = 240.0;
+ const float coarserScale = .33;
+ const float facetSpread = .75;
+ const float flashStart = .975;
+ const float glintPixels = .9;      // glint radius in pixels
+ const float maxDotRadius = .42;    // share of a cell
+ float glints = 0.0;
+ float cells = finestCellsPerMeter;
+ for (int level = 0; level < 3; level++) {
+  vec2 p = world.xz * cells;
+  vec2 cell = floor(p);
+  vec3 tilt = vec3(hash12(cell), hash12(cell + 31.7), hash12(cell + 57.3)) * 2.0 - 1.0;
+  vec3 facet = normalize(surfaceNormal + tilt * facetSpread);
+  float flash = smoothstep(flashStart, 1.0, dot(facet, halfway));
+  float dotRadius = min(maxDotRadius, footprint * cells * glintPixels);
+  float crystal = 1.0 - smoothstep(dotRadius * .5, dotRadius, length(fract(p) - .5));
+  float resolved = 1.0 - smoothstep(.25, .6, footprint * cells);
+  glints += flash * crystal * resolved;
+  cells *= coarserScale;
+ }
+ return glints;
+}
 #endif
 
 float terrainHeightAt(vec2 grid, out vec3 groundNormal) {
@@ -161,6 +213,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
  vec3 terrainNormal = inverseTransformDirection(surfaceGeometricNormal, viewMatrix);
  vec3 terrainGround = vSurfaceWorld;
  float terrainContact = 1.0;
+ float terrainGroundRelief = .5;
  if (terrainProp) {
   terrainGround.y = terrainHeightAt(terrainGrid, terrainNormal);
   terrainContact = 0.0;
@@ -197,6 +250,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
  float totalWeight = max(dot(terrainWeights, vec4(1.0)) + forestWeight, .0001);
  terrainWeights /= totalWeight;
  forestWeight /= totalWeight;
+ terrainGroundRelief = dot(microHeight, terrainWeights) + forest.a * forestWeight;
  if (terrainProp) {
   float relief = dot(microHeight - .5, terrainWeights) + (forest.a - .5) * forestWeight;
   float seam = terrainContactBand * clamp(1.0 + relief * terrainHeightBlend, .55, 1.45);
@@ -221,7 +275,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, drainage, runoffTexture, runoffFilm, puddleSky, ...surface
+ field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), drainage, runoffTexture, runoffFilm, puddleSky, ...surface
 } = {}) {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
@@ -258,7 +312,8 @@ export function createTerrainMaterial(parameters = {}, {
   terrainShoreWidth: appearance.shoreWidth, terrainShoreWetness: appearance.shoreWetness,
   terrainSnowNormal: {value: snowMaterial?.normal ?? null},
   terrainSnowRoughness: {value: snowMaterial?.roughness ?? null},
-  terrainSnowTransmission: snowMaterial?.transmission ?? {value: 0},
+  terrainSnowScatter: snowLook.scatter, terrainSnowSparkle: snowLook.sparkle, terrainSnowEdgeBreakup: snowLook.edgeBreakup,
+  terrainSnowTrackRelief: snowLook.trackRelief, terrainSnowTint: snowLook.tint, terrainSnowShadowTint: snowLook.shadowTint,
   terrainSnowNormalStrength: {value: snowMaterial?.normalStrength ?? 1},
   terrainSnowCover: field.snowCover ?? {value: false}, terrainSnowDepth: {value: field.snowMap ?? null},
  };
@@ -271,6 +326,14 @@ export function createTerrainMaterial(parameters = {}, {
     if (terrainSnowCover && !terrainProp) {
      snowCoverage = textureLod(terrainSnowDepth, (terrainGrid + .5) / terrainSize, 0.0).r;
      #ifdef TERRAIN_SNOW_DETAIL
+     // Thin snow lies in the hollows of the ground texture and in patches before it covers the bumps.
+     const float snowPatchFrequency = 2.3;
+     const float snowCrumbFrequency = 11.0;
+     const float snowEdgeWidth = .14;
+     float patches = mix(valueNoise(vec3(vSurfaceWorld.xz * snowPatchFrequency, 3.0)), valueNoise(vec3(vSurfaceWorld.xz * snowCrumbFrequency, 7.0)), .4);
+     float settleOrder = mix(terrainGroundRelief, patches, .6);
+     float snowEdgeStart = terrainSnowEdgeBreakup * settleOrder * (1.0 - snowEdgeWidth);
+     snowCoverage = smoothstep(snowEdgeStart, snowEdgeStart + mix(1.0, snowEdgeWidth, terrainSnowEdgeBreakup), snowCoverage);
      // A thin packed layer lets the wet soil show through the rut.
      const float thinSnowCoverage = .85;
      const float mudRevealStrength = .7;
@@ -331,9 +394,9 @@ export function createTerrainMaterial(parameters = {}, {
     #else
     if (wet > .45 && surfacePuddles > 0.0) {
    `)
-   .replace('diffuseColor.rgb *= 1.0 - .38 * puddle;', `
+   .replace('diffuseColor.rgb *= 1.0 - surfacePuddleDarkening * puddle;', `
     #endif
-    diffuseColor.rgb *= 1.0 - .38 * puddle;
+    diffuseColor.rgb *= 1.0 - surfacePuddleDarkening * puddle;
    `)
    .replace('vec3 filmNormal = transformDirection', `
     film = max(film, runoffFilmCoverage);
@@ -353,25 +416,22 @@ export function createTerrainMaterial(parameters = {}, {
     vec2 snowDx = dFdx(snowUv), snowDy = dFdy(snowUv);
     vec3 snowNormal = terrainTexture(TERRAIN_SNOW_NORMAL, snowUv, snowDx, snowDy).xyz * 2.0 - 1.0;
     vec3 snowDetail = vec3(snowNormal.x, snowNormal.z - 1.0, -snowNormal.y);
-    vec3 snowSurfaceNormal = normalize(terrainNormal + terrainSnowNormalStrength * snowDetail);
-    normal = normalize(mix(normal, transformDirection(snowSurfaceNormal, viewMatrix), snowCoverage));
-    // Sparse, fine grains sharpen reflected highlights. Fade them before
-    // they become subpixel so distant snow does not shimmer as the camera moves.
-    const float snowGrainFrequency = 95.0;
-    const float snowGrainRoughness = .18;
-    const float compactSnowRoughness = .43;
-    const vec3 compactSnowTint = vec3(.75, .87, 1.0);
-    const float snowVariationFrequency = .22;
-    vec2 snowGrainUv = vSurfaceWorld.xz * snowGrainFrequency;
-    float grainVisibility = 1.0 - smoothstep(.35, 1.0, length(fwidth(snowGrainUv)));
-    float grain = smoothstep(.72, .9, valueNoise(vec3(snowGrainUv, 0.0))) * grainVisibility;
-    float snowRoughness = terrainTexture(TERRAIN_SNOW_ROUGHNESS, snowUv, snowDx, snowDy).r;
     float compacted = terrainSnowCover && !terrainProp ? track : 0.0;
+    // The track mask is finer than the mesh: its slope shades the edge of each print.
+    vec2 trackSlope = compacted > 0.0 ? terrainTrackSlope(vSurfaceWorld) * terrainSnowTrackRelief : vec2(0.0);
+    vec3 snowSurfaceNormal = normalize(terrainNormal + terrainSnowNormalStrength * snowDetail + vec3(trackSlope.x, 0.0, trackSlope.y));
+    normal = normalize(mix(normal, transformDirection(snowSurfaceNormal, viewMatrix), snowCoverage));
+    const float compactSnowRoughness = .43;
+    const vec3 compactSnowTint = vec3(.8, .9, 1.0);
+    const float snowVariationFrequency = .22;
+    const float snowVariationShade = .06;   // albedo lost in the dullest patches
+    const float snowTextureShare = .3;      // how much of the snow photo's own colour remains under the tint
+    float snowRoughness = terrainTexture(TERRAIN_SNOW_ROUGHNESS, snowUv, snowDx, snowDy).r;
     float driftVariation = valueNoise(vec3(vSurfaceWorld.xz * snowVariationFrequency, 0.0));
-    terrainSnowAlbedo *= mix(.84, 1.0, driftVariation);
+    terrainSnowAlbedo = mix(terrainSnowTint, terrainSnowAlbedo, snowTextureShare);
+    terrainSnowAlbedo *= mix(1.0 - snowVariationShade, 1.0, driftVariation);
     terrainSnowAlbedo *= mix(vec3(1.0), compactSnowTint, compacted);
     snowRoughness = mix(snowRoughness, min(snowRoughness, compactSnowRoughness), compacted);
-    snowRoughness = mix(snowRoughness, min(snowRoughness, snowGrainRoughness), grain);
     roughnessFactor = mix(roughnessFactor, snowRoughness, snowCoverage);
     #else
     roughnessFactor = mix(roughnessFactor, .83, snowCoverage);
@@ -379,15 +439,37 @@ export function createTerrainMaterial(parameters = {}, {
     diffuseColor.rgb = mix(diffuseColor.rgb, terrainSnowAlbedo, snowCoverage);
    `)
    .replace('#include <opaque_fragment>', `
-    #if defined(TERRAIN_SNOW_DETAIL) && NUM_DIR_LIGHTS > 0
-    // Thin snow scatters some directional light toward the viewer.
-    vec3 snowLight = directionalLights[0].direction;
-    float backlight = max(dot(-geometryViewDir, snowLight), 0.0);
-    float grazingLight = 1.0 - abs(dot(surfaceGeometricNormal, snowLight));
-    float thinSnow = terrainSnowCover && !terrainProp ? 1.0 - snowCoverage : .5;
-    const vec3 snowScatterTint = vec3(.67, .82, 1.0);
-    outgoingLight += directionalLights[0].color * snowScatterTint * snowCoverage
-      * thinSnow * backlight * grazingLight * terrainSnowTransmission;
+    #ifdef TERRAIN_SNOW_DETAIL
+    if (snowCoverage > 0.0) {
+     // In shade snow is lit by the sky alone, which reads blue.
+     outgoingLight += reflectedLight.indirectDiffuse * (terrainSnowShadowTint - 1.0) * snowCoverage;
+     #if NUM_DIR_LIGHTS > 0
+     const vec3 snowScatterTint = vec3(.67, .82, 1.0);
+     const float maxWrap = .6;            // how far past the terminator full scatter carries sunlight
+     const float backlightStrength = .5;
+     const float glintStrength = 2.4;
+     const float packedGlintLoss = .75;   // packed tracks have crushed crystals
+     vec3 snowLight = directionalLights[0].direction;
+     vec3 sunColor = directionalLights[0].color;
+     float facing = dot(normal, snowLight);
+     // Recover the shadow-map visibility from the lit result, so scatter and glints stay out of cast shadows.
+     float unshadowed = luminance(sunColor * diffuseColor.rgb) * RECIPROCAL_PI * max(facing, 0.0);
+     float visible = saturate(luminance(reflectedLight.directDiffuse) / max(unshadowed, .0001));
+     float sunVisibility = mix(1.0, visible, smoothstep(0.0, .15, facing));
+     vec3 sunOnSnow = sunColor * diffuseColor.rgb * RECIPROCAL_PI * sunVisibility * snowCoverage;
+     float wrap = terrainSnowScatter * maxWrap;
+     float wrapped = saturate((facing + wrap) / (1.0 + wrap)) - max(facing, 0.0);
+     float backlight = max(dot(-geometryViewDir, snowLight), 0.0) * (1.0 - abs(dot(surfaceGeometricNormal, snowLight)));
+     outgoingLight += sunOnSnow * snowScatterTint * (wrapped + backlight * backlightStrength * terrainSnowScatter);
+     if (terrainSnowSparkle > 0.0 && facing > 0.0) {
+      vec3 halfway = inverseTransformDirection(normalize(snowLight + geometryViewDir), viewMatrix);
+      vec3 worldNormal = inverseTransformDirection(normal, viewMatrix);
+      float glints = terrainSnowGlints(vSurfaceWorld, worldNormal, halfway, length(fwidth(vSurfaceWorld.xz)));
+      outgoingLight += sunColor * sunVisibility * snowCoverage * glints * glintStrength * terrainSnowSparkle
+        * (1.0 - packedGlintLoss * compacted);
+     }
+     #endif
+    }
     #endif
     #ifdef TERRAIN_PUDDLE_SKY
     float waterReflection = max(puddle, runoffFilmCoverage * (1.0 - snowCoverage));

@@ -3,10 +3,12 @@ import {Body, Box, Material, Sphere, Vec3, World} from 'cannon-es';
 import {createTerrainCollider} from './heightfield.js';
 
 const STEP = 1 / 120;
-const SURFACES = {
+// Per ground type: print and impact are the dig depths in metres of a rolling contact and of a hard landing.
+// On lying snow, load and impactLoad replace them: the share of the packable snow depth pressed out (field.compactSnow).
+export const CONTACT_SURFACES = Object.freeze({
  mud: {print: .06, impact: .29, chip: {color: 0x59412d, bounce: 0, groundMotion: {stick: true}}},
- snow: {print: .12, impact: .45, chip: {color: 0xd9e4e9, bounce: .12, groundMotion: {slope: .1, drag: 8, spin: .45}}},
-};
+ snow: {print: .12, impact: .45, load: .7, impactLoad: 1, chip: {color: 0xd9e4e9, bounce: .12, groundMotion: {slope: .1, drag: 8, spin: .45}}},
+});
 
 // Ground contact: an impact is a speed change over impactSpeed m/s, at most once per cooldown s; rolling prints are stamped
 // every printSpacing m and joined to the last print within joinDistance m. Dig radius (m) and print depth share per contact.
@@ -16,7 +18,7 @@ const CONTACT = Object.freeze({impactSpeed: 2.7, cooldown: .24, printSpacing: .2
 const IMPACT_CHIPS = Object.freeze({max: 26, perVolume: 30, size: 1.2, maxShock: 70, shockPerSpeed: 6});
 const MAX_BLOCKS = 8, ICE_BREAK_ENERGY = 1100, ICE_CRACK_RADIUS = 1.8, FALL_OUT_HEIGHT = -12;   // blocks; J; m; m
 const MAX_SUBSTEPS = 6;
-export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips}) {
+export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips, surfaces = CONTACT_SURFACES}) {
  const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
  world.defaultContactMaterial.friction = .52;
  world.defaultContactMaterial.restitution = .12;
@@ -75,11 +77,13 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    if (!impact && entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.printSpacing) continue;
    const y = field.heightAt(point.x, point.z);
    if (y === undefined) continue;
-   const style = SURFACES[entry.surface];
+   const style = surfaces[entry.surface];
    const joined = entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.joinDistance;
    stamp(entry, point, joined ? entry.last : null, impact ? 1 : CONTACT.rollingStrength);
    const radius = impact ? CONTACT.radius.impact : entry.kind === 'box' ? CONTACT.radius.box : CONTACT.radius.sphere;
-   const volume = field.deform(point.x, point.z, radius, impact ? style.impact : style.print * CONTACT.printDepthShare, updateSample);
+   const volume = style.load !== undefined && field.snowCover.value
+    ? field.compactSnow(point.x, point.z, radius, impact ? style.impactLoad : style.load, updateSample)
+    : field.deform(point.x, point.z, radius, impact ? style.impact : style.print * CONTACT.printDepthShare, updateSample);
    if (impact) {
     entry.lastImpact = world.time;
     if (volume > 0) chips?.emit(new THREE.Vector3(point.x, y, point.z), {

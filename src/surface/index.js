@@ -3,12 +3,26 @@ import {RAIN_IMPACT_GLSL} from '../core/rain-impact.js';
 import {NOISE_GLSL} from '../core/lighting.js';
 export {createTrackMask} from '../core/track-mask.js';
 
-export function createSurfaceWeather() {
+// Level change per second: wetting and snowing at full precipitation, drying and thaw without any; rain adds rainThaw.
+export const SURFACE_WEATHER_RATES = Object.freeze({wetting: .23, drying: .035, snowing: .17, thaw: .018, rainThaw: .09});
+
+// How standing water changes a surface. Pass one look to every material that should match.
+export function createSurfaceLook() {
+ return {
+  wetDarkening: {value: .42},     // albedo lost when soaked
+  wetRoughness: {value: .4},      // roughness scale of a soaked surface: lower is glossier
+  puddleDarkening: {value: .38},  // extra albedo lost under a puddle
+ };
+}
+
+export function createSurfaceWeather({rates: rateOverrides} = {}) {
+ const rates = {...SURFACE_WEATHER_RATES, ...rateOverrides};
+ if (!Object.values(rates).every(rate => Number.isFinite(rate) && rate >= 0)) throw Error('Surface weather rates must be finite and non-negative');
  const levels = {value: new THREE.Vector2()};
  const time = {value: 0};
  const unit = value => THREE.MathUtils.clamp(value, 0, 1);
  return {
-  levels, time,
+  levels, time, rates,
   set({wetness = levels.value.x, snow = levels.value.y} = {}) {
    if (![wetness, snow].every(Number.isFinite)) throw Error('Surface weather levels must be finite');
    levels.value.set(unit(wetness), unit(snow));
@@ -21,8 +35,8 @@ export function createSurfaceWeather() {
    if (precipitation === null) return;
    rain = unit(rain);
    snow = unit(snow);
-   levels.value.x = unit(levels.value.x + dt * (.23 * rain - .035 * (1 - rain)));
-   levels.value.y = unit(levels.value.y + dt * (.17 * snow - (.018 + .09 * rain) * (1 - snow)));
+   levels.value.x = unit(levels.value.x + dt * (rates.wetting * rain - rates.drying * (1 - rain)));
+   levels.value.y = unit(levels.value.y + dt * (rates.snowing * snow - (rates.thaw + rates.rainThaw * rain) * (1 - snow)));
   },
  };
 }
@@ -34,6 +48,7 @@ uniform float surfaceRainAmount;
 #endif
 uniform vec3 surfaceSnowColor;
 uniform float surfacePuddles, surfaceAntiTile, surfaceRunoff, surfaceTime, surfaceTrackContrast;
+uniform float surfaceWetDarkening, surfaceWetRoughness, surfacePuddleDarkening;
 uniform sampler2D surfaceTracks;
 uniform vec4 surfaceTrackBounds;
 uniform bool surfaceHasTracks;
@@ -79,6 +94,7 @@ vec3 surfaceUntile(vec2 uv) {
 // Standard PBR stays responsible for lights, shadows, fog and the host's environment map.
 export function createWeatherSurfaceMaterial(parameters = {}, {
  weather = createSurfaceWeather(), rainAmount, tracks, snowColor = '#eaf3fa', puddles = 1, antiTiling = 0, runoff = 1, trackContrast = .08,
+ look = createSurfaceLook(),
 } = {}) {
  if (![puddles, antiTiling, runoff].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
   throw Error('Puddle, anti-tiling and runoff amounts must be between zero and one');
@@ -93,6 +109,7 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
   surfaceRunoff: {value: runoff}, surfaceTime: weather.time,
   surfaceTracks: {value: tracks?.texture ?? null}, surfaceHasTracks: {value: Boolean(tracks)},
   surfaceTrackContrast: {value: trackContrast},
+  surfaceWetDarkening: look.wetDarkening, surfaceWetRoughness: look.wetRoughness, surfacePuddleDarkening: look.puddleDarkening,
   surfaceTrackBounds: {value: tracks?.bounds ?? new THREE.Vector4(0, 0, 1, 1)},
  };
  material.onBeforeCompile = shader => {
@@ -129,12 +146,11 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     float track = surfaceTrack(vSurfaceWorld) * smoothstep(.35, .8, up);
     snowCoverage *= 1.0 - track * .92;
     float wet = surfaceWeather.x * (1.0 - snowCoverage);
-    diffuseColor.rgb *= (1.0 - .42 * wet) * (1.0 - track * min(1.0, surfaceTrackContrast + .18 * wet));
-    const float wetGroundRoughnessScale = .4;
-    float filmRoughnessScale = wetGroundRoughnessScale;
+    diffuseColor.rgb *= (1.0 - surfaceWetDarkening * wet) * (1.0 - track * min(1.0, surfaceTrackContrast + .18 * wet));
+    float filmRoughnessScale = surfaceWetRoughness;
     #ifdef SURFACE_RAIN_IMPACTS
     const float rainyGroundRoughnessScale = .65;
-    filmRoughnessScale = mix(wetGroundRoughnessScale, rainyGroundRoughnessScale, surfaceRainAmount);
+    filmRoughnessScale = mix(surfaceWetRoughness, rainyGroundRoughnessScale, surfaceRainAmount);
     #endif
     roughnessFactor = mix(roughnessFactor, max(.12, roughnessFactor * filmRoughnessScale), wet);
     float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
@@ -148,7 +164,7 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
      vec3 basinPosition = vec3(vSurfaceWorld.xz * .34, 0.0);
      float basin = valueNoise(basinPosition) * .85 + valueNoise(basinPosition * 3.2) * .15;
      puddle = surfacePuddles * smoothstep(.94, .995, up) * smoothstep(.45, .92, wet) * (1.0 - smoothstep(.24, .38, basin));
-     diffuseColor.rgb *= 1.0 - .38 * puddle;
+     diffuseColor.rgb *= 1.0 - surfacePuddleDarkening * puddle;
      roughnessFactor = mix(roughnessFactor, .055, puddle);
      normal = normalize(mix(normal, transformDirection(vec3(0, 1, 0), viewMatrix), puddle * .75));
     }

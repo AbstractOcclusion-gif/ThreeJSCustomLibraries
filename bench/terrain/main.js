@@ -2,25 +2,27 @@ import * as THREE from 'three';
 import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
-import {createTerrainAppearance, createTerrainDrainage, createTerrainField, createTerrainMaterial, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
-import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
+import {createSnowLook, createTerrainAppearance, createTerrainDrainage, createTerrainField, createTerrainMaterial, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
+import {createSurfaceLook, createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
-import {terrainControls} from './controls.js';
+import {snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
 import {createTerrainRunoff} from '../../src/terrain/runoff.js';
 import {createTerrainBasins} from './basins.js';
-import {stampFootstepTrail} from './footsteps.js';
-import {createTerrainImpacts} from './impacts.js';
+import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from './footsteps.js';
+import {CONTACT_SURFACES, createTerrainImpacts} from './impacts.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);
 const TERRAIN = {span: 64, resolution: 257};
 const RELIEF = {ridgeHeight: 4.2, ridgeFrequency: [.14, .12], hillHeight: 2, hillFrequency: [.055, .07]};
 const SNOW_MELT = {metresPerSecond: .025, updateInterval: .3, bakeInterval: 1.5, runoffShare: .7};
-const TRACK = {radius: .8, spacing: .28, depth: .11, contrast: .5, maskResolution: 512};
+// depth (m) digs bare ground; load is the share of the packable snow depth pressed out when snow lies.
+const TRACK = {radius: .8, spacing: .28, depth: .11, load: .85, contrast: .5, maskResolution: 512};
+const PUDDLE = {maxDepth: .32}; // m, deepest a filled hollow may stand
 const WET_TRACK_BAKE_INTERVAL = 1.25; // seconds between flow-map refreshes while the ball rolls
 const FOOTSTEP_DEMO = {from: {x: 11, z: 11}, to: {x: 2, z: 4}};
 const BOULDER = {radius: 1.25, detail: 2, contactBand: .65, roughness: .87};
@@ -53,7 +55,14 @@ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
 });
 const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0};
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
-const drainage = createTerrainDrainage(field);
+// Live copies of the defaults, edited from the panel.
+const paint = {radius: TRACK.radius, depth: TRACK.depth, load: TRACK.load};
+const footstep = {...FOOTSTEP_DEFAULTS};
+const contactSurfaces = structuredClone(CONTACT_SURFACES);
+const melt = {metresPerSecond: SNOW_MELT.metresPerSecond};
+const puddle = {...PUDDLE};
+const surfaceLook = createSurfaceLook();
+const drainage = createTerrainDrainage(field, {maxPuddleDepth: puddle.maxDepth});
 let drainageDirty = false, meltDrainageDirty = false, meltFlowDirty = false, meltBakeElapsed = 0;
 let rollingBakeElapsed = 0;
 const {layerArray, detail, rock, snowMaterial} = await loadTerrainTextures(renderer, {snowDetail: true});
@@ -65,9 +74,8 @@ const runoff = createTerrainRunoff({field, drainage, tracks});
 const rainAmount = {value: 0};
 const rills = {value: 1};
 const puddleFill = {value: 0};
-const snowTransmission = {value: .2};
-snowMaterial.transmission = snowTransmission;
-const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial, rainAmount};
+const snowLook = createSnowLook();
+const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial, snowLook, rainAmount, look: surfaceLook};
 const groundMaterial = createTerrainMaterial({}, {
   ...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast,
   drainage: {texture: drainage.texture, fill: puddleFill},
@@ -117,7 +125,7 @@ const rockWeather = createSurfaceWeather();
 const boulderMaterial = createTerrainMaterial({map: rock, roughness: BOULDER.roughness}, {
   ...terrainMaterialOptions, weather: rockWeather, contactBand: BOULDER.contactBand, puddles: 0,
 });
-const impacts = createTerrainImpacts({scene, field, tracks, material: boulderMaterial});
+const impacts = createTerrainImpacts({scene, field, tracks, material: boulderMaterial, surfaces: contactSurfaces});
 const snowCaps = [];
 for (const {x, z, scale, yaw} of BOULDERS) {
   const boulder = new THREE.Mesh(boulderGeometry, boulderMaterial);
@@ -165,7 +173,6 @@ surfaceFolder.add(surface, 'snowDepth', SNOW_DEPTH_SCALE.min, SNOW_DEPTH_SCALE.m
     if (field.setSnowDepthScale(scale, impacts.onHeightSample)) drainageDirty = true;
     resizeSnowCaps();
   });
-surfaceFolder.add(snowTransmission, 'value', 0, 1, .01).name('Snow light transmission');
 surfaceFolder.add(surface, 'paintTracks').name('Paint tracks (drag)').onChange(on => { controls.enabled = !on; endStroke(); });
 function enableTestSnow() {
   if (surface.snow) return;
@@ -178,21 +185,29 @@ surfaceFolder.add({roll() {
 }}, 'roll').name('Roll ball in snow');
 surfaceFolder.add({walk() {
   enableTestSnow();
-  stampFootstepTrail({field, tracks, ...FOOTSTEP_DEMO, onSample: impacts.onHeightSample});
+  stampFootstepTrail({field, tracks, ...FOOTSTEP_DEMO, onSample: impacts.onHeightSample, step: footstep});
 }}, 'walk').name('Stamp footsteps in snow');
-surfaceFolder.add({clear() {
+function resetTerrain() {
   endStroke();
   if (impacts.reset()) drainageDirty = true;
   capMeltShare = 1;
   meltDepth = meltElapsed = 0;
   if (surface.snow) resizeSnowCaps();
   stage.sun.shadow.needsUpdate = true;
-}}, 'clear').name('Reset tracks and terrain');
+}
+surfaceFolder.add({clear: resetTerrain}, 'clear').name('Reset tracks and terrain');
+snowLookControls(gui, snowLook);
+snowBodyControls(gui, {field, onRelay: resetTerrain});
+snowTrackControls(gui, {field, paint, footstep, contact: contactSurfaces.snow});
 const rainFolder = gui.addFolder('Rain and runoff');
 rainFolder.add(surface, 'melt', 0, 1, .05).name('Snow melt');
 rainFolder.add(rainAmount, 'value', 0, 1, .05).name('Rain on surfaces');
 rainFolder.add(rills, 'value', 0, 1, .05).name('Downhill runoff');
 rainFolder.add(surface, 'puddles', 0, 1, .05).name('Puddle fill');
+wetnessControls(gui, {
+  look: surfaceLook, rates: surfaceWater.rates, melt, puddle,
+  onPuddleDepth(maxPuddleDepth) { drainage.rebuild({maxPuddleDepth}); },
+});
 
 const raycaster = new THREE.Raycaster(), canvas = renderer.domElement, trackEvents = new AbortController();
 let lastTrackPoint;
@@ -200,6 +215,10 @@ let distanceToStamp = TRACK.spacing;
 function endStroke() {
   lastTrackPoint = undefined;
   distanceToStamp = TRACK.spacing;
+}
+function pressTrack(x, z) {
+  if (field.snowCover.value) field.compactSnow(x, z, paint.radius, paint.load, impacts.onHeightSample);
+  else field.deform(x, z, paint.radius, paint.depth, impacts.onHeightSample);
 }
 function paintTrack(event) {
   if (!surface.paintTracks || !(event.buttons & 1)) {
@@ -213,15 +232,15 @@ function paintTrack(event) {
     return;
   }
 
-  tracks.stamp(lastTrackPoint ?? hit, hit, TRACK.radius);
+  tracks.stamp(lastTrackPoint ?? hit, hit, paint.radius);
   if (!lastTrackPoint) {
-    field.deform(hit.x, hit.z, TRACK.radius, TRACK.depth, impacts.onHeightSample);
+    pressTrack(hit.x, hit.z);
   } else {
     const dx = hit.x - lastTrackPoint.x, dz = hit.z - lastTrackPoint.z;
     const length = Math.hypot(dx, dz);
     for (; distanceToStamp <= length; distanceToStamp += TRACK.spacing) {
       const fraction = distanceToStamp / length;
-      field.deform(lastTrackPoint.x + dx * fraction, lastTrackPoint.z + dz * fraction, TRACK.radius, TRACK.depth, impacts.onHeightSample);
+      pressTrack(lastTrackPoint.x + dx * fraction, lastTrackPoint.z + dz * fraction);
     }
     distanceToStamp -= length;
   }
@@ -237,7 +256,7 @@ function updateMelt(dt) {
   const supply = surface.melt * SNOW_MELT.runoffShare;
   if (lastTrackPoint) return supply;
   meltElapsed += dt;
-  meltDepth += dt * surface.melt * SNOW_MELT.metresPerSecond;
+  meltDepth += dt * surface.melt * melt.metresPerSecond;
   if (meltElapsed >= SNOW_MELT.updateInterval) {
     const result = field.meltSnow(meltDepth, impacts.onHeightSample);
     meltDepth = meltElapsed = 0;

@@ -8,7 +8,11 @@ const CHANNELS = 4;
 // RG contains the downhill grade in world X/Z. BA contains the basin floor
 // and capped spill elevation. A dry sample has identical floor and spill.
 export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
-  if (!(maxPuddleDepth > 0) || !Number.isFinite(maxPuddleDepth)) throw Error('Invalid puddle depth');
+  function validDepth(depth) {
+    if (!(depth > 0) || !Number.isFinite(depth)) throw Error('Invalid puddle depth');
+    return depth;
+  }
+  validDepth(maxPuddleDepth);
   const {data: heights, width, height} = field.heightMap.image;
   const {z: spanX, w: spanZ} = field.bounds;
   const values = new Float32Array(heights.length * CHANNELS);
@@ -53,7 +57,9 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
     }
   }
 
-  function rebuild() {
+  // Pass a new puddle depth cap (m) to change it; it stays for later rebuilds.
+  function rebuild({maxPuddleDepth: depth = maxPuddleDepth} = {}) {
+    maxPuddleDepth = validDepth(depth);
     spill.fill(Infinity);
     grouped.fill(0);
     for (let z = 0; z < height; z++) {
