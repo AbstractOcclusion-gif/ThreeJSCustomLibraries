@@ -3,7 +3,11 @@ import {createDataTexture} from '../core/data-texture.js';
 
 // Match the heightfield's triangulation, including its shared diagonal.
 const NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, 1], [1, -1]];
+// Water shares itself between all eight neighbours: the mesh's single diagonal would pull every stream to one side.
+const FLOW_NEIGHBORS = [...NEIGHBORS, [-1, -1], [1, 1]];
 const CHANNELS = 4;
+const FLOW_CONCENTRATION = 1.5; // higher keeps water on its steepest path but shows the grid; lower spreads it into a smooth sheet
+const MIN_POND_DEPTH = .03;     // m: a shallower hollow lets water straight through
 
 // RG contains the downhill grade in world X/Z. BA contains the basin floor
 // and capped spill elevation. A dry sample has identical floor and spill.
@@ -20,6 +24,13 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
   const spill = new Float32Array(heights.length);
   const frontier = new Uint32Array(heights.length);
   const grouped = new Uint8Array(heights.length);
+  // The flood visits cells from the lowest spill level up; each remembers the cell it was reached from.
+  const floodOrder = new Uint32Array(heights.length);
+  const floodParent = new Int32Array(heights.length);
+  const flowOrder = new Uint32Array(heights.length);
+  const waterLevel = new Float32Array(heights.length);
+  const shareCell = new Int32Array(FLOW_NEIGHBORS.length), shareWeight = new Float64Array(FLOW_NEIGHBORS.length);
+  const shareX = new Float64Array(FLOW_NEIGHBORS.length), shareZ = new Float64Array(FLOW_NEIGHBORS.length);
   const stepX = spanX / (width - 1), stepZ = spanZ / (height - 1);
   let pending = 0;
 
@@ -48,9 +59,9 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
     return first;
   }
 
-  function visitNeighbors(index, visit) {
+  function visitNeighbors(index, visit, neighbors = NEIGHBORS) {
     const x = index % width, z = Math.floor(index / width);
-    for (const [dx, dz] of NEIGHBORS) {
+    for (const [dx, dz] of neighbors) {
       const nextX = x + dx, nextZ = z + dz;
       if (nextX < 0 || nextX >= width || nextZ < 0 || nextZ >= height) continue;
       visit(nextZ * width + nextX, dx, dz);
@@ -62,6 +73,8 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
     maxPuddleDepth = validDepth(depth);
     spill.fill(Infinity);
     grouped.fill(0);
+    floodParent.fill(-1);
+    let flooded = 0;
     for (let z = 0; z < height; z++) {
       for (let x = 0; x < width; x++) {
         const index = z * width + x, offset = index * CHANNELS;
@@ -81,9 +94,11 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
     // The lowest route out of each depression determines its spill height.
     while (pending) {
       const index = dequeue();
+      floodOrder[flooded++] = index;
       visitNeighbors(index, next => {
         if (spill[next] !== Infinity) return;
         spill[next] = Math.max(heights[next], spill[index]);
+        floodParent[next] = index;
         enqueue(next);
       });
     }
@@ -113,36 +128,61 @@ export function createTerrainDrainage(field, {maxPuddleDepth = .32} = {}) {
     texture.needsUpdate = true;
   }
 
-  // Route one cell's worth of water to its steepest lower mesh neighbor.
-  // Strictly descending edges let each node forward its area after all upstream nodes have arrived.
+  // Routes every cell's rain over the ground with its hollows filled to their puddle level. On a slope a cell shares
+  // its water between all lower neighbours, weighted by slope ^ FLOW_CONCENTRATION. Water that reaches a puddle
+  // follows the flood route to the hollow's outlet, unless the puddle depth cap keeps it below its rim: then it stays.
+  // Cells are visited from the highest level down, so each forwards its water after receiving all of it.
+  // receiver: the steepest (or outlet-ward) neighbour, -1 where water stays or leaves the field. area: drained m2.
+  // held: the part of area that crossed a puddle deeper than MIN_POND_DEPTH, released only when puddles overflow.
+  // grade: [x, z] pairs, the downhill direction scaled by the slope (rise / run); zero on puddles and flats.
   function bakeFlow() {
     const receiver = new Int32Array(heights.length).fill(-1);
     const area = new Float32Array(heights.length).fill(stepX * stepZ);
-    const upstream = new Uint8Array(heights.length);
+    const held = new Float32Array(heights.length);
+    const grade = new Float32Array(heights.length * 2);
     const diagonal = Math.hypot(stepX, stepZ);
-    for (let index = 0; index < heights.length; index++) {
-      let steepest = 0;
+    for (let index = 0; index < heights.length; index++) waterLevel[index] = Math.max(heights[index], values[index * CHANNELS + 3]);
+    // Highest first. The sort is stable, so cells on one level keep the reverse flood order: outlet-ward cells last.
+    for (let slot = 0; slot < heights.length; slot++) flowOrder[slot] = floodOrder[heights.length - 1 - slot];
+    flowOrder.sort((a, b) => waterLevel[b] - waterLevel[a]);
+    for (let slot = 0; slot < heights.length; slot++) {
+      const index = flowOrder[slot], level = waterLevel[index];
+      let shares = 0, total = 0, steepest = 0;
       visitNeighbors(index, (next, dx, dz) => {
         const length = dx && dz ? diagonal : dx ? stepX : stepZ;
-        const grade = (heights[index] - heights[next]) / length;
-        if (grade <= steepest) return;
-        steepest = grade;
+        const slope = (level - waterLevel[next]) / length;
+        if (slope <= 0) return;
+        const weight = slope ** FLOW_CONCENTRATION;
+        shareCell[shares] = next;
+        shareWeight[shares] = weight;
+        shareX[shares] = dx * stepX / length * slope;
+        shareZ[shares] = dz * stepZ / length * slope;
+        shares++;
+        total += weight;
+        if (slope > steepest) {
+          steepest = slope;
+          receiver[index] = next;
+        }
+      }, FLOW_NEIGHBORS);
+      if (!shares) {
+        // A flat or a puddle. Its water reaches the outlet only if the puddle can fill to its rim.
+        const next = floodParent[index];
+        if (next < 0 || level < spill[index]) continue;
         receiver[index] = next;
-      });
-      if (receiver[index] >= 0) upstream[receiver[index]]++;
+        area[next] += area[index];
+        const holdsWater = level > heights[index] && level - values[index * CHANNELS + 2] > MIN_POND_DEPTH;
+        held[next] += holdsWater ? area[index] : held[index];
+        continue;
+      }
+      for (let share = 0; share < shares; share++) {
+        const part = shareWeight[share] / total, next = shareCell[share];
+        area[next] += area[index] * part;
+        held[next] += held[index] * part;
+        grade[index * 2] += shareX[share] * part;
+        grade[index * 2 + 1] += shareZ[share] * part;
+      }
     }
-
-    let count = 0;
-    for (let index = 0; index < heights.length; index++) {
-      if (upstream[index] === 0) frontier[count++] = index;
-    }
-    for (let head = 0; head < count; head++) {
-      const index = frontier[head], next = receiver[index];
-      if (next < 0) continue;
-      area[next] += area[index];
-      if (--upstream[next] === 0) frontier[count++] = next;
-    }
-    return {receiver, area};
+    return {receiver, area, held, grade};
   }
 
   function sample(x, z, target) {

@@ -2,15 +2,14 @@ import * as THREE from 'three';
 import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
-import {createSnowLook, createTerrainAppearance, createTerrainDrainage, createTerrainField, createTerrainMaterial, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
+import {createSnowLook, createTerrainAppearance, createTerrainDrainage, createTerrainField, createTerrainMaterial, createTerrainRunoff, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
 import {createSurfaceLook, createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
-import {snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
-import {createTerrainRunoff} from '../../src/terrain/runoff.js';
+import {runoffControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
 import {createTerrainBasins} from './basins.js';
 import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from './footsteps.js';
 import {CONTACT_SURFACES, createTerrainImpacts} from './impacts.js';
@@ -70,7 +69,7 @@ const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;   // each puddle has its own local fill level
 const surfaceWeather = createSurfaceWeather();
 const tracks = createTrackMask({origin: [-half, -half], size: [span, span], resolution: TRACK.maskResolution, directional: true});
-const runoff = createTerrainRunoff({field, drainage, tracks});
+const runoff = createTerrainRunoff({field, drainage});
 const rainAmount = {value: 0};
 const rills = {value: 1};
 const puddleFill = {value: 0};
@@ -79,8 +78,7 @@ const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appeara
 const groundMaterial = createTerrainMaterial({}, {
   ...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast,
   drainage: {texture: drainage.texture, fill: puddleFill},
-  runoffTexture: runoff.texture,
-  runoffFilm: {texture: runoff.film, coverage: runoff.coverage},
+  runoffFlow: runoff,
   puddleSky: stage.skyUniforms,
 });
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
@@ -204,6 +202,7 @@ rainFolder.add(surface, 'melt', 0, 1, .05).name('Snow melt');
 rainFolder.add(rainAmount, 'value', 0, 1, .05).name('Rain on surfaces');
 rainFolder.add(rills, 'value', 0, 1, .05).name('Downhill runoff');
 rainFolder.add(surface, 'puddles', 0, 1, .05).name('Puddle fill');
+runoffControls(rainFolder, runoff.look);
 wetnessControls(gui, {
   look: surfaceLook, rates: surfaceWater.rates, melt, puddle,
   onPuddleDepth(maxPuddleDepth) { drainage.rebuild({maxPuddleDepth}); },
@@ -315,12 +314,12 @@ startFrameLoop(renderer, (dt, now) => {
   surfaceWeather.update(dt, null);
   rockWeather.update(dt, null);
   puddleFill.value = Math.min(1, surface.puddles + water);
-  runoff.update(dt, {supply: waterSupply, wetness: water, amount: rills.value, puddleFill: puddleFill.value});
+  runoff.update(dt, {wetness: water, amount: rills.value});
   renderer.render(scene, camera);
   if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${wetness.toFixed(2)} · snow ${surface.snow ? 'on' : 'off'}`; }
 });
 document.body.dataset.ready = 'true';
-window.terrainBench = {field, rules, appearance, surfaceWeather, tracks, drainage, impacts, rainAmount, rills, puddleFill, stage, scene, camera, renderer};
+window.terrainBench = {field, rules, appearance, surfaceWeather, surfaceWater, tracks, drainage, runoff, impacts, rainAmount, rills, puddleFill, stage, scene, camera, renderer};
 onLeave(() => {
   renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort();
   snowMaterial.normal.dispose(); snowMaterial.roughness.dispose();

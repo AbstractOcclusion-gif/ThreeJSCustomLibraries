@@ -175,7 +175,8 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
      float film = max(puddle, wet * smoothstep(.55, .95, up));
      vec2 rainGradient = rainImpactGradient(vSurfaceWorld.xz, surfaceTime, surfaceRainAmount, rainFootprint);
      vec3 filmNormal = transformDirection(vec3(rainGradient.x, 0.0, rainGradient.y), viewMatrix);
-     normal = normalize(normal + filmNormal * film * filmImpactStrength);
+     // A still film has no gradient, and a zero vector has no direction to normalize.
+     if (dot(rainGradient, rainGradient) > 0.0) normal = normalize(normal + filmNormal * film * filmImpactStrength);
     }
     #endif
     diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);

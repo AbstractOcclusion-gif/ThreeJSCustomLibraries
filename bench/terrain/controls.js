@@ -82,6 +82,16 @@ export function snowLookControls(gui, look) {
   return folder;
 }
 
+// Runoff look (createRunoffLook): where streams start, how fast they run and the ripples they carry.
+export function runoffControls(folder, look) {
+  folder.add(look.sourceArea, 'value', .2, 30, .1).name('Stream starts at · m² drained');
+  folder.add(look.fullArea, 'value', 2, 200, 1).name('Full stream at · m² drained');
+  folder.add(look.rutSourceArea, 'value', 0, 10, .1).name('Stream in tracks from · m²');
+  folder.add(look.speed, 'value', 0, 3, .05).name('Flow speed ×');
+  folder.add(look.rippleSize, 'value', .03, .5, .005).name('Flow ripple size · m');
+  folder.add(look.rippleStrength, 'value', 0, 3, .05).name('Flow ripple strength ×');
+}
+
 // Wet look shared by the terrain materials, how fast rain soaks and dries the ground, melt speed and puddle depth.
 export function wetnessControls(gui, {look, rates, melt, puddle, onPuddleDepth}) {
   const folder = gui.addFolder('Wetness');
