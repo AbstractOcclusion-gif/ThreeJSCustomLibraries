@@ -1,10 +1,10 @@
-import rain from './assets/rain.ogg?url';
-import wind from './assets/wind.ogg?url';
-import chimes from './assets/chimes.ogg?url';
-
 export const DEMO = {
   initial: {listener: 0, underwater: 0, cave: 0, rain: 0.25, wind: 0.35},
-  recordings: {rain, wind, emitter: chimes},
+  recordings: {
+    rain: new URL('./assets/rain.ogg', import.meta.url).href,
+    wind: new URL('./assets/wind.ogg', import.meta.url).href,
+    emitter: new URL('./assets/chimes.ogg', import.meta.url).href,
+  },
   localSong: 'sound/foggy-harbor-lullaby.mp3',
   range: {min: 0, max: 1, step: 0.01},
   listenerRange: {min: -8, max: 8, step: 0.1},
