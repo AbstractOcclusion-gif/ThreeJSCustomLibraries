@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import {NOISE_GLSL} from '../core/lighting.js';
 import {createPuffs} from '../particles/puffs.js';
+import {createFlameFluid} from './fluid.js';
 
 const RENDER_ORDER = 8;   // after the scene's transparent surfaces
 const MAX_CAPACITY = 1024;
@@ -46,6 +47,12 @@ const WIND = Object.freeze({lean: .22, full: 14});   // m of sideways travel per
 const SWAY = Object.freeze({amount: .1, rate: .9});
 const PULSE = Object.freeze({depth: .13, rate: 2.3});
 
+// Fluid flames: the heat of a small 2D fluid (fluid.js) shown on one upright sheet that turns to face the camera.
+//   widen    sheet width, in widths of the burning object: room for the flames to lean and curl
+//   sink     how far below the top of the fuel the sheet starts, in metres at size 1 (the object hides that part)
+//   linger   seconds the sheet stays drawn after the fire stops being fed, while the last heat rises away
+const FLUID = Object.freeze({widen: 2.3, sink: .08, linger: 2.5, windFull: 10});
+
 // Life of a fire fed by a source: it grows over the first `grow` share of its fuel, dies over the last `die` share,
 // then smoulders (smoke and glow only) for `smoulder` seconds.
 const CYCLE = Object.freeze({grow: .14, die: .4, smoulder: 8});
@@ -85,14 +92,15 @@ function wander(t, seed) {
 // footprint: [half width X, half depth Z] the flames start within; rise: [lowest, highest] start height above position.
 // size scales the whole fire. environment: optional core/environment.js contract (wind bends flames, carries smoke).
 // source: optional fire object from createFireSystem ({phase, fuel}); the visual then follows its life by itself.
-export function createFireVisual(scene, {position, footprint = [.3, .3], rise = [0, .3], size = 1, capacity = 96, environment = null, look = createFlameLook(), source = null, loadTexture} = {}) {
+export function createFireVisual(scene, {position, footprint = [.3, .3], rise = [0, .3], size = 1, capacity = 96, environment = null, look = createFlameLook(), source = null, renderer = null, loadTexture} = {}) {
   if (!scene?.isObject3D) throw Error('Fire visual needs a scene or group');
   if (!position || ![position.x, position.y, position.z].every(Number.isFinite)) throw Error('Fire visual needs a finite position');
   if (![...footprint, ...rise, size].every(Number.isFinite) || footprint.some(value => value < 0) || rise[1] < rise[0] || size <= 0) {
     throw Error('Fire visual needs a non-negative footprint, an ordered rise range and a positive size');
   }
   if (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_CAPACITY) throw Error(`Fire visual capacity must be 1..${MAX_CAPACITY}`);
-  const show = {flames: true, smoke: true, embers: true, light: true};
+  // fluid: draw the flames with the fluid sim instead of the sheets. Needs the `renderer` option.
+  const show = {flames: true, fluid: Boolean(renderer), smoke: true, embers: true, light: true};
   const seed = Math.random() * 100;
 
   // Per sheet: where and when it starts, how it moves, how it is shaped. Written once at birth; the shader does the rest.
@@ -192,6 +200,60 @@ export function createFireVisual(scene, {position, footprint = [.3, .3], rise = 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false; mesh.visible = false; mesh.renderOrder = RENDER_ORDER;
   scene.add(mesh);
+
+  const fluid = renderer ? createFlameFluid(renderer) : null;
+  const half = Math.max(footprint[0], footprint[1], .05) * size;
+  const cameraRight = new THREE.Vector3(1, 0, 0);
+  let fluidMesh = null, fluidUniforms = null, fluidMaterial = null, fluidGeometry = null, fed = 0;
+  if (fluid) {
+    fluid.setSource(Math.min(.5, 1 / FLUID.widen * .5));
+    fluidUniforms = {
+      tHeat: {value: null}, uBase: {value: new THREE.Vector3()}, uSize: {value: new THREE.Vector2()}, uBrightness: {value: look.brightness},
+    };
+    fluidGeometry = new THREE.PlaneGeometry(1, 1).translate(0, .5, 0);
+    fluidMaterial = new THREE.ShaderMaterial({
+      uniforms: fluidUniforms, transparent: true, depthTest: true, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+      vertexShader: /* glsl */`
+        uniform vec3 uBase;
+        uniform vec2 uSize;
+        varying vec2 vUv;
+        void main() {
+          // Upright, turned about the vertical to face the camera.
+          vec3 right = normalize(vec3(viewMatrix[0][0], 0.0, viewMatrix[2][0]));
+          vec3 world = uBase + right * (position.x * uSize.x) + vec3(0.0, position.y * uSize.y, 0.0);
+          vUv = uv;
+          gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tHeat;
+        uniform float uBrightness;
+        varying vec2 vUv;
+        vec3 flameColor(float heat) {
+          vec3 color = mix(vec3(.3, .01, 0.0), vec3(1.0, .24, .012), smoothstep(.03, .4, heat));
+          color = mix(color, vec3(1.0, .58, .12), smoothstep(.34, .7, heat));
+          return mix(color, vec3(1.0, .86, .5), smoothstep(.78, 1.0, heat));
+        }
+        void main() {
+          float t = texture2D(tHeat, vUv).r;
+          const vec2 visible = vec2(.1, .3);     // heat where a flame starts to show, and where it is solid
+          float density = smoothstep(visible.x, visible.y, t);
+          // The slice ends at its sides and top: fade there so its border never shows.
+          float edge = smoothstep(0.0, .08, vUv.x) * smoothstep(0.0, .08, 1.0 - vUv.x) * smoothstep(0.0, .12, 1.0 - vUv.y);
+          float alpha = density * edge;
+          if (alpha <= .003) discard;
+          const float glow = 1.3, cover = .5;    // as the sheet flames: light at the core, share of the background hidden
+          gl_FragColor = vec4(flameColor(smoothstep(visible.x, 1.0, t)) * (glow * uBrightness * alpha), alpha * cover);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }`,
+    });
+    fluidMesh = new THREE.Mesh(fluidGeometry, fluidMaterial);
+    fluidMesh.frustumCulled = false; fluidMesh.visible = false; fluidMesh.renderOrder = RENDER_ORDER;
+    // The sim needs the wind across the sheet, and the sheet faces whoever looks at it.
+    fluidMesh.onBeforeRender = (_renderer, _scene, camera) => { cameraRight.setFromMatrixColumn(camera.matrixWorld, 0); };
+    scene.add(fluidMesh);
+  }
 
   const light = new THREE.PointLight(LIGHT.color, 0, LIGHT.range * size, LIGHT.decay);
   scene.add(light);
@@ -303,8 +365,23 @@ export function createFireVisual(scene, {position, footprint = [.3, .3], rise = 
       uniforms.uSway.value.set((wander(time * SWAY.rate, seed) - .5) * 2 * sway, (wander(time * SWAY.rate, seed + 37) - .5) * 2 * sway);
       uniforms.uPulse.value = 1 + PULSE.depth * look.turbulence * (wander(time * PULSE.rate, seed + 71) - .5) * 2;
 
+      const useFluid = Boolean(fluid) && show.fluid;
+      if (fluid) {
+        const feeding = useFluid && show.flames && intensity > INTENSITY.minimum;
+        fed = feeding ? FLUID.linger : Math.max(0, fed - dt);
+        fluidMesh.visible = useFluid && fed > 0;
+        if (fluidMesh.visible) {
+          const across = wind ? THREE.MathUtils.clamp((wind.x * cameraRight.x + wind.z * cameraRight.z) / FLUID.windFull, -1, 1) * look.windLean : 0;
+          fluid.update(dt, {intensity: feeding ? Math.pow(intensity, INTENSITY.count) * look.density : 0, wind: across});
+          const width = half * 2 * FLUID.widen;
+          fluidUniforms.tHeat.value = fluid.temperature;
+          fluidUniforms.uBase.value.set(position.x, position.y + (rise[1] - FLUID.sink) * size, position.z);
+          fluidUniforms.uSize.value.set(width, width * fluid.aspect * look.height);
+          fluidUniforms.uBrightness.value = look.brightness;
+        }
+      }
       let born = 0;
-      if (show.flames && intensity > INTENSITY.minimum) {
+      if (show.flames && !useFluid && intensity > INTENSITY.minimum) {
         const rate = Math.pow(intensity, INTENSITY.count) * look.density * dt;
         for (const [index, layer] of LAYERS.entries()) {
           due[index] += layer.perSecond * rate;
@@ -352,12 +429,16 @@ export function createFireVisual(scene, {position, footprint = [.3, .3], rise = 
       light.intensity = 0;
       attributes.iStart.needsUpdate = true;
       puffs?.clear();
+      fluid?.clear();
+      fed = 0;
+      if (fluidMesh) fluidMesh.visible = false;
     },
     dispose() {
       if (disposed) return;
       disposed = true;
       scene.remove(mesh, light); geometry.dispose(); material.dispose(); light.dispose();
       puffs?.dispose();
+      if (fluid) { scene.remove(fluidMesh); fluidGeometry.dispose(); fluidMaterial.dispose(); fluid.dispose(); }
     },
   };
   return api;

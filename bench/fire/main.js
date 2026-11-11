@@ -14,7 +14,7 @@ import {aimRay} from '../kit/input.js';
 const WOOD_GLOW = Object.freeze({color: [1, .22, .03], burning: .55, smouldering: .35}), TRIM_SHADE = .75;
 // Where flames start on a crate: half extents of its top (m) and the height range above its base they rise from.
 const CRATE_FIRE = Object.freeze({footprint: [.54, .47], rise: [.1, .82], size: 1.1});
-const flameLook = createFlameLook(), fireParts = {flames: true, smoke: true, embers: true, light: true};
+const flameLook = createFlameLook(), fireParts = {flames: true, fluid: true, smoke: true, embers: true, light: true};
 const renderer = benchRenderer();
 renderer.shadowMap.enabled = true;
 const scene = new T.Scene();
@@ -67,7 +67,7 @@ const crates = setups.map(([x, z, burnSeconds], index) => {
     part(trim, 0, 0.414, side * 0.439, 0.11, 0.98, 0.04).rotation.z = side * 0.7;
   }
   scene.add(group);
-  const fx = createFireVisual(scene, {position: group.position, ...CRATE_FIRE, look: flameLook, source: fire});
+  const fx = createFireVisual(scene, {position: group.position, ...CRATE_FIRE, look: flameLook, source: fire, renderer});
   fx.ready.catch(console.error);
   return {fire, fx, plank, trim};
 });
