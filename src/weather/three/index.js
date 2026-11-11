@@ -23,7 +23,6 @@ const VISIBILITY_TRANSMITTANCE=.02;   // exponential fog keeps 2 % of the light 
 // Fog bank: density x min(max, base + bank). Its billows churn at churn[0] + churn[1] x wind (m/s) times real time.
 // Its colour leans sunShare of the way from the ambient sky toward the sun tint, so banks warm up at dusk.
 const BANK=Object.freeze({base:.55,max:2,churn:[.6,.07],sunShare:.35});
-const SHAFT_STEPS=16;                 // air samples per pixel when only the sun shafts are drawn
 const SHAFT_MIN_SUN=.01;              // sun direction y: below this no sun shafts or bank glow
 // Lightning: automatic flashes above stormFrom storm weight, distance [min, span] m, interval x [min, span], flash seconds;
 // a strike starts strikeAbove m over the hit or cloudShare into the cloud layer; the bolt strength is divided by boltScale.
@@ -54,7 +53,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  const dynamic=new DynamicSky(settings,uniforms,{renderer,camera:{position:worldPosition},environment:environment??defaultEnvironment,assetBaseUrl:assets,fetch,loadTexture});
  const cloudShadows=createCloudShadows(dynamic.cloudUniforms);
  let scattering;
- const bankOffset=new THREE.Vector2(),bankSettings=new THREE.Vector4(),bankShape=new THREE.Vector4(),bankColor=new THREE.Color(),bankAmbient=new THREE.Color();
+ const bankOffset=new THREE.Vector2(),bankSettings=new THREE.Vector4(),bankShape=new THREE.Vector4(),shaftHaze=new THREE.Vector4(),bankColor=new THREE.Color(),bankAmbient=new THREE.Color();
  const wakeHead=new THREE.Vector4(),wakeTail=new THREE.Vector3();
  let bankTime=0;
  let rain=precipitationConfig===false?null:createPrecipitation(group,precipitationConfig);
@@ -181,9 +180,10 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    }
    scattering??=createSunScattering(dynamic.cloudUniforms,sunDir);
    bankSettings.set(bankDensity,look.bankHeight,look.bankScale,look.bankLevel);
-   bankShape.set(look.bankCoverage,look.bankPuffiness,look.bankSunGlow,bankDensity>0?look.bankSteps:SHAFT_STEPS);
+   bankShape.set(look.bankCoverage,look.bankPuffiness,look.bankSunGlow,look.bankSteps);
    const bankSunStrength=bankDensity>0&&sunDir.y>SHAFT_MIN_SUN&&!system.day.moonLit?Math.min(1,Math.sqrt(sun.intensity/APPEARANCE_DEFAULTS.sunIntensity)):0;
-   scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,look.heightFog?bankColor:fogObject.color,sun.color,bankSunStrength,bankSettings,bankShape,bankOffset,bankTime,wakeHead,wakeTail,input);
+   shaftHaze.set(look.shaftDensity,look.shaftHeight,look.shaftRange,look.shaftContrast);
+   scattering.render(renderer,scene,camera,uniforms.uSunCol.value,shafts,shaftHaze,look.shaftRays,look.shaftRayGlare,look.heightFog?bankColor:fogObject.color,sun.color,bankSunStrength,bankSettings,bankShape,bankOffset,bankTime,wakeHead,wakeTail,input);
   },
   dispose(){
    if(disposed)return;disposed=true;cloudShadows.dispose();bolt?.dispose();scattering?.dispose();dynamic.dispose();rain?.dispose();dome.geometry.dispose();dome.material.dispose();scene.remove(group);
