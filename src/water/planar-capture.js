@@ -4,7 +4,7 @@ import {createTargetScope} from './ocean/passes.js';
 
 // Shared adaptation of WebAquarium's pond-reflection and ocean-reflections passes.
 export function createPlanarCapture(renderer) {
- const matrix = new THREE.Matrix4(), inverse = new THREE.Matrix4();
+ const matrix = new THREE.Matrix4(), inverse = new THREE.Matrix4(), capturedFrom = new THREE.Matrix4();
  const scoped = createTargetScope(renderer);
  let reflector, lastCapture = -Infinity, lastHeight, lastBelow, stale = true;
  return {
@@ -23,12 +23,16 @@ export function createPlanarCapture(renderer) {
    }
    const now = performance.now();
    if (height !== lastHeight || below !== lastBelow) stale = true;
+   // A mirror image belongs to the eye it was captured from. While the camera moves, capture every frame, or the
+   // reflection trails the view; `hz` only limits the refresh while the camera is still (moving objects, sky).
+   camera.updateWorldMatrix(true, false);
+   if (!capturedFrom.equals(camera.matrixWorld)) stale = true;
    if (!stale && now - lastCapture < 1000 / hz) return;
    stale = false;
    reflector.rotation.x = (below ? 1 : -1) * Math.PI / 2;
    reflector.position.y = height;
    reflector.updateMatrixWorld(true);
-   camera.updateWorldMatrix(true, false);
+   capturedFrom.copy(camera.matrixWorld);
    const xr = renderer.xr.enabled, shadows = renderer.shadowMap.autoUpdate;
    try {
     scoped(() => reflector.onBeforeRender(renderer, scene, camera));
