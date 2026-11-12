@@ -29,6 +29,7 @@ const PAGES = {
   fire: ['fire', 'particles'], flocking: ['flocking'], ocean: ['water'], particles: ['particles'],
   pond: ['water', 'particles'], terrain: ['terrain', 'surface'], ui: ['ui'], vegetation: ['vegetation', 'trees'],
   water: ['water'], weather: ['weather'], sound: ['sound'],
+  interaction: ['interaction', 'puzzle'],
 };
 const EVERY_PAGE = ['core', 'stage', 'ui'];
 const MIXED_PAGES = ['demo-ocean', 'demo-all'];   // every module on one weather: no import rule

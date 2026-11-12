@@ -17,6 +17,9 @@
   "exports": {
     "./sound": "./src/sound/index.js",
     "./sound/three": "./src/sound/three.js",
+    "./interaction": "./src/interaction/index.js",
+    "./interaction/three": "./src/interaction/three.js",
+    "./puzzle": "./src/puzzle/index.js",
     "./ui": "./src/ui/index.js",
     "./ui/theme.css": "./src/ui/theme.css",
     "./core": "./src/core/index.js",

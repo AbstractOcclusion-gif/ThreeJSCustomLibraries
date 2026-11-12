@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>three-kit | Interaction and Puzzles</title>
+<style>
+body { margin: 0; background: #182934; color: #eef6f7; font: 15px system-ui; }
+canvas { display: block; touch-action: none; }
+aside { position: absolute; inset: 1rem auto auto 1rem; width: min(23rem, calc(100% - 4rem)); padding: 1rem; border-radius: .75rem; background: #14232eee; }
+h1 { margin: 0; font-size: 1.3rem; }
+p { margin: .55rem 0; }
+button { font: inherit; }
+output { display: block; min-height: 1.4em; }
+progress { width: 100%; }
+</style>
+</head>
+<body>
+<aside>
+<h1>Interaction &amp; Puzzles</h1>
+<p>Click an object or point at it and press E. Hold the gate latch to open it.</p>
+<p id="order"></p>
+<output id="sequence"></output>
+<output id="weight"></output>
+<p>Click a weight to move it onto or off the plate.</p>
+<button id="reset" type="button">Reset puzzles</button>
+<label><input id="screen" type="checkbox"> Block latch with screen</label>
+<p id="prompt"></p>
+<progress id="hold" max="1" value="0" aria-label="Interaction hold progress"></progress>
+<p id="error" hidden></p>
+</aside>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
