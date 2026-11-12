@@ -84,9 +84,13 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  const weightMap = createDataTexture(weights, nx, nz, {filter: 'linear'});
  const forestWeights = settings?.forestCover !== undefined ? new Uint8Array(samples.length) : null;
  const forestMap = forestWeights ? createDataTexture(forestWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
+ // Sand has its own map too: it lies over the other layers. Pass rules.sandBelow to enable it.
+ const sandWeights = settings?.sandBelow !== undefined ? new Uint8Array(samples.length) : null;
+ const sandMap = sandWeights ? createDataTexture(sandWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
  const bounds = new THREE.Vector4(...origin, ...size);
  function updateRules(values = {}) {
   if (!forestMap && values.forestCover > 0) throw Error('Enable forest cover when creating the terrain field');
+  if (!sandMap && values.sandBelow !== undefined) throw Error('Enable sand when creating the terrain field');
   rules.configure(values);
   for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
    const index = z * nx + x, height = samples[index];
@@ -95,12 +99,15 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    const dx = (right - left) / (stepX * (x === 0 || x === nx - 1 ? 1 : 2));
    const dz = (south - north) / (stepZ * (z === 0 || z === nz - 1 ? 1 : 2));
    const curvature = (left + right - 2 * height) / (stepX * stepX) + (north + south - 2 * height) / (stepZ * stepZ);
-   const layers = rules.weights({x: bounds.x + x * stepX, z: bounds.y + z * stepZ, height, slope: Math.hypot(dx, dz), curvature});
+   const sample = {x: bounds.x + x * stepX, z: bounds.y + z * stepZ, height, slope: Math.hypot(dx, dz), curvature};
+   const layers = rules.weights(sample);
    for (let i = 0; i < BASE_LAYERS; i++) weights[index * BASE_LAYERS + i] = Math.round(layers[i] * BYTE);
    if (forestWeights) forestWeights[index] = Math.round((layers[FOREST_LAYER] ?? 0) * BYTE);
+   if (sandWeights) sandWeights[index] = Math.round(rules.sand(sample) * BYTE);
   }
   weightMap.needsUpdate = true;
   if (forestMap) forestMap.needsUpdate = true;
+  if (sandMap) sandMap.needsUpdate = true;
  }
  function heightAt(x, z) {
   const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ;
@@ -112,14 +119,20 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  }
  // Match the shader's linear sampling of the baked layer map before texture height blending.
  function layerWeightAt(x, z, layer) {
+  const forest = layer === FOREST_LAYER;
+  if (forest && !forestWeights) return 0;
+  return forest ? weightAt(forestWeights, 1, 0, x, z) : weightAt(weights, BASE_LAYERS, layer, x, z);
+ }
+ // Share of sand at a point (0..1); 0 where the field has no sand.
+ function sandWeightAt(x, z) {
+  return sandWeights ? weightAt(sandWeights, 1, 0, x, z) : 0;
+ }
+ // Linear sample of one channel of a byte weight map with `stride` channels per sample.
+ function weightAt(data, stride, channel, x, z) {
   const gx = THREE.MathUtils.clamp((x - bounds.x) / stepX, 0, nx - 1);
   const gz = THREE.MathUtils.clamp((z - bounds.y) / stepZ, 0, nz - 1);
   const ix = Math.min(Math.floor(gx), nx - 2), iz = Math.min(Math.floor(gz), nz - 2);
-  const forest = layer === FOREST_LAYER;
-  if (forest && !forestWeights) return 0;
-  const data = forest ? forestWeights : weights;
-  const stride = forest ? 1 : BASE_LAYERS;
-  const i = (iz * nx + ix) * stride + (forest ? 0 : layer);
+  const i = (iz * nx + ix) * stride + channel;
   const lerp = THREE.MathUtils.lerp;
   const north = lerp(data[i], data[i + stride], gx - ix);
   const south = lerp(data[i + nx * stride], data[i + (nx + 1) * stride], gx - ix);
@@ -335,6 +348,6 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, forestMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, updateRules, deform, compactSnow, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
-  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); snowMap.dispose(); }};
+ return {geometry, bounds, heightMap, weightMap, forestMap, sandMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, sandWeightAt, updateRules, deform, compactSnow, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
+  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); sandMap?.dispose(); snowMap.dispose(); }};
 }

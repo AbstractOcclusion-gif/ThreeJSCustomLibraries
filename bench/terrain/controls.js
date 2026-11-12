@@ -7,6 +7,7 @@ export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
     ['snowLine', 'Snow line · m', -2, 22, .5],
     ['mudBelow', 'Mud below · m', -3, 6, .1],
     ['forestCover', 'Forest floor coverage', 0, 1, .01],
+    ['sandBelow', 'Sand below · m', -7, 22, .1],
   ];
   for (const [key, label, min, max, step] of primary) {
     automatic.add(rules, key, min, max, step).name(label).onFinishChange(onLayersChanged);
@@ -79,6 +80,21 @@ export function snowLookControls(gui, look) {
   folder.add(look.sparkle, 'value', 0, 2, .01).name('Sparkle');
   folder.add(look.edgeBreakup, 'value', 0, 1, .01).name('Edge break-up');
   folder.add(look.trackRelief, 'value', 0, .2, .005).name('Track edge relief · m');
+  return folder;
+}
+
+// Sand shading (createSandLook). The colour is edited as a hex string and written to the shared uniform.
+export function sandLookControls(gui, look) {
+  const folder = gui.addFolder('Sand look').close();
+  const colors = {color: '#' + look.color.value.getHexString()};
+  folder.addColor(colors, 'color').name('Sand colour').onChange(value => look.color.value.set(value));
+  folder.add(look.variation, 'value', 0, 1, .01).name('Colour patches');
+  folder.add(look.grain, 'value', 0, 1, .01).name('Grain');
+  folder.add(look.rippleSize, 'value', .04, .6, .01).name('Ripple spacing · m');
+  folder.add(look.rippleHeight, 'value', 0, 3, .01).name('Ripple height');
+  folder.add(look.rippleHeading, 'value', 0, 360, 1).name('Wind heading · °');
+  folder.add(look.sparkle, 'value', 0, 2, .01).name('Sparkle');
+  folder.add(look.roughness, 'value', .5, 1, .01).name('Roughness');
   return folder;
 }
 

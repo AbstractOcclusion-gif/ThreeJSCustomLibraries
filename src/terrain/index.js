@@ -22,6 +22,20 @@ export function createSnowLook() {
  };
 }
 
+// Sand shading, shared by every terrain material that receives the same look. The sand itself is procedural.
+export function createSandLook() {
+ return {
+  color: {value: new THREE.Color('#d6c096')},       // dry sand
+  variation: {value: .5},      // large patches of lighter and darker sand
+  grain: {value: .5},          // fine speckle of individual grains
+  rippleSize: {value: .14},    // m between two wind ripple crests
+  rippleHeight: {value: 1},    // relief of the wind ripples (0 = smooth sand)
+  rippleHeading: {value: 35},  // degrees the wind blows along: 0 = +X, 90 = +Z; ripples run across it
+  sparkle: {value: .5},        // brightness of the mineral glints
+  roughness: {value: .93},     // dry sand; the surface wetness makes it glossier as on any ground
+ };
+}
+
 export function createTerrainAppearance() {
  return {
   tiling: {value: .45}, rockScale: {value: .55}, sharpness: {value: 3.5}, antiTiling: {value: .85},
@@ -97,7 +111,7 @@ float terrainFlowSkin(vec2 world, vec2 velocity) {
 ${SKY_GLSL}
 #endif
 
-#ifdef TERRAIN_SNOW_DETAIL
+#if defined(TERRAIN_SNOW_DETAIL) || defined(TERRAIN_SAND)
 // Change of the track mask per metre along world X and Z: points toward the inside of a track.
 vec2 terrainTrackSlope(vec3 world) {
  if (!surfaceHasTracks) return vec2(0.0);
@@ -108,10 +122,10 @@ vec2 terrainTrackSlope(vec3 world) {
  return vec2(east - west, south - north) / (2.0 * texel * surfaceTrackBounds.zw);
 }
 
-// Ice crystals. Each cell holds one facet tilted at random around the surface normal; it flashes when it mirrors
+// Ice crystals and mineral grains. Each cell holds one facet tilted at random around the surface normal; it flashes when it mirrors
 // the sun toward the eye. Three cell sizes keep glints from the foreground to the distance; a glint stays about one
 // pixel wide whatever its cell size, and a level fades out before its cells become subpixel.
-float terrainSnowGlints(vec3 world, vec3 surfaceNormal, vec3 halfway, float footprint) {
+float terrainCrystalGlints(vec3 world, vec3 surfaceNormal, vec3 halfway, float footprint) {
  const float finestCellsPerMeter = 240.0;
  const float coarserScale = .33;
  const float facetSpread = .75;
@@ -133,6 +147,28 @@ float terrainSnowGlints(vec3 world, vec3 surfaceNormal, vec3 halfway, float foot
   cells *= coarserScale;
  }
  return glints;
+}
+#endif
+
+#ifdef TERRAIN_SAND
+uniform sampler2D terrainSandWeight;
+uniform vec3 terrainSandColor;
+uniform float terrainSandHeading;   // degrees the wind blows along: 0 = +X, 90 = +Z
+uniform float terrainSandVariation, terrainSandGrain, terrainSandRippleSize, terrainSandRippleHeight, terrainSandSparkle, terrainSandRoughness;
+
+// Height (0..1) of the wind ripples: crests run across the wind, gentle on the windward side and steep on the lee.
+// Noise bends the crests and makes them fork, and lets them die out in patches.
+float terrainSandRipples(vec2 p) {
+ const float bend = .9;            // ripple spacings a crest wanders
+ const float bendFrequency = .35;  // per metre
+ const float lee = .35;            // how far the crest is pushed downwind: 0 symmetric
+ float heading = radians(terrainSandHeading);
+ float along = dot(p, vec2(cos(heading), sin(heading))) / terrainSandRippleSize;
+ along += (valueNoise(vec3(p * bendFrequency, 31.0)) - .5) * 2.0 * bend + (valueNoise(vec3(p * bendFrequency * 3.1, 47.0)) - .5) * bend * .5;
+ float phase = fract(along);
+ float crest = phase < 1.0 - lee ? phase / (1.0 - lee) : (1.0 - phase) / lee;
+ float patches = smoothstep(.25, .6, valueNoise(vec3(p * .21, 59.0)));
+ return crest * crest * (3.0 - 2.0 * crest) * mix(.35, 1.0, patches);
 }
 #endif
 
@@ -217,6 +253,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
  vec3 terrainGround = vSurfaceWorld;
  float terrainContact = 1.0;
  float terrainGroundRelief = .5;
+ float sandCover = 0.0;
  if (terrainProp) {
   terrainGround.y = terrainHeightAt(terrainGrid, terrainNormal);
   terrainContact = 0.0;
@@ -263,11 +300,47 @@ const TERRAIN_FRAGMENT = /* glsl */`
  diffuseColor.rgb = mix(diffuseColor.rgb, terrainColor, terrainContact);
  roughnessFactor = mix(roughnessFactor, dot(terrainWeights, vec4(.95, .85, .82, .75)) + .92 * forestWeight, terrainContact);
  metalnessFactor *= 1.0 - terrainContact;
+ vec3 sandNormal = terrainNormal;
+ #ifdef TERRAIN_SAND
+ sandCover = terrainProp ? 0.0 : textureLod(terrainSandWeight, (terrainGrid + .5) / terrainSize, 0.0).r;
+ if (sandCover > 0.0) {
+  // Sand fills the hollows of the ground it meets first, so its edge follows the texture instead of fading evenly.
+  const float sandEdgeWidth = .25;
+  float sandEdge = terrainGroundRelief * (1.0 - sandEdgeWidth);
+  sandCover = smoothstep(sandEdge, sandEdge + sandEdgeWidth, sandCover);
+  vec2 sandPoint = vSurfaceWorld.xz;
+  float sandFootprint = length(fwidth(sandPoint));
+  const float patchFrequency = .17;        // large colour patches per metre
+  const float patchShade = .16;            // albedo lost in the darkest patch at full variation
+  const float grainsPerMeter = 420.0;
+  const float grainShade = .2;             // albedo range of single grains at full grain
+  float shadePatch = valueNoise(vec3(sandPoint * patchFrequency, 13.0)) * .65 + valueNoise(vec3(sandPoint * patchFrequency * 4.3, 17.0)) * .35;
+  float grainsVisible = 1.0 - smoothstep(.3, .9, sandFootprint * grainsPerMeter);
+  float grains = (hash12(floor(sandPoint * grainsPerMeter)) - .5) * grainsVisible;
+  vec3 sandAlbedo = terrainSandColor * (1.0 - patchShade * terrainSandVariation * (1.0 - shadePatch)) * (1.0 + grains * grainShade * terrainSandGrain);
+  // Ripples fade out before a pixel spans one, and on slopes too steep to hold them.
+  const float rippleRelief = .02;          // m from trough to crest at ripple height 1
+  float ripplesVisible = (1.0 - smoothstep(.25, .6, sandFootprint / terrainSandRippleSize)) * smoothstep(.7, .92, terrainNormal.y);
+  if (ripplesVisible > 0.0 && terrainSandRippleHeight > 0.0) {
+   float sampleStep = terrainSandRippleSize * .12;
+   float here = terrainSandRipples(sandPoint);
+   vec2 slope = vec2(terrainSandRipples(sandPoint + vec2(sampleStep, 0.0)) - here, terrainSandRipples(sandPoint + vec2(0.0, sampleStep)) - here)
+     * (rippleRelief * terrainSandRippleHeight * ripplesVisible / sampleStep);
+   sandNormal = normalize(terrainNormal - vec3(slope.x, 0.0, slope.y));
+   // Troughs collect a little shade and darker, heavier grains.
+   sandAlbedo *= 1.0 - .08 * terrainSandRippleHeight * ripplesVisible * (1.0 - here);
+  }
+  diffuseColor.rgb = mix(diffuseColor.rgb, sandAlbedo, sandCover * terrainContact);
+  roughnessFactor = mix(roughnessFactor, terrainSandRoughness, sandCover * terrainContact);
+ }
+ #endif
  if (terrainDetailStrength > 0.0) {
   vec3 detail = terrainNormalDetail(terrainP * 3.4, terrainDx * 3.4, terrainDy * 3.4, terrainSign, terrainAxes);
-  vec3 detailedNormal = normalize(terrainNormal + detail * terrainDetailStrength);
+  // The shared rock detail does not belong on sand.
+  vec3 detailedNormal = normalize(terrainNormal + detail * terrainDetailStrength * (1.0 - sandCover));
   normal = normalize(mix(normal, transformDirection(detailedNormal, viewMatrix), terrainContact));
  }
+ if (sandCover > 0.0) normal = normalize(mix(normal, transformDirection(sandNormal, viewMatrix), sandCover * terrainContact));
  }
  float shoreWet = 0.0;
  if (terrainInside && terrainShoreWidth > 0.0) {
@@ -278,7 +351,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), drainage, runoffFlow, puddleSky, ...surface
+ field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, ...surface
 } = {}) {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
@@ -295,6 +368,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (drainage && puddleSky) material.defines = {...material.defines, TERRAIN_PUDDLE_SKY: 1};
  if (snowMaterial) material.defines = {...material.defines, TERRAIN_SNOW_DETAIL: 1};
  if (field.forestMap) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
+ if (field.sandMap) material.defines = {...material.defines, TERRAIN_SAND: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  const compileSurface = material.onBeforeCompile;
  const uniforms = {
@@ -309,6 +383,9 @@ export function createTerrainMaterial(parameters = {}, {
   terrainLayerArray: {value: layerArray ?? null},
   terrainGrass: {value: layers?.grass}, terrainRock: {value: layers?.rock}, terrainSnow: {value: layers?.snow}, terrainMud: {value: layers?.mud},
   terrainForest: {value: layers?.forest}, terrainForestWeight: {value: field.forestMap ?? null},
+  terrainSandWeight: {value: field.sandMap ?? null}, terrainSandColor: sandLook.color, terrainSandHeading: sandLook.rippleHeading,
+  terrainSandVariation: sandLook.variation, terrainSandGrain: sandLook.grain, terrainSandRippleSize: sandLook.rippleSize,
+  terrainSandRippleHeight: sandLook.rippleHeight, terrainSandSparkle: sandLook.sparkle, terrainSandRoughness: sandLook.roughness,
   terrainDetail: {value: detailNormal}, terrainProp: {value: contactBand !== undefined}, terrainContactBand: {value: contactBand ?? 0},
   terrainTiling: appearance.tiling, terrainSharpness: appearance.sharpness, terrainAntiTiling: appearance.antiTiling,
   terrainRockScale: appearance.rockScale ?? {value: .55},
@@ -468,6 +545,21 @@ export function createTerrainMaterial(parameters = {}, {
     diffuseColor.rgb = mix(diffuseColor.rgb, terrainSnowAlbedo, snowCoverage);
    `)
    .replace('#include <opaque_fragment>', `
+    #if defined(TERRAIN_SAND) && NUM_DIR_LIGHTS > 0
+    {
+     // Mineral grains flash in the sun where the sand is dry and bare.
+     float bareSand = sandCover * (1.0 - snowCoverage) * (1.0 - wet);
+     vec3 sandLight = directionalLights[0].direction;
+     if (bareSand > 0.0 && terrainSandSparkle > 0.0 && dot(normal, sandLight) > 0.0) {
+      const float sandGlintStrength = 1.1;
+      vec3 sandHalfway = inverseTransformDirection(normalize(sandLight + geometryViewDir), viewMatrix);
+      float sandGlints = terrainCrystalGlints(vSurfaceWorld, inverseTransformDirection(normal, viewMatrix), sandHalfway, length(fwidth(vSurfaceWorld.xz)));
+      // The lit result already carries the shadow map: glints scale with it so none flash in cast shadow.
+      float sandLit = saturate(luminance(reflectedLight.directDiffuse) * 4.0);
+      outgoingLight += directionalLights[0].color * sandGlints * sandGlintStrength * terrainSandSparkle * bareSand * sandLit;
+     }
+    }
+    #endif
     #ifdef TERRAIN_SNOW_DETAIL
     if (snowCoverage > 0.0) {
      // In shade snow is lit by the sky alone, which reads blue.
@@ -493,7 +585,7 @@ export function createTerrainMaterial(parameters = {}, {
      if (terrainSnowSparkle > 0.0 && facing > 0.0) {
       vec3 halfway = inverseTransformDirection(normalize(snowLight + geometryViewDir), viewMatrix);
       vec3 worldNormal = inverseTransformDirection(normal, viewMatrix);
-      float glints = terrainSnowGlints(vSurfaceWorld, worldNormal, halfway, length(fwidth(vSurfaceWorld.xz)));
+      float glints = terrainCrystalGlints(vSurfaceWorld, worldNormal, halfway, length(fwidth(vSurfaceWorld.xz)));
       outgoingLight += sunColor * sunVisibility * snowCoverage * glints * glintStrength * terrainSnowSparkle
         * (1.0 - packedGlintLoss * compacted);
      }

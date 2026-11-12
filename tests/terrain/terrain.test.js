@@ -17,6 +17,22 @@ test('terrain field validates its inputs, samples heights inside its bounds and 
  assert.ok(Math.abs(noise(.3, .7)) <= 1);
 });
 
+test('sand lies below its altitude, is off unless enabled and cannot be configured on a field without it', () => {
+ const nx = 9, nz = 9, heights = new Float32Array(nx * nz).map((_, i) => (i % nx) * .5);
+ const plain = createTerrainField({origin: [0, 0], size: [8, 8], resolution: [nx, nz], heights, seed: 3});
+ assert.equal(plain.sandMap, null);
+ assert.equal(plain.sandWeightAt(0, 4), 0);
+ assert.throws(() => plain.updateRules({sandBelow: 2}), /sand/);
+ plain.dispose();
+ const field = createTerrainField({origin: [0, 0], size: [8, 8], resolution: [nx, nz], heights, seed: 3, rules: {sandBelow: 2, sandBlend: .2, rockSlope: 1.8}});
+ assert.ok(field.sandMap);
+ assert.ok(field.sandWeightAt(0, 4) > .95);
+ assert.equal(field.sandWeightAt(8, 4), 0);
+ field.updateRules({sandBelow: -5, sandBlend: .2, rockSlope: 1.8});
+ assert.equal(field.sandWeightAt(0, 4), 0);
+ field.dispose();
+});
+
 test('ocean coast terrain builds on the lighting hook and shares its uniforms', () => {
  const scene = new THREE.Scene(), lighting = createLighting();
  const coast = new OceanCoastTerrain({scene, settings: {centerZ: -220}, lighting});

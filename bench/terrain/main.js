@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
-import {createSnowLook, createTerrainAppearance, createTerrainDrainage, createTerrainField, createTerrainMaterial, createTerrainRunoff, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
+import {createSandLook, createSnowLook, createTerrainAppearance, createTerrainDrainage, createTerrainField, createTerrainMaterial, createTerrainRunoff, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
 import {createSurfaceLook, createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
-import {runoffControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
+import {runoffControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
 import {createTerrainBasins} from './basins.js';
 import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from './footsteps.js';
 import {CONTACT_SURFACES, createTerrainImpacts} from './impacts.js';
@@ -52,7 +52,8 @@ const heights = Float32Array.from({length: resolution ** 2}, (_, index) => {
   const z = Math.floor(index / resolution) * sampleSpacing - half;
   return basins.heightAt(x, z);
 });
-const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0};
+// Sand starts below the lowest ground, so none shows until 'Sand below' is raised.
+const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forestCover: 0, sandBelow: -7};
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
 // Live copies of the defaults, edited from the panel.
 const paint = {radius: TRACK.radius, depth: TRACK.depth, load: TRACK.load};
@@ -74,7 +75,8 @@ const rainAmount = {value: 0};
 const rills = {value: 1};
 const puddleFill = {value: 0};
 const snowLook = createSnowLook();
-const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial, snowLook, rainAmount, look: surfaceLook};
+const sandLook = createSandLook();
+const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial, snowLook, sandLook, rainAmount, look: surfaceLook};
 const groundMaterial = createTerrainMaterial({}, {
   ...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast,
   drainage: {texture: drainage.texture, fill: puddleFill},
@@ -195,6 +197,7 @@ function resetTerrain() {
 }
 surfaceFolder.add({clear: resetTerrain}, 'clear').name('Reset tracks and terrain');
 snowLookControls(gui, snowLook);
+sandLookControls(gui, sandLook);
 snowBodyControls(gui, {field, onRelay: resetTerrain});
 snowTrackControls(gui, {field, paint, footstep, contact: contactSurfaces.snow});
 const rainFolder = gui.addFolder('Rain and runoff');
@@ -319,7 +322,7 @@ startFrameLoop(renderer, (dt, now) => {
   if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; $('status').textContent = `${span} m square · ${resolution}² heights\nwetness ${wetness.toFixed(2)} · snow ${surface.snow ? 'on' : 'off'}`; }
 });
 document.body.dataset.ready = 'true';
-window.terrainBench = {field, rules, appearance, surfaceWeather, surfaceWater, tracks, drainage, runoff, impacts, rainAmount, rills, puddleFill, stage, scene, camera, renderer};
+window.terrainBench = {field, rules, sandLook, appearance, surfaceWeather, surfaceWater, tracks, drainage, runoff, impacts, rainAmount, rills, puddleFill, stage, scene, camera, renderer};
 onLeave(() => {
   renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort();
   snowMaterial.normal.dispose(); snowMaterial.roughness.dispose();
