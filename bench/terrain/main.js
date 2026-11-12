@@ -9,7 +9,7 @@ import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} f
 import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
-import {runoffControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
+import {groundTrackControls, runoffControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
 import {createTerrainBasins} from './basins.js';
 import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from './footsteps.js';
 import {CONTACT_SURFACES, createTerrainImpacts} from './impacts.js';
@@ -183,6 +183,10 @@ surfaceFolder.add({roll() {
   enableTestSnow();
   impacts.launch('sphere', 'snow');
 }}, 'roll').name('Roll ball in snow');
+surfaceFolder.add({roll() {
+  if (surface.snow) { surface.snow = false; applySurface(); }
+  impacts.launch('sphere', 'mud');
+}}, 'roll').name('Roll ball on mud and sand');
 surfaceFolder.add({walk() {
   enableTestSnow();
   stampFootstepTrail({field, tracks, ...FOOTSTEP_DEMO, onSample: impacts.onHeightSample, step: footstep});
@@ -200,6 +204,7 @@ snowLookControls(gui, snowLook);
 sandLookControls(gui, sandLook);
 snowBodyControls(gui, {field, onRelay: resetTerrain});
 snowTrackControls(gui, {field, paint, footstep, contact: contactSurfaces.snow});
+groundTrackControls(gui, contactSurfaces);
 const rainFolder = gui.addFolder('Rain and runoff');
 rainFolder.add(surface, 'melt', 0, 1, .05).name('Snow melt');
 rainFolder.add(rainAmount, 'value', 0, 1, .05).name('Rain on surfaces');

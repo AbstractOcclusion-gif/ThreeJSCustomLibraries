@@ -33,6 +33,19 @@ test('sand lies below its altitude, is off unless enabled and cannot be configur
  field.dispose();
 });
 
+test('digging bare soil pushes a share of it up into a rim and validates the share', () => {
+ const nx = 33, nz = 33, heights = new Float32Array(nx * nz);
+ const field = createTerrainField({origin: [0, 0], size: [8, 8], resolution: [nx, nz], heights, seed: 3});
+ assert.throws(() => field.deform(4, 4, 1, .1, undefined, {rimShare: 2}), /rim share/);
+ field.deform(2, 2, 1, .1);
+ assert.ok(field.heightAt(2, 2) < -.09);
+ assert.equal(field.heightAt(3, 2), 0);
+ field.deform(6, 6, 1, .1, undefined, {rimShare: .6});
+ assert.ok(field.heightAt(6, 6) < -.09);
+ assert.ok(field.heightAt(7, 6) > 0 && field.heightAt(7, 6) <= .1);
+ field.dispose();
+});
+
 test('ocean coast terrain builds on the lighting hook and shares its uniforms', () => {
  const scene = new THREE.Scene(), lighting = createLighting();
  const coast = new OceanCoastTerrain({scene, settings: {centerZ: -220}, lighting});

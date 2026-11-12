@@ -42,7 +42,9 @@ export function validateSnow(values) {
 // Highest the snow surface may stand above the soil at depth scale 1: bounds every snow edit.
 const MAX_SNOW_RISE = SNOW_FIELDS.driftDepth.max + SNOW_FIELDS.driftVariation.max + SNOW_FIELDS.rimMaxRise.max;
 // Track rim profile in shares of the track radius: rises from start, peaks, and ends.
+// Where displaced material piles up around a track, as shares of the track radius. Snow and soil rims share it.
 const SNOW_RIM = Object.freeze({start: .7, peak: .95, end: 1.2});
+const SOIL_RIM_MAX_RISE = .1;  // m a rim of soil (mud, sand) may stand above the original ground
 const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
 const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: recompute all normals at once
 // Snow cover: depth = (driftDepth + driftVariation x noise) x smoothstep(flatness). The noise is two octaves (the second
@@ -177,7 +179,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
  }
  // Lowers the samples within radius to nextHeight(index, falloff, previous). Returns the displaced volume in cubic metres.
- function press(x, z, radius, onSample, nextHeight) {
+ function press(x, z, radius, onSample, nextHeight, soilRimShare = 0) {
   const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ;
   let volume = 0;
   for (let j = Math.max(0, Math.ceil(gz - radius / stepZ)); j <= Math.min(nz - 1, Math.floor(gz + radius / stepZ)); j++) {
@@ -193,17 +195,21 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
     volume += (previous - samples[index]) * stepX * stepZ;
    }
   }
-  if (snowEnabled && snowTrackRims && volume > 0) {
-   raiseSnowRim(gx, gz, radius, volume / (stepX * stepZ), onSample);
+  if (volume > 0) {
+   if (snowEnabled && snowTrackRims) raiseSnowRim(gx, gz, radius, volume / (stepX * stepZ), onSample);
+   else if (!snowEnabled && soilRimShare > 0) raiseSoilRim(gx, gz, radius, volume / (stepX * stepZ) * soilRimShare, onSample);
   }
   return volume;
  }
- function deform(x, z, radius, depth, onSample) {
+ // Digs the ground under a contact. rimShare (0..1) is the share of the displaced soil pushed up around the dig, as
+ // soft ground (mud, sand) does; it applies to bare soil only: snow rims follow the snow settings.
+ function deform(x, z, radius, depth, onSample, {rimShare = 0} = {}) {
   if (![x, z, radius, depth].every(Number.isFinite) || radius <= 0 || depth <= 0) return 0;
+  if (!(rimShare >= 0 && rimShare <= 1)) throw Error('Terrain deformation needs a rim share from zero to one');
   return press(x, z, radius, onSample, (index, falloff, previous) => {
    const minimum = snowEnabled ? Math.min(previous, soil[index] + packedFloor(index)) : original[index] - MAX_DIG;
    return Math.max(minimum, previous - depth * falloff);
-  });
+  }, rimShare);
  }
  // Packs the snow under a contact. load (0..1) is the share of the packable depth pressed out at the centre, so the sink
  // follows the local snow depth and pressing again with the same load does not sink further.
@@ -218,6 +224,24 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   });
  }
  function raiseSnowRim(gx, gz, radius, removedDepth, onSample) {
+  const highest = (snowSettings.driftDepth + snowSettings.driftVariation + snowSettings.rimMaxRise) * snowDepthScale;
+  raiseRim(gx, gz, radius, removedDepth * snowSettings.rimShare, (index, rise) => {
+   const next = Math.fround(soil[index] + Math.min(highest, snow[index] + rise));
+   if (next <= samples[index]) return;
+   snow[index] = next - soil[index];
+   writeHeight(index, next, onSample);
+  });
+ }
+ function raiseSoilRim(gx, gz, radius, rimDepth, onSample) {
+  raiseRim(gx, gz, radius, rimDepth, (index, rise) => {
+   const next = Math.fround(Math.min(original[index] + SOIL_RIM_MAX_RISE, soil[index] + rise));
+   if (next <= samples[index]) return;
+   soil[index] = next;
+   writeHeight(index, next, onSample);
+  });
+ }
+ // Spreads rimDepth (summed sample depth, m) over the ring around a track: raise(index, rise) applies each share.
+ function raiseRim(gx, gz, radius, rimDepth, raise) {
   const candidates = [];
   let totalWeight = 0;
   const reach = radius * SNOW_RIM.end;
@@ -232,15 +256,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    }
   }
   if (!totalWeight) return;
-  const rimDepth = removedDepth * snowSettings.rimShare / totalWeight;
-  const highest = (snowSettings.driftDepth + snowSettings.driftVariation + snowSettings.rimMaxRise) * snowDepthScale;
-  for (const {index, weight} of candidates) {
-   const depth = Math.min(highest, snow[index] + rimDepth * weight);
-   const next = Math.fround(soil[index] + depth);
-   if (next <= samples[index]) continue;
-   snow[index] = next - soil[index];
-   writeHeight(index, next, onSample);
-  }
+  for (const {index, weight} of candidates) raise(index, rimDepth * weight / totalWeight);
  }
  function flushDeformation() {
   if (maxX < 0) return false;

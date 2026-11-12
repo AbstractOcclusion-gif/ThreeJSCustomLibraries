@@ -70,6 +70,17 @@ export function snowTrackControls(gui, {field, paint, footstep, contact}) {
   return folder;
 }
 
+// Marks a rolling or landing body leaves in bare mud and sand (CONTACT_SURFACES.mud and .sand).
+export function groundTrackControls(gui, {mud, sand}) {
+  const folder = gui.addFolder('Mud and sand tracks').close();
+  for (const [name, contact] of [['Mud', mud], ['Sand', sand]]) {
+    folder.add(contact, 'print', 0, .3, .005).name(`${name} rolling rut depth · m`);
+    folder.add(contact, 'impact', 0, .6, .01).name(`${name} impact depth · m`);
+    folder.add(contact, 'rimShare', 0, 1, .01).name(`${name} pushed to track rims`);
+  }
+  return folder;
+}
+
 // Snow shading (createSnowLook). Colours are edited as hex strings and written to the shared uniforms.
 export function snowLookControls(gui, look) {
   const folder = gui.addFolder('Snow look');

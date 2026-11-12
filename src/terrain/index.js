@@ -320,7 +320,8 @@ const TERRAIN_FRAGMENT = /* glsl */`
   vec3 sandAlbedo = terrainSandColor * (1.0 - patchShade * terrainSandVariation * (1.0 - shadePatch)) * (1.0 + grains * grainShade * terrainSandGrain);
   // Ripples fade out before a pixel spans one, and on slopes too steep to hold them.
   const float rippleRelief = .02;          // m from trough to crest at ripple height 1
-  float ripplesVisible = (1.0 - smoothstep(.25, .6, sandFootprint / terrainSandRippleSize)) * smoothstep(.7, .92, terrainNormal.y);
+  // A track flattens the ripples it crosses.
+  float ripplesVisible = (1.0 - smoothstep(.25, .6, sandFootprint / terrainSandRippleSize)) * smoothstep(.7, .92, terrainNormal.y) * (1.0 - surfaceTrack(vSurfaceWorld));
   if (ripplesVisible > 0.0 && terrainSandRippleHeight > 0.0) {
    float sampleStep = terrainSandRippleSize * .12;
    float here = terrainSandRipples(sandPoint);
