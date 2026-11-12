@@ -515,3 +515,5 @@ export function createTerrainMaterial(parameters = {}, {
  };
  return material;
 }
+
+export {createValley, VALLEY_DEFAULTS} from './valley.js';
