@@ -11,3 +11,9 @@ These 1K JPEG maps are from Poly Haven under [CC0](https://polyhaven.com/license
 | `brown_mud` | [Brown Mud](https://polyhaven.com/a/brown_mud) |
 
 The terrain bench packs height into the color map’s alpha channel and uses the rock normal as shared detail. Color is sRGB. Normal, height, and roughness are data maps.
+
+Import `TERRAIN_TEXTURE_SETS`, `DEFAULT_TERRAIN_TEXTURES`, and
+`getTerrainTextureMap(setId, role)` from `@abstractocclusion/three-kit/terrain/textures`.
+Map paths are relative to this asset directory. Resolve them against the
+URL where your app serves the bundled maps. The catalogue identifies map
+roles, color spaces, normal conventions, and sources.

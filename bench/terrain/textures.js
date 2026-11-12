@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {TERRAIN_LAYERS} from '../../src/terrain/terrain-rules.js';
+import {DEFAULT_TERRAIN_TEXTURES as sets, getTerrainTextureMap} from '../../src/terrain/textures.js';
 import {configureTexture, createDataTexture} from '../../src/core/data-texture.js';
 
 const files = import.meta.glob([
@@ -7,7 +8,6 @@ const files = import.meta.glob([
  '../../assets/terrain/rock_wall_02/normal.jpg',
  '../../assets/terrain/snow_02/{normal,roughness}.jpg',
 ], {eager: true, query: '?url', import: 'default'});
-const sets = {grass: 'sparse_grass', rock: 'rock_wall_02', snow: 'snow_02', mud: 'brown_mud', forest: 'mud_forest'};
 
 // The layer images share the same resolution and color space. Upload them as one texture unit.
 export function packTerrainLayers(layers) {
@@ -39,7 +39,12 @@ export function packTerrainLayers(layers) {
 
 export async function loadTerrainTextures(renderer, {snowDetail = false} = {}) {
  const loader = new THREE.ImageLoader();
- const load = (set, map) => loader.loadAsync(files[`../../assets/terrain/${set}/${map}.jpg`]);
+ const load = (set, role) => {
+  const {path} = getTerrainTextureMap(set, role);
+  const url = files[`../../assets/terrain/${path}`];
+  if (!url) throw Error(`Terrain bench texture is missing: ${path}`);
+  return loader.loadAsync(url);
+ };
  const [images, rockNormal, snowMaps] = await Promise.all([
   Promise.all(Object.entries(sets).map(([layer, set]) =>
    Promise.all([layer, load(set, 'color'), load(set, 'height')]))),

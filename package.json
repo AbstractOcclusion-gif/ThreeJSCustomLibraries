@@ -38,6 +38,7 @@
     "./flocking": "./src/flocking/index.js",
     "./surface": "./src/surface/index.js",
     "./terrain": "./src/terrain/index.js",
+    "./terrain/textures": "./src/terrain/textures.js",
     "./vegetation": "./src/vegetation/index.js",
     "./trees": "./src/trees/index.js",
     "./boundaries": "./src/boundaries/index.js",
