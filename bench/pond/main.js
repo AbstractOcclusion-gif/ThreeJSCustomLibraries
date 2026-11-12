@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
-import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
+import {createImpactSplash, createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
 import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createIceLook, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
@@ -11,7 +11,7 @@ import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js
 import {bindRippleGesture} from '../ripple-gesture.js';
 import {valueNoise} from '../../src/core/value-noise.js';
 import {configureTexture} from '../../src/core/data-texture.js';
-import {sprayControls} from '../particles/controls.js';
+import {splashControls, sprayControls} from '../particles/controls.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
 
@@ -200,6 +200,18 @@ const spray = createWaterSpray({
  },
  onDeposit(x, z, radius, strength) { if (freeze.progress < 1) ripples.splash(x, z, strength * .5); },
 });
+// A tap or drag on the pond drops something in: the gesture's strength sets the splash, radius metres wide.
+const TAP_SPLASH = Object.freeze({radius: .45, demo: {x: 3.5, z: 3, strength: .9, radius: .7}});
+const splash = createImpactSplash({THREE, scene: fxScene, depth, lighting: {
+ uniforms: {uSunCol: sky.uniforms.uSunCol, uFxAmbient: sky.uniforms.uAmb}, direction: sky.uniforms.uSkySunDir.value,
+}});
+splash.ready.catch(console.error);
+const splashPoint = new THREE.Vector3();
+function splashAt(x, z, strength, radius) {
+  if (freeze.progress >= 1) return;
+  splash.emit(splashPoint.set(x, water.surface.position.y, z), strength, radius);
+  ripples.splash(x, z, strength);
+}
 
 
 
@@ -207,6 +219,7 @@ const state = {...createBenchPondSettings(), bankFoam: .12, discharge: 1, fallFr
 const gui = createBenchPanel('Pond & waterfall');
 stageControls(gui, stage, {wind: false, onChange: () => sky.setEnvironment(stage.environment)}).apply();
 sprayControls(gui, {spray, depth}).close();
+splashControls(gui, splash, {'Drop a rock in': () => splashAt(TAP_SPLASH.demo.x, TAP_SPLASH.demo.z, TAP_SPLASH.demo.strength, TAP_SPLASH.demo.radius)});
 gui.add(state, 'discharge', 0, 2, 0.05).name('Waterfall flow');
 gui.add(state, 'fallFreezes').name('Waterfall freezes');
 // No weather here: this temperature drives the ice when Water > Pond phase is 'Weather' (freezes at -1 °C, thaws above 1 °C).
@@ -244,9 +257,7 @@ const rippleGesture = bindRippleGesture(canvas, controls, event => {
   aimRay(ray, event, canvas, camera);
   if (!ray.ray.intersectPlane(plane, ripplePoint)) return;
   if (Math.hypot(ripplePoint.x / radiusX, ripplePoint.z / radiusZ) < 1) return ripplePoint;
-}, ({x, z}, strength) => {
-  if (freeze.progress < 1) ripples.splash(x, z, strength);
-});
+}, ({x, z}, strength) => splashAt(x, z, strength, TAP_SPLASH.radius));
 bindResize(renderer, camera);
 
 let time = 0, fallTime = 0, nextImpact = 0;
@@ -275,6 +286,7 @@ startFrameLoop(renderer, (dt, now) => {
     spray.splash(sprayPosition, Math.min(1, discharge * FALL.splashShare), FALL.splashRadius);
   }
   spray.update(dt);
+  splash.update(dt);
   if (freezeProgress < 1) ripples.update(dt);
   canvas.dataset.ripples = ripples.active ? 'active' : 'still';
   water.render(time * FLOW_TIME_SCALE, {
@@ -297,6 +309,7 @@ onLeave(() => {
   renderer.setAnimationLoop(null);
   rippleGesture.dispose();
   spray.dispose();
+  splash.dispose();
   water.dispose();
   waterline.dispose();
   freezeMap.dispose();

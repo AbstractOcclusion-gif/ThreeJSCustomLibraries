@@ -14,11 +14,13 @@ export const CONTACT_SURFACES = Object.freeze({
 // every printSpacing m and joined to the last print within joinDistance m. Dig radius (m) and print depth share per contact.
 const CONTACT = Object.freeze({impactSpeed: 2.7, cooldown: .24, printSpacing: .24, joinDistance: 1.1, rollingStrength: .8,
   radius: {impact: 1.3, box: .85, sphere: .65}, printDepthShare: .36});
+// Radius (m) of the mark a body leaves in the track mask. The default is the narrow rut it presses into snow or mud.
+export const TRACK_RADIUS = Object.freeze({sphere: .31, box: .39});
 // Chips thrown by an impact: count from the dug volume (m^3 x perVolume, at most max), shock from the speed change.
 const IMPACT_CHIPS = Object.freeze({max: 26, perVolume: 30, size: 1.2, maxShock: 70, shockPerSpeed: 6});
 const MAX_BLOCKS = 8, ICE_BREAK_ENERGY = 1100, ICE_CRACK_RADIUS = 1.8, FALL_OUT_HEIGHT = -12;   // blocks; J; m; m
 const MAX_SUBSTEPS = 6;
-export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips, surfaces = CONTACT_SURFACES}) {
+export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips, surfaces = CONTACT_SURFACES, trackRadius = TRACK_RADIUS}) {
  const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
  world.defaultContactMaterial.friction = .52;
  world.defaultContactMaterial.restitution = .12;
@@ -44,7 +46,7 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
 
  function stamp(entry, point, previous, strength) {
   if (entry.kind === 'sphere') {
-   tracks.stamp(previous ?? point, point, .31, strength);
+   tracks.stamp(previous ?? point, point, trackRadius.sphere, strength);
    return;
   }
   // Extend along the longest projected box axis. The stamp follows body orientation.
@@ -56,8 +58,8 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    if (projected > extent) { extent = projected; bestAxis.copy(axis); }
   });
   const angle = Math.atan2(bestAxis.z, bestAxis.x), dx = Math.cos(angle) * extent * .7, dz = Math.sin(angle) * extent * .7;
-  tracks.stamp({x: point.x - dx, z: point.z - dz}, {x: point.x + dx, z: point.z + dz}, .39, strength);
-  if (previous) tracks.stamp(previous, point, .39, strength);
+  tracks.stamp({x: point.x - dx, z: point.z - dz}, {x: point.x + dx, z: point.z + dz}, trackRadius.box, strength);
+  if (previous) tracks.stamp(previous, point, trackRadius.box, strength);
  }
 
  world.addEventListener('postStep', () => {

@@ -1,5 +1,21 @@
 import {environmentControls} from '../kit/controls.js';
 
+// Impact splash (createImpactSplash): which parts are drawn and the scales of its look.
+export function splashControls(gui, splash, actions = {}) {
+  const folder = gui.addFolder('Splash');
+  for (const [name, action] of Object.entries(actions)) folder.add({[name]: action}, name);
+  folder.add(splash.show, 'droplets').name('Droplets');
+  folder.add(splash.show, 'chunks').name('Water chunks');
+  folder.add(splash.show, 'jets').name('Entry jets');
+  folder.add(splash.show, 'crown').name('Crown');
+  folder.add(splash.look, 'amount', .2, 3, .05).name('Amount ×');
+  folder.add(splash.look, 'height', .3, 3, .05).name('Height ×');
+  folder.add(splash.look, 'size', .3, 3, .05).name('Size ×');
+  folder.add(splash.look, 'life', .3, 3, .05).name('Duration ×');
+  folder.add(splash.look, 'brightness', .2, 2, .05).name('Brightness ×');
+  return folder;
+}
+
 export function sprayControls(gui, {spray, depth, state, fx}) {
   const folder = gui.addFolder('Water spray');
   if (fx) {
