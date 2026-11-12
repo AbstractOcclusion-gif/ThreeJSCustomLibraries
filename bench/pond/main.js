@@ -19,6 +19,9 @@ import {aimRay} from '../kit/input.js';
 // within spread m across, splashing the ripples at rippleShare x flow and throwing mist and droplets; impact foam = foamShare x flow.
 const FALL = Object.freeze({scrollBase: .5, interval: .18, minFlow: .25, spread: 3, rippleShare: .5, sprayHeight: .12,
   mistRadius: .75, splashShare: .5, splashRadius: .18, foamShare: .75});
+// The fall is moving water, so it freezes after the pond: over this range of the pond's freeze progress. Icicles grow down
+// from the lip while the flow thins to nothing; `columns` icicles across the sheet, the shortest `shortest` of its height.
+const FALL_ICE = Object.freeze({from: .45, to: 1, columns: 11, shortest: .4});
 const FLOW_TIME_SCALE = .12;
 const MAX_ANISOTROPY = 8;   // the pond surface's foam / flow clock against real seconds
 const renderer = benchRenderer();
@@ -125,7 +128,7 @@ foamTile.wrapS = foamTile.wrapT = THREE.RepeatWrapping;
 const sheetGeometry = new THREE.PlaneGeometry(4.6, 6.8, 20, 30);
 const sheetMaterial = new THREE.ShaderMaterial({
  side: THREE.DoubleSide, transparent: true, depthWrite: false,
- uniforms: {tile: {value: foamTile}, time: {value: 0}, discharge: {value: 1}, light: sky.uniforms.uDaylight},
+ uniforms: {tile: {value: foamTile}, time: {value: 0}, discharge: {value: 1}, frozen: {value: 0}, light: sky.uniforms.uDaylight},
  vertexShader: `
  uniform float time;
  varying vec2 sheetUV;
@@ -137,8 +140,27 @@ const sheetMaterial = new THREE.ShaderMaterial({
  }`,
  fragmentShader: `
  uniform sampler2D tile;
- uniform float time, discharge, light;
+ uniform float time, discharge, frozen, light;
  varying vec2 sheetUV;
+ float columnHash(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+ // Icicles hanging from the lip: rgb = colour, a = coverage. They lengthen as the fall freezes; at the top they
+ // merge into a curtain, lower down each ends in its own point.
+ vec4 icicles(float grown) {
+  float column = sheetUV.x * ${FALL_ICE.columns}.0 + .35 * sin(sheetUV.y * 5.0);
+  float id = floor(column), across = fract(column) - .5;
+  float down = 1.0 - sheetUV.y;
+  float reach = mix(${FALL_ICE.shortest}, 1.0, columnHash(id)) * grown;
+  if (reach <= 0.0 || down >= reach) return vec4(0.0);
+  float halfWidth = mix(.38, .7, columnHash(id + 31.0)) * (1.0 - pow(down / reach, 1.6));
+  float body = 1.0 - smoothstep(halfWidth * .7, halfWidth, abs(across));
+  // Near the lip the icicles have grown together into one curtain.
+  body = max(body, 1.0 - smoothstep(.15, .5, down / reach));
+  // Round each icicle: bright along its middle, darker toward its sides, with frozen-in streaks.
+  float middle = 1.0 - abs(across) / max(halfWidth, .001);
+  float streaks = texture2D(tile, vec2(sheetUV.x * 7.0, sheetUV.y * .55)).r;
+  vec3 ice = mix(vec3(.6, .76, .84), vec3(.93, .97, 1.0), sqrt(clamp(middle, 0.0, 1.0)) * .65 + streaks * .35);
+  return vec4(ice, body * .93);
+ }
  void main(){
   vec2 uv = vec2(sheetUV.x * 4.0, sheetUV.y * 1.4 + time);
   vec4 foam = texture2D(tile, uv);
@@ -146,7 +168,12 @@ const sheetMaterial = new THREE.ShaderMaterial({
   float edge = 1.0 - smoothstep(width - .08, width, abs(sheetUV.x - .5));
   float film = foam.a * smoothstep(.16,.8,foam.r + foam.g - foam.b * .32);
   vec3 color = mix(vec3(.16,.31,.32),vec3(.76,.86,.83),film);
-  gl_FragColor = vec4(color * (.2 + .8 * light), edge * min(1.0, discharge) * (.36 + .54 * film));
+  float alpha = edge * min(1.0, discharge) * (.36 + .54 * film);
+  // Ice hangs across the fall's full-flow width, whatever is still running over it.
+  vec4 ice = icicles(frozen);
+  ice.a *= 1.0 - smoothstep(.42, .5, abs(sheetUV.x - .5));
+  color = mix(color, ice.rgb, ice.a);
+  gl_FragColor = vec4(color * (.2 + .8 * light), max(alpha, ice.a));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
  }`,
@@ -176,11 +203,12 @@ const spray = createWaterSpray({
 
 
 
-const state = {...createBenchPondSettings(), bankFoam: .12, discharge: 1, diveHeight: -2.1, airTemperature: 15};
+const state = {...createBenchPondSettings(), bankFoam: .12, discharge: 1, fallFreezes: true, diveHeight: -2.1, airTemperature: 15};
 const gui = createBenchPanel('Pond & waterfall');
 stageControls(gui, stage, {wind: false, onChange: () => sky.setEnvironment(stage.environment)}).apply();
 sprayControls(gui, {spray, depth}).close();
 gui.add(state, 'discharge', 0, 2, 0.05).name('Waterfall flow');
+gui.add(state, 'fallFreezes').name('Waterfall freezes');
 // No weather here: this temperature drives the ice when Water > Pond phase is 'Weather' (freezes at -1 °C, thaws above 1 °C).
 gui.add(state, 'airTemperature', -15, 30, 1).name('Air temperature · °C');
 const {diveControl, diveHeight} = inlandWaterControls(gui.addFolder('Water'), {
@@ -229,9 +257,12 @@ startFrameLoop(renderer, (dt, now) => {
   const freezeProgress = freeze.update(dt, state.airTemperature);
   if (freezeProgress >= 1) rippleGesture.cancel();
   rippleGesture.update(dt);
-  const discharge = state.discharge;
-  fallTime += dt * (FALL.scrollBase + discharge);
-  sheet.visible = discharge > 0;
+  // The fall freezes late; its flow thins away as the icicles grow, and the ice stays when the flow is turned off.
+  const fallFrozen = state.fallFreezes ? THREE.MathUtils.smoothstep(freezeProgress, FALL_ICE.from, FALL_ICE.to) : 0;
+  const discharge = state.discharge * (1 - fallFrozen);
+  fallTime += dt * (FALL.scrollBase + discharge) * (1 - fallFrozen);
+  sheet.visible = discharge > 0 || fallFrozen > 0;
+  sheetMaterial.uniforms.frozen.value = fallFrozen;
   sheetMaterial.uniforms.time.value = fallTime;
   sheetMaterial.uniforms.discharge.value = discharge;
   impact.w = Math.min(1, discharge * FALL.foamShare);
