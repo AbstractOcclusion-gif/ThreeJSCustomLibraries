@@ -7,13 +7,12 @@ import {seededRandom} from '../../src/core/hash.js';
 import {valueNoise} from '../../src/core/value-noise.js';
 import {createDataTexture} from '../../src/core/data-texture.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
-import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
-import {createChannelSurface, createFlowBake, createFreezeTexture, createIceLook, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
+import {createImpactSplash, createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
+import {createChannelSurface, createFlowBake, createFoamLayer, createFreezeTexture, createIceLook, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
 import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
-import {createImpactSheets} from './impact-sheets.js';
 import {createTerrainIce} from './ice.js';
 import {loadTerrainTextures, packTerrainLayers} from '../terrain/textures.js';
 import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from '../terrain/controls.js';
@@ -22,7 +21,7 @@ import {createCameraShots} from '../kit/shots.js';
 import {createDemoLife} from '../kit/life.js';
 import {createDemoStructures} from '../kit/structures.js';
 import {grassControls} from '../vegetation/controls.js';
-import {sprayControls} from '../particles/controls.js';
+import {splashControls, sprayControls} from '../particles/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
@@ -143,21 +142,27 @@ waterGeometry.computeVertexNormals();
 waterGeometry.setAttribute('flow', new THREE.BufferAttribute(new Float32Array(waterPositions.count * 3), 3));
 const ripples = createRipples({origin: [-24, -16], size: [96, 96], cell: .4});
 const flow = createFlowBake();
+// Foam left by splashes, on a finer grid over the pond's ripple area; it drifts with the baked flow.
+const foamLayer = createFoamLayer({origin: [-24, -16], size: [192, 192], cell: .2, flow});
 const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
 const freeze = createWaterFreeze(), freezeMap = createFreezeTexture(), icePattern = createIceLook();
 const ice = createTerrainIce(field, freezeMap, scene, icePattern);
 weather.view.addCloudShadowReceiver(ice.material);
 const lightOccluders = [ground, ...rocks];
 const pond = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view, {water: true}), ripples, flow, obstacles,
- freezeMap, iceDamage: ice, iceLook: icePattern, captureScale: .4, causticSegments: 280, clipToBed: true, pondOptics: true, lightOccluders});
+ freezeMap, iceDamage: ice, iceLook: icePattern, foamLayer, captureScale: .4, causticSegments: 280, clipToBed: true, pondOptics: true, lightOccluders});
 const waterline = createWaterlineComposite(renderer, {caustics: pond.lighting});
 const sprayScene = new THREE.Scene();
 const waterPlane = new THREE.Vector4(0, 1, 0, 0);
 const splashPosition = new THREE.Vector3();
-const IMPACT_LOOK = Object.freeze({
- point: [-7, 2], strength: .85, radius: 1.2,
- crown: {sheet: 'crown', size: 2, life: .7, growth: .35, opacity: .95},
- foam: {sheet: 'foam', size: 2.4, life: 2, lift: .025, growth: .4, opacity: .95},
+// Splashes on the pond. demo: the 'Splash pond' button; tap: a tap or drag on the water (ripple x its strength);
+// foam: each splash leaves foam radius x its own radius wide, amount x its strength thick; rain: drops landing on the
+// pond per second at full rain, each a few droplets.
+const POND_SPLASH = Object.freeze({
+ demo: {point: [-7, 2], strength: .85, radius: .8},
+ tap: {radius: .45, ripple: 1.6},
+ foam: {radius: 1.5, amount: 1.1},
+ rain: {perSecond: 26, strength: .1, radius: .12, amount: .2, tries: 6},
 });
 const light = weather.view.uniforms;
 const sprayDepth = createParticleDepthBinding({THREE, camera, depthTexture: pond.depthTexture, viewport: pond.viewport, waterPlane});
@@ -169,15 +174,15 @@ const spray = createWaterSpray({
   uniforms: {uOceanAmplitude: {value: 1}, uPondLevel: appearance.waterLevel},
  },
  lighting: {uniforms: {uSunCol: light.uSunCol, uFxAmbient: light.uAmb}, direction: light.uSkySunDir.value, ambient: light.uAmb.value},
- assets: {sheets: createImpactSheets()},
- impactSheets: {crown: IMPACT_LOOK.crown, foam: IMPACT_LOOK.foam,
-  acceptFoam: (x, z) => pond.surface.visible && freeze.progress < 1 && wetAt(x, z)},
 });
+const splash = createImpactSplash({THREE, scene: sprayScene, depth: sprayDepth,
+ lighting: {uniforms: {uSunCol: light.uSunCol, uFxAmbient: light.uAmb}, direction: light.uSkySunDir.value}});
+splash.ready.catch(console.error);
 pond.surface.geometry.dispose();
 pond.surface.geometry = waterGeometry;
 const pondSettings = {...createBenchPondSettings(), foam: 0, foamFeather: .7, speed: 1, waveTime: 0, freezeProgress: 0, diveHeight: -1.2};
 pondSettings.planarReflection.on = false;
-let diving = false;
+let diving = false, rainDue = 0;
 const aboveWater = new THREE.Vector3();
 const diveX = -8, diveZ = 4;
 // Dive view: only over at least minDepth m of water; the eye stays floorClear m above the bed; the target sits under the surface.
@@ -190,11 +195,15 @@ const rippleGesture = bindRippleGesture(renderer.domElement, controls, event => 
  aimRay(pondRay, event, renderer.domElement, camera);
  const hit = pondRay.intersectObject(pond.surface)[0]?.point;
  return hit && wetAt(hit.x, hit.z) ? hit : undefined;
-}, ({x, z}, strength) => {
+}, ({x, z}, strength) => pondSplash(x, z, strength, POND_SPLASH.tap.radius, POND_SPLASH.tap.ripple));
+// Something hits the open pond: splash, ripples and foam. amount scales how many particles it throws.
+function pondSplash(x, z, strength, radius, rippleGain = 1, amount = 1) {
  if (!pond.surface.visible || freeze.progress >= 1 || !wetAt(x, z)) return;
+ splash.emit(splashPosition.set(x, appearance.waterLevel.value, z), strength, radius, amount);
+ foamLayer.deposit(x, z, radius * POND_SPLASH.foam.radius, strength * POND_SPLASH.foam.amount * amount);
  if (!ripples.active) ripples.mask(wetAt);
- ripples.splash(x, z, 1.6 * strength);
-});
+ ripples.splash(x, z, rippleGain * strength);
+}
 
 function stampDemo() {
  for (const side of [-1, 1]) {
@@ -205,6 +214,7 @@ function stampDemo() {
 const gui = createBenchPanel('All tools demo');
 const demoActions = gui.addFolder('Demo');   // filled once the demo life and structures exist
 sprayControls(gui, {spray, depth: sprayDepth}).close();
+splashControls(gui, splash).close();
 const controlsState = {blendObjects: true, water: true, wetPreview: false};
 const meadow = createFreeVegetation({meadowBlades: true});
 const defaultCover = {grass: 100, rock: 0, snow: 0, mud: 0, forest: 24, patchiness: .85, patchSize: 5};
@@ -271,12 +281,14 @@ shots.addTo(demoActions);
 grassDensityControls(gui, {cover, defaults: defaultCover, stats: coverStats, rebuild: rebuildGrass});
 grassControls(gui, {settings: grassSettings, rebuild: rebuildGrass});
 // An ice break throws water by the block's energy (J): strength = clamp(energy / energyForFull, min, 1).
-const ICE_SPLASH = Object.freeze({energyForFull: 2400, minStrength: .55, radius: 1.55, amount: 1.75, elevation: 8, crown: {size: 2.5, height: 3.3},
+const ICE_SPLASH = Object.freeze({energyForFull: 2400, minStrength: .55, radius: 1.55, amount: 1.75,
   mistLift: .5, mistRadius: 1.25, rippleGain: 2});
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
  onIceBreak(x, y, z, energy) {
   const S = ICE_SPLASH, strength = THREE.MathUtils.clamp(energy / S.energyForFull, S.minStrength, 1);
-  spray.emitSplash(x, y, z, strength, S.radius, S.amount, null, 360, S.elevation, true, S.crown);
+  // Water bursts up through the hole and leaves foam on what is now open water.
+  splash.emit(splashPosition.set(x, y, z), strength, S.radius, S.amount);
+  foamLayer.deposit(x, z, S.radius, strength);
   spray.mist(splashPosition.set(x, y + S.mistLift, z), strength, S.mistRadius);
   if (!ripples.active) ripples.mask(wetAt);
   ripples.splash(x, z, strength * S.rippleGain);
@@ -297,6 +309,8 @@ impactControls.add({drop: () => launch('box')}, 'drop').name('Drop a block');
 impactControls.add({reset: () => {
  if (impacts.reset()) { bedHeight.needsUpdate = true; rebuildGrass(); }
  spray.clear();
+ splash.clear();
+ foamLayer.clear();
  weather.view.sun.shadow.needsUpdate = true;
 }}, 'reset').name('Reset impacts and tracks');
 gui.add(controlsState, 'blendObjects').name('Blend boulder bases').onChange(value => rocks.forEach(rock => { rock.material = value ? rockMaterial : plainRock; }));
@@ -319,11 +333,8 @@ function setDiving(enabled) {
 }
 const iceControls = waterControls.addFolder('Ice impacts');
 waterControls.add({splash() {
- const {point: [x, z], strength, radius} = IMPACT_LOOK;
- if (!pond.surface.visible || freeze.progress >= 1 || !wetAt(x, z)) return;
- spray.splash(splashPosition.set(x, appearance.waterLevel.value, z), strength, radius);
- if (!ripples.active) ripples.mask(wetAt);
- ripples.splash(x, z, strength);
+ const {point: [x, z], strength, radius} = POND_SPLASH.demo;
+ pondSplash(x, z, strength, radius);
 }}, 'splash').name('Splash pond');
 function dropOnIce(hard) {
  impacts.launch('box', impactSettings.surface, {hard, level: appearance.waterLevel.value});
@@ -431,12 +442,24 @@ startFrameLoop(renderer, (dt, now) => {
  }
  pond.render(pondSettings.waveTime, pondSettings);
  spray.update(dt);
+ // Rain pocks the pond: a few drops a frame, wherever a random point of the ripple area is water.
+ rainDue += weather.system.weather.rain * POND_SPLASH.rain.perSecond * dt;
+ for (; rainDue >= 1; rainDue--) {
+  for (let attempt = 0; attempt < POND_SPLASH.rain.tries; attempt++) {
+   const x = ripples.bounds.x + Math.random() * ripples.bounds.z, z = ripples.bounds.y + Math.random() * ripples.bounds.w;
+   if (!wetAt(x, z)) continue;
+   pondSplash(x, z, POND_SPLASH.rain.strength, POND_SPLASH.rain.radius, 1, POND_SPLASH.rain.amount);
+   break;
+  }
+ }
+ splash.update(dt);
+ foamLayer.update(dt);
  if (diving) {
   waterline.render(scene, camera, {height: waterLevel, clarity: pondSettings.clarity, godRays: pondSettings.godRays,
    sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
  } else weather.view.render();
  const {droplets, mist} = spray.active;
- if (pond.surface.visible && (droplets > 0 || mist > 0)) {
+ if (pond.surface.visible && (droplets > 0 || mist > 0 || splash.active > 0)) {
   const autoClear = renderer.autoClear;
   renderer.autoClear = false;
   try { renderer.render(sprayScene, camera); }
@@ -460,6 +483,8 @@ onLeave(() => {
  life.dispose();
  structures.dispose();
  spray.dispose();
+ splash.dispose();
+ foamLayer.dispose();
  pond.dispose();
  waterline.dispose();
  ice.dispose();

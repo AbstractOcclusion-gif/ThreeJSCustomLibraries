@@ -88,7 +88,7 @@ const RIPPLE_HEIGHT_GLSL = `
 // uDaylight (see sky-binding.js: skyFromWeather(view) or proceduralSky()). foamTexture (rgba tile: r/g brightness,
 // b density threshold, a coverage) is optional; without it a generated tile is used.
 // The host calls render(seconds, settings) once per frame (it captures the bed), then draws the scene itself.
-export function createChannelSurface({renderer, scene, camera, sky = proceduralSky(), ripples, obstacles, flow, foamTexture, freezeMap, iceDamage, iceLook = createIceLook(), captureScale = .5, causticSegments = 160, clipToBed = false, pondOptics = false, bedCaustics = 'screen', lightOccluders}) {
+export function createChannelSurface({renderer, scene, camera, sky = proceduralSky(), ripples, obstacles, flow, foamTexture, foamLayer, freezeMap, iceDamage, iceLook = createIceLook(), captureScale = .5, causticSegments = 160, clipToBed = false, pondOptics = false, bedCaustics = 'screen', lightOccluders}) {
  if (!renderer || !scene || !camera || !ripples || !obstacles || !flow) throw Error('Channel surface needs renderer, scene, camera, ripples, obstacles and flow');
  const depth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
  const capture = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthTexture: depth});
@@ -145,6 +145,9 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   waveTime: {value: 0},
   godRays: {value: .55},
   impactFoam: {value: new THREE.Vector4()},
+  foamLayerMap: {value: foamLayer?.texture ?? null},
+  foamLayerBounds: {value: foamLayer?.bounds ?? new THREE.Vector4(0, 0, 1, 1)},
+  splashFoam: {value: foamLayer ? 1 : 0},
   waterTint: {value: new THREE.Color()},
   pondColor: {value: new THREE.Color(R.pondColor)}, pondHaze: {value: R.haze}, pondDepthDark: {value: R.depthDark}, pondClarity: {value: R.pondClarity},
   pondAmbient: sky.uniforms.uAmb ?? {value: new THREE.Color(...FALLBACK_AMBIENT)},
@@ -254,6 +257,9 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    ${WIND_WAVE_GLSL}
    uniform float waveTime, godRays;
    uniform vec4 impactFoam;
+   uniform sampler2D foamLayerMap;
+   uniform vec4 foamLayerBounds;
+   uniform float splashFoam;   // opacity of the foam left by splashes; 0 without a foam layer
    uniform vec3 waterTint;
    uniform float clarity, reflectionStrength;
    uniform float f0, fresnelPower, sunGlint;
@@ -524,8 +530,19 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
     vec4 field = bakedFlow ? texture2D(flowMap, (vWorld.xz - flowBounds.xy) / flowBounds.zw) : vec4(.6,.5,0,1);
     vec2 impactDelta = (vWorld.xz - impactFoam.xy) * vec2(.65, 1.0);
     float impact = impactFoam.w * (1.0 - smoothstep(.2, max(.21, impactFoam.z), length(impactDelta)));
-    float coverage = clamp(bank + sqrt(field.b) * field.a * .9 + wake * .58 + impact, 0.0, 1.0);
-    float foamOpacity = foamAmount * smoothstep(0.0, .35, flowSpeed);
+    float flowing = clamp(bank + sqrt(field.b) * field.a * .9 + wake * .58 + impact, 0.0, 1.0);
+    // Foam left by splashes shows on still water too, whatever the flow foam setting; none on ice.
+    float left = 0.0;
+    if (splashFoam > 0.0) {
+     vec2 layerUV = (vWorld.xz - foamLayerBounds.xy) / foamLayerBounds.zw;
+     if (all(greaterThanEqual(layerUV, vec2(0.0))) && all(lessThanEqual(layerUV, vec2(1.0)))) {
+      left = texture2D(foamLayerMap, layerUV).r * splashFoam * (1.0 - iceCalm);
+     }
+    }
+    float flowOpacity = foamAmount * smoothstep(0.0, .35, flowSpeed);
+    float coverage = clamp(flowing + left, 0.0, 1.0);
+    // Each kind of foam keeps its own opacity where they overlap.
+    float foamOpacity = coverage > 0.0 ? clamp((flowing * flowOpacity + left) / coverage, 0.0, 1.0) : 0.0;
     if (coverage > 0.0 && foamOpacity > 0.0) {
      vec2 velocity = (field.rg - .5) * 10.0;
      float cycle = fract(currentTime * .36), phase = fract(cycle + .5);
@@ -676,6 +693,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    uniforms.pondRefractedSun.value.set(-eta * sun.x, -Math.sqrt(1 - eta * eta * (1 - sun.y * sun.y)), -eta * sun.z);
    uniforms.clipRange.value.set(camera.near, camera.far);
    if (settings.impactFoam) uniforms.impactFoam.value.copy(settings.impactFoam);
+   if (foamLayer) uniforms.splashFoam.value = THREE.MathUtils.clamp(settings.splashFoam ?? 1, 0, 1);
    if (settings.windWaves) waves.configure(settings.windWaves);
    else waves.update(settings.waveHeight ?? R.waveHeight, settings.wavelength ?? R.wavelength, settings.waveDirection ?? R.waveDirection, settings.waveSpread ?? R.waveSpread);
    surface.visible = false;

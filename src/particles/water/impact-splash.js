@@ -293,11 +293,12 @@ export function createImpactSplash({THREE, scene, depth, lighting, look = create
     look, show, ready,
     meshes: [crownMesh, chunkMesh, dropMesh],
     // position: where it hits the water (y = water level). strength 0..1. radius: size of what hit, in metres.
-    emit(position, strength = .6, radius = .2) {
+    // amount scales how many particles this one splash throws (a raindrop throws a few, a boulder all of them).
+    emit(position, strength = .6, radius = .2, amount = 1) {
       if (disposed) return;
-      if (![position?.x, position?.y, position?.z, strength, radius].every(Number.isFinite) || radius <= 0) throw Error('Impact splash needs a finite position, strength and a positive radius');
+      if (![position?.x, position?.y, position?.z, strength, radius, amount].every(Number.isFinite) || radius <= 0 || amount < 0) throw Error('Impact splash needs a finite position, strength and a positive radius');
       const s = Math.min(1, Math.max(0, strength)), {x, y, z} = position;
-      const scale = radius * look.size, tall = Math.sqrt(radius) * look.height;
+      const scale = radius * look.size, tall = Math.sqrt(radius) * look.height, many = look.amount * amount;
       if (show.crown && crownUniforms.tCrown.value && s >= CROWN.from) {
         const k = crowns.pool.alloc(), a = crowns.arrays;
         a.iPos.set([x, y, z], k * 3);
@@ -305,14 +306,14 @@ export function createImpactSplash({THREE, scene, depth, lighting, look = create
         a.iShape.set([radius * CROWN.size * (.5 + .7 * s) * look.size, Number(Math.random() < .5)], k * 2);
       }
       if (show.jets && s > .2) {
-        for (let i = Math.round(lerp(...JETS.count, s) * look.amount); i > 0; i--) {
+        for (let i = Math.round(lerp(...JETS.count, s) * many); i > 0; i--) {
           const angle = Math.random() * TAU, out = Math.sqrt(Math.random()) * JETS.spread * s;
           addChunk(x, y + .01, z, Math.cos(angle) * out, lerp(...JETS.up, s) * tall, Math.sin(angle) * out,
             between(JETS.width) * scale, between(JETS.life) * look.life, true);
         }
       }
       if (show.chunks && s >= .12) {
-        for (let i = Math.round(lerp(...CHUNKS.count, s) * look.amount); i > 0; i--) {
+        for (let i = Math.round(lerp(...CHUNKS.count, s) * many); i > 0; i--) {
           let rx, rz;
           do { rx = Math.random() * 2 - 1; rz = Math.random() * 2 - 1; } while (rx * rx + rz * rz > 1);
           // A rare chunk is much larger than the rest.
@@ -322,7 +323,7 @@ export function createImpactSplash({THREE, scene, depth, lighting, look = create
         }
       }
       if (show.droplets) {
-        for (let i = Math.round(lerp(...DROPLETS.count, s) * look.amount); i > 0; i--) {
+        for (let i = Math.round(lerp(...DROPLETS.count, s) * many); i > 0; i--) {
           const angle = Math.random() * TAU, out = between(DROPLETS.out) * s * Math.sqrt(radius), from = Math.sqrt(Math.random()) * radius * .6;
           addDroplet(x + Math.cos(angle) * from, y + .01, z + Math.sin(angle) * from, Math.cos(angle) * out, between(DROPLETS.up) * (.4 + .6 * s) * tall, Math.sin(angle) * out,
             between(DROPLETS.size) * (.6 + .6 * Math.sqrt(radius)) * look.size, DROPLETS.life * look.life);

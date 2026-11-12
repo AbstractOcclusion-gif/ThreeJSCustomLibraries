@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createImpactSplash, createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
-import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createIceLook, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
+import {createRipples, createFoamLayer, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createIceLook, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
@@ -16,9 +16,9 @@ import '../bench.css';
 import {aimRay} from '../kit/input.js';
 
 // Waterfall: the sheet scrolls at (base + flow) x time; every interval / max(minFlow, flow) s an impact lands somewhere
-// within spread m across, splashing the ripples at rippleShare x flow and throwing mist and droplets; impact foam = foamShare x flow.
+// within spread m across, splashing the ripples at rippleShare x flow and throwing mist and droplets; foam left on the water = foamShare x flow.
 const FALL = Object.freeze({scrollBase: .5, interval: .18, minFlow: .25, spread: 3, rippleShare: .5, sprayHeight: .12,
-  mistRadius: .75, splashShare: .5, splashRadius: .18, foamShare: .75});
+  mistRadius: .75, splashShare: .5, splashRadius: .35, splashAmount: .5, foamShare: .3, foamRadius: .9});
 // The fall is moving water, so it freezes after the pond: over this range of the pond's freeze progress. Icicles grow down
 // from the lip while the flow thins to nothing; `columns` icicles across the sheet, the shortest `shortest` of its height.
 const FALL_ICE = Object.freeze({from: .45, to: 1, columns: 11, shortest: .4});
@@ -40,12 +40,16 @@ controls.update();
 const stage = createBasicStage({scene, ground: false});
 const sky = proceduralSky();
 const ripples = createRipples({origin: [-15, -13], size: [100, 88], cell: 0.3});
+// Foam left by splashes, on a finer grid over the same area.
+const foamLayer = createFoamLayer({origin: [-15, -13], size: [200, 176], cell: .15});
+// A splash leaves foam radius x its own radius wide, amount x its strength thick.
+const SPLASH_FOAM = Object.freeze({radius: 1.5, amount: 1.1});
 const flow = createFlowBake();
 const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
 const lightOccluders = [];
 const freeze = createWaterFreeze(), freezeMap = createFreezeTexture(), iceLook = createIceLook();
 const water = createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow,
- freezeMap, iceLook, causticSegments: 280, clipToBed: true, pondOptics: true, bedCaustics: 'material', lightOccluders});
+ freezeMap, iceLook, foamLayer, causticSegments: 280, clipToBed: true, pondOptics: true, bedCaustics: 'material', lightOccluders});
 const waterline = createWaterlineComposite(renderer, {caustics: water.lighting});
 
 // Pond, cliff and falling sheet adapted from Glider 2's procedural waterfall sample.
@@ -211,15 +215,19 @@ function splashAt(x, z, strength, radius) {
   if (freeze.progress >= 1) return;
   splash.emit(splashPoint.set(x, water.surface.position.y, z), strength, radius);
   ripples.splash(x, z, strength);
+  foamLayer.deposit(x, z, radius * SPLASH_FOAM.radius, strength * SPLASH_FOAM.amount);
 }
 
 
 
-const state = {...createBenchPondSettings(), bankFoam: .12, discharge: 1, fallFreezes: true, diveHeight: -2.1, airTemperature: 15};
+const state = {...createBenchPondSettings(), bankFoam: .12, discharge: 1, splashFoam: 1, fallFreezes: true, diveHeight: -2.1, airTemperature: 15};
 const gui = createBenchPanel('Pond & waterfall');
 stageControls(gui, stage, {wind: false, onChange: () => sky.setEnvironment(stage.environment)}).apply();
 sprayControls(gui, {spray, depth}).close();
-splashControls(gui, splash, {'Drop a rock in': () => splashAt(TAP_SPLASH.demo.x, TAP_SPLASH.demo.z, TAP_SPLASH.demo.strength, TAP_SPLASH.demo.radius)});
+const splashFolder = splashControls(gui, splash, {'Drop a rock in': () => splashAt(TAP_SPLASH.demo.x, TAP_SPLASH.demo.z, TAP_SPLASH.demo.strength, TAP_SPLASH.demo.radius)});
+splashFolder.add(state, 'splashFoam', 0, 1, .05).name('Foam left on the water');
+splashFolder.add(foamLayer.settings, 'life', .5, 20, .5).name('Foam fades in · s');
+splashFolder.add(foamLayer.settings, 'spread', 0, 3, .05).name('Foam spread');
 gui.add(state, 'discharge', 0, 2, 0.05).name('Waterfall flow');
 gui.add(state, 'fallFreezes').name('Waterfall freezes');
 // No weather here: this temperature drives the ice when Water > Pond phase is 'Weather' (freezes at -1 °C, thaws above 1 °C).
@@ -276,22 +284,23 @@ startFrameLoop(renderer, (dt, now) => {
   sheetMaterial.uniforms.frozen.value = fallFrozen;
   sheetMaterial.uniforms.time.value = fallTime;
   sheetMaterial.uniforms.discharge.value = discharge;
-  impact.w = Math.min(1, discharge * FALL.foamShare);
   if (discharge > 0 && time >= nextImpact) {
     nextImpact = time + FALL.interval / Math.max(FALL.minFlow, discharge);
     const x = (Math.random() - 0.5) * FALL.spread * Math.min(1, discharge);
     if (freezeProgress < 1) ripples.splash(x, impact.y, discharge * FALL.rippleShare);
     sprayPosition.set(x, FALL.sprayHeight, impact.y);
     spray.mist(sprayPosition, Math.min(1, discharge), FALL.mistRadius);
-    spray.splash(sprayPosition, Math.min(1, discharge * FALL.splashShare), FALL.splashRadius);
+    // The fall keeps churning the same patch: many small splashes, each leaving a little foam that adds up.
+    splash.emit(splashPoint.set(x, water.surface.position.y, impact.y), Math.min(1, discharge * FALL.splashShare), FALL.splashRadius, FALL.splashAmount);
+    if (freezeProgress < 1) foamLayer.deposit(x, impact.y, FALL.foamRadius, Math.min(1, discharge) * FALL.foamShare);
   }
   spray.update(dt);
   splash.update(dt);
+  foamLayer.update(dt);
   if (freezeProgress < 1) ripples.update(dt);
   canvas.dataset.ripples = ripples.active ? 'active' : 'still';
   water.render(time * FLOW_TIME_SCALE, {
     ...state, waveTime: time,
-    impactFoam: impact,
     freezeProgress, freezeThaw: freeze.thaw,
   });
   if (diving) {
@@ -310,6 +319,7 @@ onLeave(() => {
   rippleGesture.dispose();
   spray.dispose();
   splash.dispose();
+  foamLayer.dispose();
   water.dispose();
   waterline.dispose();
   freezeMap.dispose();
