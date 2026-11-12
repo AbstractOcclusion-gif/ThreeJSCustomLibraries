@@ -96,6 +96,8 @@ export function iceLookControls(folder, look) {
   folder.add(look.cracks, 'value', 0, 2, .05).name('Cracks');
   folder.add(look.bubbles, 'value', 0, 2, .05).name('Bubbles');
   folder.add(look.sparkle, 'value', 0, 3, .05).name('Frost sparkle');
+  folder.add(look.needles, 'value', 0, 2, .05).name('Crystal front (0 = smooth)');
+  folder.add(look.slush, 'value', 0, 1, .05).name('Slush ahead of the ice');
 }
 
 export function inlandWaterControls(folder, {settings, freeze, iceLook, toggleUnderwater, positionDiveCamera}) {

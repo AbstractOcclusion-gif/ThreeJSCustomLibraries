@@ -249,7 +249,7 @@ startFrameLoop(renderer, (dt, now) => {
   water.render(time * FLOW_TIME_SCALE, {
     ...state, waveTime: time,
     impactFoam: impact,
-    freezeProgress,
+    freezeProgress, freezeThaw: freeze.thaw,
   });
   if (diving) {
     const light = sky.uniforms;

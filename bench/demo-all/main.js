@@ -395,6 +395,7 @@ startFrameLoop(renderer, (dt, now) => {
  else if (controlsState.wetPreview) { surfaceWeather.set({wetness: 1, snow: 0}); surfaceWeather.update(dt, null); }
  else surfaceWeather.update(dt, weather.system.weather);
  pondSettings.freezeProgress = freeze.update(dt, weather.system.weather.temperature);
+ pondSettings.freezeThaw = freeze.thaw;
  const bedChanged = impacts.update(dt, controlsState.water ? freeze.progress : 0, appearance.waterLevel.value);
  if (bedChanged) { bedHeight.needsUpdate = true; grassDirty = true; }
  if (grassDirty && !impacts.moving) rebuildGrass();

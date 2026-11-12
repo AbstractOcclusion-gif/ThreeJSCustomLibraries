@@ -161,6 +161,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   microRipples: {value: R.microRipples},
   caustics: {value: R.caustics},
   freezeProgress: {value: 0},
+  freezeThaw: {value: 0},
   freezeMap: {value: freezeMap ?? foamTile},
   ...iceLookUniforms(iceLook),
   ...(iceDamage ? {iceDamageMap: {value: iceDamage.texture}, iceDamageBounds: {value: iceDamage.bounds},
@@ -268,6 +269,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    ${lightingGLSL}
    ${iceDamage ? '' : 'uniform float freezeProgress;'}
    uniform sampler2D freezeMap;
+   uniform float freezeThaw;
    #ifdef WATER_ICE_DAMAGE
    uniform bool iceSolidSurface;
    #endif
@@ -325,7 +327,8 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
     #endif
     vec3 V = normalize(cameraPosition - vWorld);
     vec3 baseNormal = normalize(vNormal);
-    float iceCoverage = 0.0, iceOpacity = 1.0;
+    // iceMix: how much of the water's own colour the ice (and slush) replaces.
+    float iceCoverage = 0.0, iceOpacity = 1.0, iceCalm = 0.0, iceMix = 0.0;
     vec3 iceColor = vec3(0.0);
     #ifdef WATER_ICE_DAMAGE
     if (iceSolidSurface && !iceHasDamage) discard;
@@ -338,7 +341,18 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      deep = smoothstep(.05, 2.0, basinDepth);
      #endif
      float order = texture2D(freezeMap, p * ${ICE_MAP_SCALE}).r;
-     iceCoverage = iceCoverageAt(freezeProgress, deep, order);
+     // Freezing: crystal stars reach ahead of the ice, so the front grows as needles instead of fading in.
+     // Melting: no crystals, the edge just retreats.
+     const float needleReach = .16;     // progress the tip of a needle is ahead of the plain front
+     const float frontEdge = .03;       // progress over which a spot turns from water to ice
+     const float slushAhead = .2;       // progress ahead of the ice where the water is already slush
+     float growing = 1.0 - freezeThaw;
+     float level = iceFrontLevel(freezeProgress, deep, order)
+       + (iceCrystalStars(p) - .45) * needleReach * iceNeedles * growing;
+     iceCoverage = smoothstep(-frontEdge, frontEdge, level);
+     // Everything is frozen at full progress and open at none, whatever the crystals say.
+     iceCoverage = mix(iceCoverage, iceCoverageAt(freezeProgress, deep, order), smoothstep(.9, 1.0, freezeProgress));
+     float slush = smoothstep(-slushAhead, -frontEdge, level) * (1.0 - iceCoverage) * iceSlush * growing;
      float brokenEdge = 0.0;
      #ifdef WATER_ICE_DAMAGE
      if (iceHasDamage) {
@@ -351,13 +365,26 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
                            textureLod(iceDamageMap, uv - vec2(0, pixel.y), 0.0).r));
      }
      #endif
-     if (iceCoverage > 0.0) {
+     // Slush and ice both still the water.
+     iceCalm = max(iceCoverage, slush * .85);
+     if (iceCoverage > 0.0 || slush > 0.0) {
       #ifdef POND_GOD_PASS
       if (iceCoverage >= 1.0) discard;
       #endif
       float frost, cracks, deepCracks, bubbles;
       icePattern(p, V, deep, freezeMap, frost, cracks, deepCracks, bubbles);
+      // Fresh ice is thin and clear; frost and cracks come as it ages. Melting ice is wet: its frost soaks away,
+      // first where it is thinnest.
+      const float agedAfter = .1;        // progress behind the front where the ice has its full frost and cracks
+      float aged = smoothstep(0.0, agedAfter, level);
+      float wet = freezeThaw * (1.0 - .6 * smoothstep(.1, .6, level));
+      frost *= mix(.25, 1.0, aged) * (1.0 - .75 * wet);
+      cracks *= aged; deepCracks *= aged;
       vec3 ice = iceBody(frost, cracks, deepCracks, bubbles, iceOpacity) + ICE_WHITE * brokenEdge * .8;
+      // A bright thin rim where the ice is forming; none on a melting edge.
+      float rim = iceCoverage * (1.0 - iceCoverage) * 4.0 * growing;
+      ice += ICE_WHITE * rim * .5;
+      iceOpacity = mix(iceOpacity, 1.0, rim * .6) * (1.0 - .35 * wet);
       // Clear ice is glassy: a sharp sun and a strong grazing reflection. Frost is matte and glitters instead.
       vec3 mirrored = reflect(-V, baseNormal);
       float glint = (.05 + .6 * pow(1.0 - abs(dot(baseNormal, V)), 4.0)) * mix(1.0, .4, frost);
@@ -367,6 +394,13 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
       float crystalsResolved = 1.0 - smoothstep(.3, .8, length(fwidth(p)) * crystalsPerMeter);
       float crystals = step(.985, iceHash(floor(p * crystalsPerMeter))) * pow(sunward, 5.0) * frost * iceSparkle * 4.0 * crystalsResolved;
       iceColor = mix(ice * (.20 + .80 * uDaylight), sky(mirrored, .04), glint) + uSunCol * (sunSpot + crystals);
+      // Slush: the water ahead of the ice turns milky before it sets.
+      const vec3 slushColor = vec3(.3, .45, .52);
+      const float slushOpacity = .3;
+      vec3 milky = slushColor * (.20 + .80 * uDaylight);
+      float iceShare = iceCoverage * iceOpacity, slushShare = slush * slushOpacity * (1.0 - iceCoverage);
+      iceColor = (iceColor * iceShare + milky * slushShare) / max(iceShare + slushShare, .0001);
+      iceMix = iceShare + slushShare;
      }
     }
     vec2 rippleUV = (vWorld.xz - rippleBounds.xy) / rippleBounds.zw;
@@ -403,7 +437,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      gradient += microRipples * (1.0 - smoothstep(.025, .12, footprint)) *
       (.65 * a * cos(dot(p, a) * 34.0 - waveTime * 13.0) + .35 * b * cos(dot(p, b) * 48.0 - waveTime * 17.0));
     }
-    vec3 n = normalize(baseNormal - vec3(gradient.x, 0, gradient.y) * (1.0 - iceCoverage));
+    vec3 n = normalize(baseNormal - vec3(gradient.x, 0, gradient.y) * (1.0 - iceCalm));
     if (!gl_FrontFacing) {
      #ifdef POND_GOD_PASS
      gl_FragColor = vec4(shaftRadiance(vWorld, V, distance(cameraPosition, vWorld)), 1.0);
@@ -432,7 +466,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      }
      vec3 color = mix(refr, mirror, fresnelBelow);
      color += shaftRadiance(vWorld, V, distance(cameraPosition, vWorld));
-     gl_FragColor = vec4(mix(color, iceColor, iceCoverage * iceOpacity), 1.0);
+     gl_FragColor = vec4(mix(color, iceColor, iceMix), 1.0);
      #include <tonemapping_fragment>
      #include <colorspace_fragment>
      return;
@@ -503,7 +537,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      vec3 foamColor = vec3(.72, .80, .77) * (.18 + .82 * uDaylight) * mix(.5, 1.25, film.x);
      color = mix(color, foamColor, film.y * foamOpacity);
     }
-    gl_FragColor = vec4(mix(color, iceColor, iceCoverage * iceOpacity), 1.0);
+    gl_FragColor = vec4(mix(color, iceColor, iceMix), 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
    }`,
@@ -597,6 +631,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   get viewport() { return size; },
   render(seconds, settings) {
    uniforms.freezeProgress.value = settings.frozen === true ? 1 : THREE.MathUtils.clamp(settings.freezeProgress ?? 0, 0, 1);
+   uniforms.freezeThaw.value = THREE.MathUtils.clamp(settings.freezeThaw ?? 0, 0, 1);
    uniforms.uCausticOn.value = 0;
    if (shadow) shadow.uniforms.pondShadowOn.value = 0;
    uniforms.pondGodHalf.value = false;

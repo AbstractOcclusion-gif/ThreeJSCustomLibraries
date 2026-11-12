@@ -1,10 +1,15 @@
 export const ICE_MAP_SCALE = .08;
 const ICE_MIN = .12, ICE_MAX = .88, ICE_EDGE = .10, ICE_DEPTH_WEIGHT = .67;
+const THAW_BLEND_SECONDS = 1.2;   // time the surface takes to turn from freezing to its wet, melting look and back
 
 export const ICE_COVERAGE_GLSL = `
  float iceCoverageAt(float progress, float deep, float order) {
   float threshold = mix(${ICE_MIN}, ${ICE_MAX}, ${ICE_DEPTH_WEIGHT} * deep + ${1 - ICE_DEPTH_WEIGHT} * order);
   return smoothstep(threshold - ${ICE_EDGE}, threshold + ${ICE_EDGE}, progress);
+ }
+ // How far the freeze has passed this spot, in units of progress: negative ahead of the ice, positive behind it.
+ float iceFrontLevel(float progress, float deep, float order) {
+  return progress - mix(${ICE_MIN}, ${ICE_MAX}, ${ICE_DEPTH_WEIGHT} * deep + ${1 - ICE_DEPTH_WEIGHT} * order);
  }
 `;
 
@@ -15,9 +20,12 @@ export function createIceLook() {
   cracks: {value: 1},     // strength of the crack network
   bubbles: {value: 1},    // trapped air bubbles in the clear ice
   sparkle: {value: 1},    // sun glints on frost crystals
+  needles: {value: 1},    // freezing: how far crystal stars reach ahead of the ice (0 = a smooth front)
+  slush: {value: 1},      // freezing: milky, calmed water just ahead of the ice (0 = none)
  };
 }
-export const iceLookUniforms = look => ({iceFrost: look.frost, iceCracks: look.cracks, iceBubbles: look.bubbles, iceSparkle: look.sparkle});
+export const iceLookUniforms = look => ({iceFrost: look.frost, iceCracks: look.cracks, iceBubbles: look.bubbles, iceSparkle: look.sparkle,
+ iceNeedles: look.needles, iceSlush: look.slush});
 
 // The ice pattern in world space (p = world xz, metres), shared by every ice shader so they agree texel for texel.
 // noiseMap is the freeze texture (createFreezeTexture). All outputs are 0..1:
@@ -25,7 +33,7 @@ export const iceLookUniforms = look => ({iceFrost: look.frost, iceCracks: look.c
 //   cracks      the crack network on the surface         deepCracks  the same cracks seen deeper inside clear ice
 //   bubbles     trapped air bubbles
 export const ICE_PATTERN_GLSL = /* glsl */`
- uniform float iceFrost, iceCracks, iceBubbles, iceSparkle;
+ uniform float iceFrost, iceCracks, iceBubbles, iceSparkle, iceNeedles, iceSlush;
  const vec3 ICE_CLEAR = vec3(.045, .15, .2);      // body colour of clear ice over deep water
  const vec3 ICE_FROSTED = vec3(.74, .84, .89);    // frosted, snowy ice
  const vec3 ICE_WHITE = vec3(.86, .93, .96);      // cracks and bubbles
@@ -41,6 +49,28 @@ export const ICE_PATTERN_GLSL = /* glsl */`
    if (d < nearest) { second = nearest; nearest = d; } else if (d < second) second = d;
   }
   return sqrt(second) - sqrt(nearest);
+ }
+ // Crystal stars: six thin needles spread from scattered seeds, strongest at the seed. Each seed has its own size
+ // and turn, and its needles bend a little, so no two stars match. 0..1.
+ float iceCrystalStars(vec2 p) {
+  const float seedsPerMeter = 1.1;
+  const float needleSharpness = 16.0;
+  const vec2 starSize = vec2(.45, 1.15);   // reach of the smallest and largest star, in seed spacings
+  const float bend = 1.1;                   // radians a needle curves over its length
+  vec2 q = p * seedsPerMeter, cell = floor(q), f = fract(q);
+  float stars = 0.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+   vec2 neighbour = vec2(float(i), float(j));
+   vec2 toSeed = neighbour + vec2(iceHash(cell + neighbour + 41.0), iceHash(cell + neighbour + 59.0)) - f;
+   float distance = length(toSeed);
+   float turn = iceHash(cell + neighbour + 23.0) * 6.2831853;
+   float size = mix(starSize.x, starSize.y, iceHash(cell + neighbour + 77.0));
+   float curve = (iceHash(cell + neighbour + 91.0) - .5) * bend * distance / size;
+   float needle = pow(abs(cos((atan(toSeed.y, toSeed.x) + curve) * 3.0 + turn)), needleSharpness);
+   float reach = 1.0 - smoothstep(.08 * size, size, distance);
+   stars = max(stars, reach * mix(.35, 1.0, needle));
+  }
+  return stars;
  }
  float iceCrackLines(vec2 p, sampler2D noiseMap, float footprint) {
   const float platesPerMeter = .55;     // large plates
@@ -106,10 +136,12 @@ export function hasIceSupport(progress, depth, x, z, map) {
 // Air temperature requests a phase. The water surface advances toward it over time.
 export function createWaterFreeze() {
  const settings = {phase: 'Weather', freezeSeconds: 6, thawSeconds: 5};
- let progress = 0, freezing = false;
+ let progress = 0, freezing = false, thaw = 0;
  return {
   settings,
   get progress() { return progress; },
+  // 0 while freezing or holding, 1 while the ice melts: pass it to the water surface as settings.freezeThaw.
+  get thaw() { return thaw; },
   update(dt, temperature) {
    if (!Number.isFinite(dt) || dt < 0 || !Number.isFinite(temperature)) throw Error('Water freeze needs finite temperature and non-negative time');
    const {phase, freezeSeconds, thawSeconds} = settings;
@@ -119,6 +151,8 @@ export function createWaterFreeze() {
    progress = freezing ? Math.min(1, progress + dt / duration) : Math.max(0, progress - dt / duration);
    if (progress < 1e-9) progress = 0;
    if (progress > 1 - 1e-9) progress = 1;
+   const melting = !freezing && progress > 0 ? 1 : 0;
+   thaw += (melting - thaw) * Math.min(1, dt / THAW_BLEND_SECONDS);
    return progress;
   },
  };
