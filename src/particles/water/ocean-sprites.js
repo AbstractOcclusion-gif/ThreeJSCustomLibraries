@@ -39,7 +39,15 @@ export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, S
             else if (uFree > 0.5) { c.y = iPos.y + uRise * age; c.x += sin(age * 2.5 + iMisc.y * 9.0) * size * 0.15; float sp = iMisc.y * 6.2831853 + age * 0.4;
               vec3 cr = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]), cu = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
               ax = cr * cos(sp) + cu * sin(sp); ay = cu * cos(sp) - cr * sin(sp); vFade *= 1.0 - smoothstep(hs - size, hs - size * 0.2, c.y); }
-            else c.y += size * 0.45;
+            else {
+              #ifdef SURFACE_SPRITE
+              float spin = iData.w;
+              ax = vec3(cos(spin), 0.0, sin(spin));
+              ay = vec3(-sin(spin), 0.0, cos(spin));
+              #else
+              c.y += size * 0.45;
+              #endif
+            }
             vec3 w = c + ax * (position.x * size) + ay * (position.y * size); vWorldFx = w; gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0); }`,
         fragmentShader: /* glsl */`uniform float uBillow; varying vec2 vUv; varying float vFrame, vFade, vBillowPhase; varying vec3 vWorldFx;
           ${FLIPBOOK_GLSL}
@@ -56,6 +64,7 @@ export function createOceanSprites({THREE, FX_DEPTH_GLSL, FX_DEPTH_U, fxScene, S
           }` }));
       this.mesh.frustumCulled = false; this.mesh.renderOrder = RENDER_ORDER; fxScene.add(this.mesh);
       this.applySettings();
+      this.mesh.material.defines = this.s.flat ? {SURFACE_SPRITE: 1} : {};
     }
     applySettings(settings = {}) { const s = Object.assign(this.s, settings), u = this.mesh.material.uniforms; applySheet(this.mesh.material, s.sheet); applyLook(this.mesh.material, s);
       u.uGrowth.value = s.growth; u.uLift.value = s.lift; u.uFps.value = s.fps; u.uOneShot.value = s.oneShot ? 1 : 0; u.uFree.value = s.free ? 1 : 0; u.uRise.value = s.rise; u.uUpright.value = s.upright ? 1 : 0; u.uBillow.value = s.billow ? 1 : 0; }

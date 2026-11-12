@@ -45,8 +45,9 @@ export function createTrackMask({origin = [-32, -32], size = [64, 64], resolutio
       data[index] = value;
       if (directional) {
        // Premultiply by strength so filtering against an empty texel preserves direction.
-       data[index + 1] = Math.round(value * (.5 + .5 * dirX));
-       data[index + 2] = Math.round(value * (.5 + .5 * dirZ));
+       const radial = !length && distance > 0;
+       data[index + 1] = Math.round(value * (.5 + .5 * (radial ? px / distance : dirX)));
+       data[index + 2] = Math.round(value * (.5 + .5 * (radial ? pz / distance : dirZ)));
       }
       changed = true;
      }

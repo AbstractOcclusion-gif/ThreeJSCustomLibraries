@@ -44,7 +44,6 @@ vec3 bendGrass(vec3 position) {
             lean = normalize(lean + side * clamp(falloff * 1.5, -0.55, 0.55));
           }
         } else {
-          contact = 0.0;
           lean = vec2(1.0, 0.0);
         }
       }

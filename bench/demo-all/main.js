@@ -13,6 +13,7 @@ import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
+import {createImpactSheets} from './impact-sheets.js';
 import {createTerrainIce} from './ice.js';
 import {loadTerrainTextures, packTerrainLayers} from '../terrain/textures.js';
 import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from '../terrain/controls.js';
@@ -153,6 +154,11 @@ const waterline = createWaterlineComposite(renderer, {caustics: pond.lighting});
 const sprayScene = new THREE.Scene();
 const waterPlane = new THREE.Vector4(0, 1, 0, 0);
 const splashPosition = new THREE.Vector3();
+const IMPACT_LOOK = Object.freeze({
+ point: [-7, 2], strength: .85, radius: 1.2,
+ crown: {sheet: 'crown', size: 2, life: .7, growth: .35, opacity: .95},
+ foam: {sheet: 'foam', size: 2.4, life: 2, lift: .025, growth: .4, opacity: .95},
+});
 const light = weather.view.uniforms;
 const sprayDepth = createParticleDepthBinding({THREE, camera, depthTexture: pond.depthTexture, viewport: pond.viewport, waterPlane});
 const spray = createWaterSpray({
@@ -163,6 +169,9 @@ const spray = createWaterSpray({
   uniforms: {uOceanAmplitude: {value: 1}, uPondLevel: appearance.waterLevel},
  },
  lighting: {uniforms: {uSunCol: light.uSunCol, uFxAmbient: light.uAmb}, direction: light.uSkySunDir.value, ambient: light.uAmb.value},
+ assets: {sheets: createImpactSheets()},
+ impactSheets: {crown: IMPACT_LOOK.crown, foam: IMPACT_LOOK.foam,
+  acceptFoam: (x, z) => pond.surface.visible && freeze.progress < 1 && wetAt(x, z)},
 });
 pond.surface.geometry.dispose();
 pond.surface.geometry = waterGeometry;
@@ -267,7 +276,7 @@ const ICE_SPLASH = Object.freeze({energyForFull: 2400, minStrength: .55, radius:
 const impacts = createTerrainImpacts({scene, field, tracks, material: rockMaterial, ice, lightOccluders,
  onIceBreak(x, y, z, energy) {
   const S = ICE_SPLASH, strength = THREE.MathUtils.clamp(energy / S.energyForFull, S.minStrength, 1);
-  spray.emitSplash(x, y, z, strength, S.radius, S.amount, null, 360, S.elevation, false, S.crown);
+  spray.emitSplash(x, y, z, strength, S.radius, S.amount, null, 360, S.elevation, true, S.crown);
   spray.mist(splashPosition.set(x, y + S.mistLift, z), strength, S.mistRadius);
   if (!ripples.active) ripples.mask(wetAt);
   ripples.splash(x, z, strength * S.rippleGain);
@@ -309,6 +318,13 @@ function setDiving(enabled) {
  diveControl.name(enabled ? 'Return above water' : 'Underwater view');
 }
 const iceControls = waterControls.addFolder('Ice impacts');
+waterControls.add({splash() {
+ const {point: [x, z], strength, radius} = IMPACT_LOOK;
+ if (!pond.surface.visible || freeze.progress >= 1 || !wetAt(x, z)) return;
+ spray.splash(splashPosition.set(x, appearance.waterLevel.value, z), strength, radius);
+ if (!ripples.active) ripples.mask(wetAt);
+ ripples.splash(x, z, strength);
+}}, 'splash').name('Splash pond');
 function dropOnIce(hard) {
  impacts.launch('box', impactSettings.surface, {hard, level: appearance.waterLevel.value});
 }
@@ -324,6 +340,7 @@ shorelineControls(gui, appearance);
 gui.add({stampDemo}, 'stampDemo').name('Lay tracks');
 gui.add(tracks, 'clear').name('Clear tracks');
 const weatherUI = mountWeatherControls(weather);
+gui.add({weather: () => weatherUI.open()}, 'weather').name('Open weather controls');
 const profiling = gui.addFolder('Performance');
 const performanceSettings = {skyInterval: 1.25, pixelRatio: renderer.getPixelRatio(), cloudShadows: true};
 profiling.add(performanceSettings, 'skyInterval', [.35, 1.25, 8]).name('Sky refresh · s').onChange(value => weather.view.configure({sky: {captureInterval: value}}));

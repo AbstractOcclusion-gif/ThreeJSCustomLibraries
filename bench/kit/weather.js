@@ -25,7 +25,11 @@ export function mountWeatherControls(weather, parent = document.querySelector('a
   const panel = createWeatherDevPanel({...weather, container});
   let last = -Infinity;
   container.addEventListener('toggle', () => { if (container.open) panel.refresh(); });
-  return {sync() {
+  return {open() {
+    container.open = true;
+    container.scrollIntoView({block: 'nearest'});
+    summary.focus({preventScroll: true});
+  }, sync() {
     if (!container.open) return;
     const now = performance.now();
     if (now - last < 200) return;

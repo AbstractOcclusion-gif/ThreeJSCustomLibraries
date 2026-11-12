@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>three-kit | Save &amp; Load</title></head>
+<body>
+<header><div><small>THREE-KIT</small><h1>Save &amp; Load</h1></div><a href="../" target="_top">All modules</a></header>
+<aside>
+<label>Slot <select id="slot"><option>Harbor</option><option>Workshop</option></select></label>
+<label>Collected shells <input id="shells" type="number" min="0" value="0"></label>
+<label class="check"><input id="gate" type="checkbox"> Gate unlocked</label>
+<div class="buttons">
+<button id="save">Save slot</button><button id="load">Load slot</button>
+<button id="export">Export JSON</button><label class="file-button">Import JSON <input id="import" type="file" accept=".json,application/json"></label>
+</div>
+<p id="status" role="status"></p>
+</aside>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

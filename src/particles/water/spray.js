@@ -10,7 +10,7 @@ import {assertFrameTime} from '../../core/validate.js';
 // that setEnvironment() (core/environment.js contract) keeps in step with the scene light.
 const SPRAY_AMBIENT = [.35, .45, .55];
 export function createWaterSpray({
- THREE, scene, renderer, depth, surface, lighting, onDeposit = null, assets = {},
+ THREE, scene, renderer, depth, surface, lighting, onDeposit = null, assets = {}, impactSheets,
 }) {
  if (!THREE || !scene || !renderer || !depth || !surface) {
   throw Error('Water spray needs Three.js, a target scene, renderer, depth and surface bindings');
@@ -33,12 +33,22 @@ export function createWaterSpray({
   sheet: mistSheet, free: true, upright: true, billow: true,
   size: .9, growth: .85, life: 1.05, rise: .48, opacity: .42,
  });
- const splash = createOceanSplash({...host, renderer, ...sheets, dropletUrl: assets.dropletUrl, loadTexture: assets.loadTexture, onDeposit});
+ const crown = impactSheets?.crown && new SheetSprites(lighting.uniforms, lighting.direction, impactSheets.crown);
+ const foam = impactSheets?.foam && new SheetSprites(lighting.uniforms, lighting.direction, {...impactSheets.foam, flat: true});
+ const sprites = [mist, crown, foam].filter(Boolean);
+ const deposit = foam ? (x, z, radius, strength) => {
+  if (impactSheets.acceptFoam?.(x, z) ?? true) foam.spawn(x, z, strength, radius);
+  onDeposit?.(x, z, radius, strength);
+ } : onDeposit;
+ const splash = createOceanSplash({...host, renderer, ...sheets, dropletUrl: assets.dropletUrl, loadTexture: assets.loadTexture, onDeposit: deposit});
+ if (crown) splash.setSplashHook((x, y, z, strength, radius, size, allowed) => {
+  if (allowed) crown.spawn(x, z, strength, radius, y);
+ });
  splash.initSplash(lighting.uniforms, lighting.ambient, lighting.direction);
  splash.setSplashSettings({sprite: 'droplet', dropletSize: .055, opacity: .7});
  let disposed = false;
  return {
-  meshes: [mist.mesh, splash.mesh],
+  meshes: [...sprites.map(sprite => sprite.mesh), splash.mesh],
   mist(position, intensity = 1, size = 1) {
    if (!disposed) mist.spawn(position.x, position.z, intensity, size, position.y);
   },
@@ -59,16 +69,16 @@ export function createWaterSpray({
    if (disposed) return;
    assertFrameTime(dt, 'Water spray');
    depth.update();
-   mist.update(dt);
+   for (const sprite of sprites) sprite.update(dt);
    splash.updateSplash(dt);
    splash.depositFoam(simWindow);
   },
   get active() { return {mist: mist.active, droplets: splash.splashStats().droplets}; },
-  clear() { mist.clear(); splash.clear(); },
+  clear() { for (const sprite of sprites) sprite.clear(); splash.clear(); },
   dispose() {
    if (disposed) return;
    disposed = true;
-   mist.dispose();
+   for (const sprite of sprites) sprite.dispose();
    splash.dispose();
    sheets.dispose();
   },

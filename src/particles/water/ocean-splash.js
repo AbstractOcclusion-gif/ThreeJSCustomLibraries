@@ -93,7 +93,7 @@ export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, f
   }
   const tmpV = new THREE.Vector3();
   // WaterSplashEmitter.EmitSplash contract: strength 0..1, radius (m), amount scale, petal direction (null = full ring) / arc /
-  // elevation; allowCrown is accepted and ignored (no crown layer in this port).
+  // elevation; allowCrown is forwarded to the optional sprite hook.
   function emitSplash(x, surfaceY, z, strength, radius, amountScale = 1, petal = null, arcDegrees = 360, elevationDegrees = 0, allowCrown = true, appearance = null) {
     strength = THREE.MathUtils.clamp(strength, 0, 1); if (amountScale <= 0) return;
     let count = THREE.MathUtils.clamp(Math.round(strength * S.maxParticlesPerBurst), MIN_BURST_COUNT, S.maxParticlesPerBurst); count = Math.max(1, Math.round(count * amountScale));
@@ -101,7 +101,7 @@ export function createOceanSplash({THREE, renderer, FX_DEPTH_GLSL, FX_DEPTH_U, f
     const upSpeed = S.upwardBias * heightScale * (UP_STRENGTH_FLOOR + UP_STRENGTH_GAIN * strength), outSpeed = radius * S.outwardSpread * Math.max(MIN_OUTWARD_STRENGTH, strength);
     const petalAngle = petal && petal.x * petal.x + petal.z * petal.z >= 1e-8 ? Math.atan2(petal.z, petal.x) : null, arcHalf = 0.5 * THREE.MathUtils.degToRad(arcDegrees), elevation = THREE.MathUtils.degToRad(elevationDegrees);
     const opacity = THREE.MathUtils.clamp((ALPHA_STRENGTH_FLOOR + ALPHA_STRENGTH_GAIN * strength) * S.dropletOpacity, 0, 1);
-    if (splashHook) splashHook(x, surfaceY, z, strength, radius, sizeScale);
+    if (splashHook) splashHook(x, surfaceY, z, strength, radius, sizeScale, allowCrown);
     for (let i = 0; i < count; i++) {
       const r0 = Math.random(), r1 = Math.random(), r2 = Math.random(), r3 = Math.random();
       const angle = petalAngle === null ? r0 * Math.PI * 2 : petalAngle + (r0 * 2 - 1) * arcHalf, dx = Math.cos(angle), dz = Math.sin(angle), ring = radius * SPAWN_RING_RADIUS_SCALE * r1;
