@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {createWaveBank, WIND_WAVE_GLSL} from './waves.js';
 import {proceduralSky} from './sky-binding.js';
 import {createFoamTexture} from './foam-texture.js';
-import {ICE_COVERAGE_GLSL, ICE_MAP_SCALE} from './freeze.js';
+import {ICE_COVERAGE_GLSL, ICE_MAP_SCALE, ICE_PATTERN_GLSL, createIceLook, iceLookUniforms} from './freeze.js';
 import {createPlanarCapture} from './planar-capture.js';
 import {POND_OPTICS_GLSL} from './pond-optics.js';
 import {createPondShadow, POND_SHADOW_GLSL} from './pond-shadow.js';
@@ -88,7 +88,7 @@ const RIPPLE_HEIGHT_GLSL = `
 // uDaylight (see sky-binding.js: skyFromWeather(view) or proceduralSky()). foamTexture (rgba tile: r/g brightness,
 // b density threshold, a coverage) is optional; without it a generated tile is used.
 // The host calls render(seconds, settings) once per frame (it captures the bed), then draws the scene itself.
-export function createChannelSurface({renderer, scene, camera, sky = proceduralSky(), ripples, obstacles, flow, foamTexture, freezeMap, iceDamage, captureScale = .5, causticSegments = 160, clipToBed = false, pondOptics = false, bedCaustics = 'screen', lightOccluders}) {
+export function createChannelSurface({renderer, scene, camera, sky = proceduralSky(), ripples, obstacles, flow, foamTexture, freezeMap, iceDamage, iceLook = createIceLook(), captureScale = .5, causticSegments = 160, clipToBed = false, pondOptics = false, bedCaustics = 'screen', lightOccluders}) {
  if (!renderer || !scene || !camera || !ripples || !obstacles || !flow) throw Error('Channel surface needs renderer, scene, camera, ripples, obstacles and flow');
  const depth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
  const capture = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthTexture: depth});
@@ -162,6 +162,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
   caustics: {value: R.caustics},
   freezeProgress: {value: 0},
   freezeMap: {value: freezeMap ?? foamTile},
+  ...iceLookUniforms(iceLook),
   ...(iceDamage ? {iceDamageMap: {value: iceDamage.texture}, iceDamageBounds: {value: iceDamage.bounds},
    iceHasDamage: iceDamage.active, iceSolidSurface: iceDamage.solidSurface ?? {value: false}} : {}),
  };
@@ -271,6 +272,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    uniform bool iceSolidSurface;
    #endif
    ${ICE_COVERAGE_GLSL}
+   ${ICE_PATTERN_GLSL}
    varying vec3 vFlow, vWorld, vNormal;
    varying vec4 vClip;
    #ifdef WATER_BED_CLIP
@@ -323,7 +325,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
     #endif
     vec3 V = normalize(cameraPosition - vWorld);
     vec3 baseNormal = normalize(vNormal);
-    float iceCoverage = 0.0;
+    float iceCoverage = 0.0, iceOpacity = 1.0;
     vec3 iceColor = vec3(0.0);
     #ifdef WATER_ICE_DAMAGE
     if (iceSolidSurface && !iceHasDamage) discard;
@@ -350,23 +352,21 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      }
      #endif
      if (iceCoverage > 0.0) {
-      vec4 grain = textureLod(foamTile, p * .16, 0.0);
-      float frost = smoothstep(.34, .82, grain.r * .65 + grain.g * .35);
-      float crack = 1.0 - smoothstep(.018, .085, abs(sin(dot(p, vec2(.49, .33)) + grain.g * 2.6)));
-      float rim = smoothstep(.57, 1.0, abs(across));
-      vec3 ice = mix(vec3(.08,.23,.30), vec3(.52,.68,.75), clamp(frost * .65 + rim * .48, 0.0, 1.0));
-      ice += vec3(.18,.24,.27) * max(brokenEdge * .8, crack * (.35 + frost * .65));
-      float glint = .07 + .57 * pow(1.0 - abs(dot(baseNormal, V)), 4.0);
-      iceColor = mix(ice * (.20 + .80 * uDaylight), sky(reflect(-V, baseNormal), .04), glint);
-      if (iceCoverage >= 1.0) {
-       #ifdef POND_GOD_PASS
-       discard;
-       #endif
-       gl_FragColor = vec4(iceColor, 1.0);
-       #include <tonemapping_fragment>
-       #include <colorspace_fragment>
-       return;
-      }
+      #ifdef POND_GOD_PASS
+      if (iceCoverage >= 1.0) discard;
+      #endif
+      float frost, cracks, deepCracks, bubbles;
+      icePattern(p, V, deep, freezeMap, frost, cracks, deepCracks, bubbles);
+      vec3 ice = iceBody(frost, cracks, deepCracks, bubbles, iceOpacity) + ICE_WHITE * brokenEdge * .8;
+      // Clear ice is glassy: a sharp sun and a strong grazing reflection. Frost is matte and glitters instead.
+      vec3 mirrored = reflect(-V, baseNormal);
+      float glint = (.05 + .6 * pow(1.0 - abs(dot(baseNormal, V)), 4.0)) * mix(1.0, .4, frost);
+      float sunward = max(dot(mirrored, uSkySun), 0.0);
+      float sunSpot = pow(sunward, mix(900.0, 40.0, frost)) * mix(5.0, .5, frost);
+      const float crystalsPerMeter = 110.0;
+      float crystalsResolved = 1.0 - smoothstep(.3, .8, length(fwidth(p)) * crystalsPerMeter);
+      float crystals = step(.985, iceHash(floor(p * crystalsPerMeter))) * pow(sunward, 5.0) * frost * iceSparkle * 4.0 * crystalsResolved;
+      iceColor = mix(ice * (.20 + .80 * uDaylight), sky(mirrored, .04), glint) + uSunCol * (sunSpot + crystals);
      }
     }
     vec2 rippleUV = (vWorld.xz - rippleBounds.xy) / rippleBounds.zw;
@@ -432,7 +432,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      }
      vec3 color = mix(refr, mirror, fresnelBelow);
      color += shaftRadiance(vWorld, V, distance(cameraPosition, vWorld));
-     gl_FragColor = vec4(mix(color, iceColor, iceCoverage), 1.0);
+     gl_FragColor = vec4(mix(color, iceColor, iceCoverage * iceOpacity), 1.0);
      #include <tonemapping_fragment>
      #include <colorspace_fragment>
      return;
@@ -503,7 +503,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      vec3 foamColor = vec3(.72, .80, .77) * (.18 + .82 * uDaylight) * mix(.5, 1.25, film.x);
      color = mix(color, foamColor, film.y * foamOpacity);
     }
-    gl_FragColor = vec4(mix(color, iceColor, iceCoverage), 1.0);
+    gl_FragColor = vec4(mix(color, iceColor, iceCoverage * iceOpacity), 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
    }`,
@@ -604,7 +604,8 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    if (settings.pondColor) uniforms.pondColor.value.set(settings.pondColor);
    uniforms.pondHaze.value = settings.haze ?? R.haze;
    uniforms.pondDepthDark.value = settings.depthDark ?? R.depthDark;
-   if ((uniforms.freezeProgress.value >= 1 && !iceDamage?.active.value) || !surface.visible) return;
+   // A frozen pond still draws what lies under its clear ice, so the captures keep running.
+   if (!surface.visible) return;
    renderer.getDrawingBufferSize(size);
    capture.setSize(Math.max(1, Math.floor(size.x * captureScale)), Math.max(1, Math.floor(size.y * captureScale)));
    uniforms.currentTime.value = seconds;

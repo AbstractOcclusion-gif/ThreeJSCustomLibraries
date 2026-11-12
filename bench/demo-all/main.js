@@ -8,7 +8,7 @@ import {valueNoise} from '../../src/core/value-noise.js';
 import {createDataTexture} from '../../src/core/data-texture.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
-import {createChannelSurface, createFlowBake, createFreezeTexture, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
+import {createChannelSurface, createFlowBake, createFreezeTexture, createIceLook, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
 import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
@@ -144,12 +144,12 @@ waterGeometry.setAttribute('flow', new THREE.BufferAttribute(new Float32Array(wa
 const ripples = createRipples({origin: [-24, -16], size: [96, 96], cell: .4});
 const flow = createFlowBake();
 const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
-const freeze = createWaterFreeze(), freezeMap = createFreezeTexture();
-const ice = createTerrainIce(field, freezeMap, scene);
+const freeze = createWaterFreeze(), freezeMap = createFreezeTexture(), icePattern = createIceLook();
+const ice = createTerrainIce(field, freezeMap, scene, icePattern);
 weather.view.addCloudShadowReceiver(ice.material);
 const lightOccluders = [ground, ...rocks];
 const pond = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view, {water: true}), ripples, flow, obstacles,
- freezeMap, iceDamage: ice, captureScale: .4, causticSegments: 280, clipToBed: true, pondOptics: true, lightOccluders});
+ freezeMap, iceDamage: ice, iceLook: icePattern, captureScale: .4, causticSegments: 280, clipToBed: true, pondOptics: true, lightOccluders});
 const waterline = createWaterlineComposite(renderer, {caustics: pond.lighting});
 const sprayScene = new THREE.Scene();
 const waterPlane = new THREE.Vector4(0, 1, 0, 0);
@@ -306,7 +306,7 @@ const waterControls = gui.addFolder('Water');
 waterControls.add(controlsState, 'water').name('Show pond').onChange(rebuildGrass);
 waterControls.add(appearance.waterLevel, 'value', -2, maxWaterLevel, .05).name('Water level · m').onFinishChange(rebuildGrass);
 const {diveControl, diveHeight} = inlandWaterControls(waterControls, {
- settings: pondSettings, freeze, toggleUnderwater: () => setDiving(!diving),
+ settings: pondSettings, freeze, iceLook: icePattern, toggleUnderwater: () => setDiving(!diving),
 });
 function setDiving(enabled) {
  rippleGesture.cancel();

@@ -37,9 +37,11 @@ const COMMON = /* glsl */`
 `;
 
 // temperature() gives the heat field (0..~1) as a texture: sample .r.
-export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.resolution, pressureIterations = FLAME_FLUID_DEFAULTS.pressureIterations} = {}) {
+// seed: any number; fires with different seeds burn with different hot spots, so no two move alike.
+export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.resolution, pressureIterations = FLAME_FLUID_DEFAULTS.pressureIterations, seed = 0} = {}) {
   if (!renderer?.isWebGLRenderer) throw Error('Flame fluid needs a WebGL renderer');
   const [columns, rows] = resolution;
+  if (!Number.isFinite(seed)) throw Error('Flame fluid seed must be finite');
   if (![columns, rows].every(n => Number.isInteger(n) && n >= 8 && n <= 512) || !Number.isInteger(pressureIterations) || pressureIterations < 1 || pressureIterations > 80) {
     throw Error('Flame fluid needs a resolution of 8..512 cells and 1..80 pressure iterations');
   }
@@ -119,7 +121,7 @@ export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.re
     // Move the heat along the flow, cool it, and feed the heated band.
     advectHeat: pass(/* glsl */`
       uniform sampler2D tVelocity, tHeat;
-      uniform float uAspect, uDt, uTime, uIntensity;
+      uniform float uAspect, uDt, uTime, uIntensity, uSeed;
       uniform vec2 uSource;   // centre and half width of the heated band, in slice widths
       ${NOISE_GLSL}
       void main() {
@@ -132,10 +134,10 @@ export function createFlameFluid(renderer, {resolution = FLAME_FLUID_DEFAULTS.re
         float along = (vUv.x - uSource.x) / uSource.y;
         float band = (1.0 - smoothstep(.75, 1.0, abs(along))) * (1.0 - smoothstep(0.0, ${SIM.sourceRows.toFixed(3)}, vUv.y));
         // Fuel does not burn evenly: hot spots wander along the band.
-        float spots = valueNoise(vec3(vUv.x * ${SIM.sourceGrain.toFixed(1)}, uTime * ${SIM.sourceFlicker.toFixed(1)}, 3.0));
+        float spots = valueNoise(vec3(vUv.x * ${SIM.sourceGrain.toFixed(1)}, uTime * ${SIM.sourceFlicker.toFixed(1)}, uSeed));
         float feed = band * uIntensity * smoothstep(.3, .62, spots + uIntensity * .12);
         gl_FragColor = vec4(max(heat, feed), 0.0, 0.0, 1.0);
-      }`, {tVelocity: {value: null}, tHeat: {value: null}, uTime: {value: 0}, uIntensity: {value: 0}, uSource: {value: new THREE.Vector2(.5, .3)}}),
+      }`, {tVelocity: {value: null}, tHeat: {value: null}, uTime: {value: 0}, uIntensity: {value: 0}, uSeed: {value: seed}, uSource: {value: new THREE.Vector2(.5, .3)}}),
   };
 
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));

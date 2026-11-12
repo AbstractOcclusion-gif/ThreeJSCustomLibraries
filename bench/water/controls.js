@@ -90,10 +90,22 @@ export function waterMaterialControls(folder, settings) {
   if ('shadowEvery' in settings) light.add(settings, 'shadowEvery', 1, 8, 1).name('Shadow update interval');
 }
 
-export function inlandWaterControls(folder, {settings, freeze, toggleUnderwater, positionDiveCamera}) {
+// Ice look (createIceLook), shared by the water surface and any ice mesh.
+export function iceLookControls(folder, look) {
+  folder.add(look.frost, 'value', 0, 1, .01).name('Frost (0 clear · 1 white)');
+  folder.add(look.cracks, 'value', 0, 2, .05).name('Cracks');
+  folder.add(look.bubbles, 'value', 0, 2, .05).name('Bubbles');
+  folder.add(look.sparkle, 'value', 0, 3, .05).name('Frost sparkle');
+}
+
+export function inlandWaterControls(folder, {settings, freeze, iceLook, toggleUnderwater, positionDiveCamera}) {
   waterMaterialControls(folder, settings);
   if (settings.windWaves) pondWindControls(folder.addFolder('Wind ripples'), settings.windWaves);
-  if (freeze) waterFreezeControls(folder.addFolder('Freeze and thaw'), freeze);
+  if (freeze) {
+    const freezing = folder.addFolder('Freeze and thaw');
+    waterFreezeControls(freezing, freeze);
+    if (iceLook) iceLookControls(freezing, iceLook);
+  }
   const view = folder.addFolder('View');
   const diveControl = view.add({toggleUnderwater}, 'toggleUnderwater').name('Underwater view');
   let diveHeight;

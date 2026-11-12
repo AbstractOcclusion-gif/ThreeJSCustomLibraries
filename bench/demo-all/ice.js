@@ -7,7 +7,7 @@ import {createDataTexture} from '../../src/core/data-texture.js';
 
 const SLIDE_FRICTION = .00015;
 
-export function createTerrainIce(field, freezeMap, scene) {
+export function createTerrainIce(field, freezeMap, scene, look) {
  const columns = Math.ceil(field.bounds.z / .5), rows = Math.ceil(field.bounds.w / .5);
  const width = field.bounds.z / columns, depth = field.bounds.w / rows;
  const damage = new Uint8Array(columns * rows);
@@ -17,7 +17,7 @@ export function createTerrainIce(field, freezeMap, scene) {
  const mask = new Uint8Array(mapColumns * mapRows);
  const texture = createDataTexture(mask, mapColumns, mapRows, {format: THREE.RedFormat});
  const active = {value: false};
- const solidSurface = {value: false}, holes = [], slab = createIceSlab(scene, freezeMap);
+ const solidSurface = {value: false}, holes = [], slab = createIceSlab(scene, freezeMap, look);
  const bodies = new Map(), material = new Material({friction: SLIDE_FRICTION, restitution: 0});
  let lastProgress, lastLevel, lastBedVersion, dirty = true;
 

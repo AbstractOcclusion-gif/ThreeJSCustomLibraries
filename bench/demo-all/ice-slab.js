@@ -1,25 +1,31 @@
 import * as THREE from 'three';
-import {ICE_MAP_SCALE} from '../../src/water/freeze.js';
+import {ICE_MAP_SCALE, ICE_PATTERN_GLSL, createIceLook, iceLookUniforms} from '../../src/water/freeze.js';
 import {iceFractureDistance} from './ice-fracture.js';
 
 export const ICE_TOP = .05;
 export const ICE_THICKNESS = .16;
 const CELL = .25;
 
-export function createIceSlab(scene, freezeMap) {
+export function createIceSlab(scene, freezeMap, look = createIceLook()) {
  const material = new THREE.MeshPhysicalMaterial({
-  color: '#9cbfce', roughness: .33, ior: 1.31, clearcoat: .5,
-  clearcoatRoughness: .14, bumpMap: freezeMap, bumpScale: .045, vertexColors: true,
+  color: '#ffffff', roughness: .33, ior: 1.31, clearcoat: .5,
+  clearcoatRoughness: .14, bumpMap: freezeMap, bumpScale: .012, vertexColors: true,
  });
  material.onBeforeCompile = shader => {
+  // The same pattern as the water surface's ice (freeze.js), so the slab matches it where it takes over.
+  Object.assign(shader.uniforms, iceLookUniforms(look));
   shader.fragmentShader = shader.fragmentShader
+   .replace('#include <common>', `#include <common>\n${ICE_PATTERN_GLSL}`)
    .replace('#include <color_fragment>', `#include <color_fragment>
-    float grain = texture2D(bumpMap, vBumpMapUv).r;
-    float detail = texture2D(bumpMap, vBumpMapUv * 3.7 + vec2(.19, .63)).r;
-    float frost = smoothstep(.38, .66, mix(grain, detail, .33));
-    diffuseColor.rgb *= mix(vec3(.33, .62, .78), vec3(1.26, 1.32, 1.31), frost);`)
+    vec2 icePoint = vBumpMapUv / ${ICE_MAP_SCALE};
+    vec3 iceView = inverseTransformDirection(normalize(vViewPosition), viewMatrix);
+    float frost, cracks, deepCracks, bubbles, iceOpacity;
+    icePattern(icePoint, iceView, 1.0, bumpMap, frost, cracks, deepCracks, bubbles);
+    // The material colour tints the ice; the vertex tint darkens the walls and the underside of the slab.
+    diffuseColor.rgb = iceBody(frost, cracks, deepCracks, bubbles, iceOpacity) * diffuse * vColor.rgb;`)
    .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-    roughnessFactor = clamp(roughnessFactor * mix(.55, 1.8, frost), .05, 1.0);`);
+    // Clear ice is glassy and frost is matte, around the material's own roughness.
+    roughnessFactor = clamp(roughnessFactor * mix(.2, 2.4, frost), .04, 1.0);`);
  };
  const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
  mesh.receiveShadow = true;

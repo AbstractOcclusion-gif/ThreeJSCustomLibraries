@@ -3,7 +3,7 @@ export {createRipples} from './ripples.js';
 export {createFlowBake} from './flow-bake.js';
 export {createChannel, DEFAULT_SECTIONS} from './channel.js';
 export {createChannelSurface, POND_REFLECTION_DEFAULTS, CHANNEL_RENDER_DEFAULTS} from './surface.js';
-export {createWaterFreeze} from './freeze.js';
+export {createWaterFreeze, createIceLook, iceLookUniforms, ICE_PATTERN_GLSL} from './freeze.js';
 export {createWaterlineComposite} from './waterline.js';
 export {JERLOV, JERLOV_NAMES} from './jerlov.js';
 export {createOceanSurface, createOceanGeometry, OCEAN_DEFAULTS, OCEAN_PRESETS, OCEAN_REFLECTION_MODES} from './ocean-surface.js';

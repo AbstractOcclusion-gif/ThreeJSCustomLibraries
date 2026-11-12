@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
-import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
+import {createRipples, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createIceLook, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
@@ -40,9 +40,9 @@ const ripples = createRipples({origin: [-15, -13], size: [100, 88], cell: 0.3});
 const flow = createFlowBake();
 const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
 const lightOccluders = [];
-const freeze = createWaterFreeze(), freezeMap = createFreezeTexture();
+const freeze = createWaterFreeze(), freezeMap = createFreezeTexture(), iceLook = createIceLook();
 const water = createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow,
- freezeMap, causticSegments: 280, clipToBed: true, pondOptics: true, bedCaustics: 'material', lightOccluders});
+ freezeMap, iceLook, causticSegments: 280, clipToBed: true, pondOptics: true, bedCaustics: 'material', lightOccluders});
 const waterline = createWaterlineComposite(renderer, {caustics: water.lighting});
 
 // Pond, cliff and falling sheet adapted from Glider 2's procedural waterfall sample.
@@ -184,7 +184,7 @@ gui.add(state, 'discharge', 0, 2, 0.05).name('Waterfall flow');
 // No weather here: this temperature drives the ice when Water > Pond phase is 'Weather' (freezes at -1 °C, thaws above 1 °C).
 gui.add(state, 'airTemperature', -15, 30, 1).name('Air temperature · °C');
 const {diveControl, diveHeight} = inlandWaterControls(gui.addFolder('Water'), {
- settings: state, freeze, toggleUnderwater, positionDiveCamera,
+ settings: state, freeze, iceLook, toggleUnderwater, positionDiveCamera,
 });
 
 let diving = false;
