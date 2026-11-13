@@ -2,6 +2,7 @@ import {valueNoise} from '../core/value-noise.js';
 import {hash2} from '../core/hash.js';
 import {validateBiome, BIOME_CLIMATE_AXES} from './biomes.js';
 import {createRelief} from './relief.js';
+import {createCorridor} from './corridor.js';
 import {createTerrainRules, PAINT_REACH, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
 
 // A world lays biomes out in square regions and stitches them: across a border the relief and the layer paint of
@@ -54,15 +55,20 @@ export function validateWorld(settings) {
 // water: true floods the ground below settings.waterLevel: the rules then paint banks and beds.
 // climate: false ignores the climates of the biomes: regions are drawn by weight alone.
 // climateAt(x, z) -> {temperature, moisture}, each 0..1: the host's climate, in place of the world's own.
-export function createTerrainWorld({seed, biomes, map, water = false, climate = true, climateAt, ...overrides} = {}) {
+// corridor: CORRIDOR_DEFAULTS overrides (corridor.js; {} for the defaults). The world is then a corridor along +Z:
+// its biomes follow one another in sections along the route instead of lying in regions, and the map is not used.
+export function createTerrainWorld({seed, biomes, map, water = false, climate = true, climateAt, corridor: corridorSettings, ...overrides} = {}) {
   const settings = {...WORLD_DEFAULTS, ...overrides};
   validateWorld(settings);
   if (!Number.isSafeInteger(seed)) throw new RangeError('A world needs an integer seed');
   if (!Array.isArray(biomes) || !biomes.length || biomes.length > WORLD_MAX_BIOMES) throw new RangeError(`A world needs 1 to ${WORLD_MAX_BIOMES} biomes`);
   biomes.forEach(validateBiome);
   if (climateAt !== undefined && typeof climateAt !== 'function') throw new TypeError('A world climate is a function of x and z');
+  if (corridorSettings !== undefined && (corridorSettings === null || typeof corridorSettings !== 'object')) throw new TypeError('A world corridor is a settings object');
+  if (corridorSettings && map) throw new RangeError('A corridor world takes no map: its biomes lie in sections along the route');
+  const corridor = corridorSettings ? createCorridor(seed, biomes, corridorSettings) : null;
   const weights = biomes.map(biome => biome.weight ?? 1);
-  if (!weights.some(weight => weight > 0) && !map) throw new RangeError('A world needs a biome with a weight, or a map');
+  if (!corridor && !weights.some(weight => weight > 0) && !map) throw new RangeError('A world needs a biome with a weight, or a map');
   if (map) {
     const {columns, rows, cells} = map;
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1 || cells?.length !== columns * rows) throw new RangeError('A world map needs columns x rows cells');
@@ -70,7 +76,7 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
   }
   const {regionSize, blend, wander, climateSize} = settings;
   const count = biomes.length;
-  const reliefs = biomes.map(biome => createRelief(seed, biome.relief));
+  const reliefs = biomes.map(biome => createRelief(seed, biome.relief, {route: corridor?.routeX}));
   const rules = biomes.map(biome => createTerrainRules(seed, {...biome.paint, mudFromRunout: false}));
   // The palette: every texture set the biomes use, once per layer role. slices[biome][layer] is its place in it.
   const paletteSets = [], paletteRoles = [];
@@ -128,6 +134,7 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
   // Biome of region (column, row); region (0, 0) starts at the world origin.
   const drawn = new Map();
   function regionBiome(column, row) {
+    if (corridor) return corridor.sectionAt((row + .5) * regionSize).biome;
     if (map) {
       const i = column + Math.floor(map.columns / 2), j = row + Math.floor(map.rows / 2);
       const painted = i >= 0 && j >= 0 && i < map.columns && j < map.rows ? map.cells[j * map.columns + i] : WORLD_MAP_AUTO;
@@ -145,6 +152,7 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
 
   // Share of each biome at a point, written into `out` (one entry per biome, summing to 1).
   function weightsAt(x, z, out = new Float32Array(count)) {
+    if (corridor) return corridor.weightsAt(z, out);
     out.fill(0);
     if (count === 1) { out[0] = 1; return out; }
     const strayX = wander * regionSize * wanderX(x / wanderSize, z / wanderSize);
@@ -166,7 +174,7 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
     weightsAt(x, z, scratch);
     let height = 0;
     for (let i = 0; i < count; i++) if (scratch[i] > 0) height += scratch[i] * reliefs[i].heightAt(x, z, cell);
-    return height;
+    return corridor ? corridor.shape(height, x, z) : height;
   }
 
   // How far the ground at a point lies below the mean of its surroundings, in metres (negative on a ridge).
@@ -214,7 +222,9 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
     heightAt, hollowAt, sampleAt, weightsAt, paintAt, regionBiome,
     // The climate the regions are drawn by: {temperature, moisture} at a point.
     climateAt: worldClimate,
-    // A valley route only makes sense in a world of one biome.
-    routeX: count === 1 ? reliefs[0].routeX : undefined,
+    // The corridor, when the world is one: {settings, length (null: endless), routeX, sectionAt(z)}.
+    corridor,
+    // The route to follow: the corridor's, or the valley of a world of one biome.
+    routeX: corridor?.routeX ?? (count === 1 ? reliefs[0].routeX : undefined),
   };
 }

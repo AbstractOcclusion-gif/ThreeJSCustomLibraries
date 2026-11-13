@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {bakeSkyMap, terrainGroundColor, BIOME_CLIMATE_AXES, BIOME_TEXTURE_DEFAULTS, BIOME_WEIGHT_FIELD, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {bakeSkyMap, terrainGroundColor, CORRIDOR_DEFAULTS, CORRIDOR_FIELDS, BIOME_CLIMATE_AXES, BIOME_TEXTURE_DEFAULTS, BIOME_WEIGHT_FIELD, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createDataTexture} from '../../src/core/data-texture.js';
@@ -22,6 +22,7 @@ const LOD_COLORS = [0xffffff, 0x83e4bc, 0xffce78, 0xa7b2ff, 0xff9d9d, 0x9de0ff, 
 const VIEW = {
   fov: 48, near: .5, far: 6000, position: [110, 105, 145], target: [0, 8, 0],
   speed: 16, low: 7, lookAhead: 20,
+  corridorStart: 150,   // m along a corridor the view is brought to when the world becomes one
 };
 // Trees and rocks are placed per square tile, in the tiles within `reach` tiles of the focus, at most `tilesPerFrame`
 // new tiles a frame.
@@ -62,7 +63,8 @@ const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48f
 const biomeColors = BIOME_SWATCHES.map((color, index) => ['biome' + index, new THREE.Color(color)]);
 export async function mountValley() {
   const settings = {seed: SEED, dressingSeed: DRESSING.seed, density: .62, view: VIEWS[0], flyover: false,
-    ...WORLD_DEFAULTS, handPlaced: false, byClimate: true, water: true, ballRadius: PLAY.ball.radius, snow: false, wetness: 0, bounce: 1};
+    ...WORLD_DEFAULTS, corridor: false, sectionOrder: '', handPlaced: false, byClimate: true, water: true, ballRadius: PLAY.ball.radius, snow: false, wetness: 0, bounce: 1};
+  const corridor = {...CORRIDOR_DEFAULTS};
   // The world's biomes: copies of catalogue biomes, so the catalogue stays as shipped. `biome` is the one being edited.
   const worldBiomes = [cloneBiome(DEFAULT_TERRAIN_BIOME)];
   let biome = worldBiomes[0];
@@ -268,9 +270,18 @@ export async function mountValley() {
   // Rebuilds the world and the terrain rings around the focus from the edited biomes. The textures are reloaded
   // when the world's palette of texture sets changed; a newer rebuild started meanwhile wins.
   let building = 0;
+  // The corridor of the world, when it is one. Section order: biome numbers as listed in the panel ("1, 3, 2"),
+  // repeated along the route; empty: drawn by the rules.
+  function corridorOptions() {
+    if (!settings.corridor) return undefined;
+    const order = settings.sectionOrder.split(/[\s,;]+/).filter(Boolean).map(Number);
+    if (order.some(place => !Number.isInteger(place) || place < 1 || place > worldBiomes.length)) throw new RangeError(`Section order: biome numbers from 1 to ${worldBiomes.length}, separated by commas`);
+    return {...corridor, ...(order.length && {sections: order.map(place => ({biome: place - 1}))})};
+  }
   async function regenerate() {
     const {seed, regionSize, blend, wander, waterLevel, water, climateSize, byClimate: climate} = settings;
-    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced ? map : undefined, regionSize, blend, wander, waterLevel, water, climateSize, climate});
+    const corridorNow = corridorOptions();
+    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced && !corridorNow ? map : undefined, regionSize, blend, wander, waterLevel, water, climateSize, climate, corridor: corridorNow});
     const build = ++building, key = next.palette.sets.join() + '|' + next.palette.roles.join();
     if (key !== texturesKey) {
       const loaded = await loadPalette(next.palette);
@@ -378,6 +389,8 @@ export async function mountValley() {
         worldBiomes.splice(removed, 1);
         // Regions painted with the removed biome go back to the seed; later biomes move down one place.
         map.cells = map.cells.map(cell => cell === removed ? WORLD_MAP_AUTO : cell > removed ? cell - 1 : cell);
+        // The biomes that named it as a follower no longer do.
+        for (const other of worldBiomes) if (other.next) { other.next = other.next.filter(id => worldBiomes.some(left => left.id === id)); if (!other.next.length) delete other.next; }
         biome = worldBiomes[Math.min(removed, worldBiomes.length - 1)];
         mountWorld(); mountEditor();
         rebuild();
@@ -387,6 +400,18 @@ export async function mountValley() {
     worldFolder.add(settings, 'water').name('Water (lakes, rivers, sea)').onChange(rebuild);
     worldFolder.add(settings, 'byClimate').name('Place biomes by climate').onChange(rebuild);
     worldFolder.add(settings, 'handPlaced').name('Hand-placed map').onChange(rebuild);
+    // A corridor along +Z in place of the regions: the biomes then follow one another in sections along its route.
+    const corridorFolder = worldFolder.addFolder('Corridor').close();
+    corridorFolder.add(settings, 'corridor').name('World is a corridor').onChange(on => { rebuild().then(() => { if (on) lookAtCorridor(); }); });
+    for (const [key, {label, min, max, step}] of Object.entries(CORRIDOR_FIELDS)) corridorFolder.add(corridor, key, min, max, step).name(label).onFinishChange(rebuild);
+    corridorFolder.add(settings, 'sectionOrder').name('Biome order (e.g. 1, 3, 2; empty = rules)').onFinishChange(rebuild);
+  }
+  // Brings the view onto the corridor, a little way in from its start.
+  function lookAtCorridor() {
+    const route = world.corridor;
+    if (!route) return;
+    const z = Math.min(VIEW.corridorStart, (route.length ?? Infinity) / 2), x = route.routeX(z), move = new THREE.Vector3(x, world.heightAt(x, z), z).sub(orbit.target);
+    orbit.target.add(move); camera.position.add(move); orbit.update();
   }
   mountWorld();
   function mountEditor() {
@@ -404,6 +429,16 @@ export async function mountValley() {
     biome.climate ??= Object.fromEntries(BIOME_CLIMATE_AXES.map(axis => [axis, [0, 1]]));
     for (const axis of BIOME_CLIMATE_AXES) for (const [end, label] of [[0, 'from'], [1, 'up to']]) {
       placeFolder.add(biome.climate[axis], end, 0, 1, .01).name(`${axis} ${label}`).onFinishChange(rebuild);
+    }
+    // Along a corridor: the biomes that may come after this one. All ticked: any.
+    if (worldBiomes.length > 1) {
+      const followFolder = placeFolder.addFolder('In a corridor, may be followed by');
+      const may = Object.fromEntries(worldBiomes.map((other, index) => [index, !biome.next || biome.next.includes(other.id)]));
+      worldBiomes.forEach((other, index) => followFolder.add(may, index).name(biomeName(index)).onChange(() => {
+        const ids = [...new Set(worldBiomes.filter((_, place) => may[place]).map(entry => entry.id))];
+        if (ids.length === new Set(worldBiomes.map(entry => entry.id)).size) delete biome.next; else biome.next = ids;
+        rebuild();
+      }));
     }
     const reliefFolder = biomeFolder.addFolder('Relief (applied top to bottom)');
     biome.relief.forEach((entry, index) => {
@@ -436,7 +471,8 @@ export async function mountValley() {
   gui.add({copy: copy(() => biome)}, 'copy').name('Copy edited biome as JSON');
   gui.add({copy: copy(() => {
     const {seed, regionSize, blend, wander, waterLevel, water, climateSize, byClimate: climate} = settings;
-    return {seed, regionSize, blend, wander, waterLevel, water, climateSize, climate, biomes: worldBiomes, ...(settings.handPlaced && {map})};
+    const corridorNow = corridorOptions();
+    return {seed, regionSize, blend, wander, waterLevel, water, climateSize, climate, biomes: worldBiomes, ...(corridorNow ? {corridor: corridorNow} : settings.handPlaced && {map})};
   })}, 'copy').name('Copy world as JSON');
   const materialFolder = appearanceControls(gui, appearance, 'Material').close();
   materialFolder.add(appearance.harmony, 'value', 0, 1, .01).name('Colour harmony between layers');

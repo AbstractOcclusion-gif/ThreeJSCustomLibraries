@@ -135,9 +135,10 @@ export const RELIEF_SHAPES = Object.freeze({
     floor: number('Floor height · m', -60, 100, .5),
     saddleDepth: number('Side pass depth', 0, 1, .01), saddleWidth: number('Side pass width · m', 4, 200, 1),
   }, {width: 35, shoulder: 72, bend: 21, bendScale: 105, floor: 0, saddleDepth: 0, saddleWidth: 31},
-  ({width, shoulder, bend, bendScale, floor, saddleDepth, saddleWidth}, noise) => {
-    // The valley runs along +Z and wanders in X. The pass lowers the +X side around z = 0.
-    const routeX = z => bend * noise(0, z / bendScale);
+  ({width, shoulder, bend, bendScale, floor, saddleDepth, saddleWidth}, noise, before) => {
+    // The valley runs along +Z and wanders in X: along the route it is given (a world's corridor), else by its own
+    // bends. The pass lowers the +X side around z = 0.
+    const routeX = before.find(step => step.routeX)?.routeX ?? (z => bend * noise(0, z / bendScale));
     return {routeX, apply(value, x, z) {
       const cross = x - routeX(z);
       const side = smooth(width / 2, width / 2 + shoulder, Math.abs(cross));
@@ -193,14 +194,16 @@ export function validateRelief(recipe) {
 }
 
 // Builds the height sampler of a recipe. routeX(z) follows the first valley or river of the recipe (undefined without one).
-export function createRelief(seed, recipe) {
+// route: a routeX(z) given from outside (a world's corridor): the valleys and rivers of the recipe then follow it.
+export function createRelief(seed, recipe, {route} = {}) {
   if (!Number.isSafeInteger(seed)) throw new RangeError('Relief needs an integer seed');
+  if (route !== undefined && typeof route !== 'function') throw new TypeError('A relief route is a function of z');
   validateRelief(recipe);
-  const steps = [];
+  const steps = [], given = route ? [{routeX: route}] : [];
   // A shape is built knowing the shapes before it: a river follows the valley it runs in.
-  recipe.forEach(({shape: name, ...settings}, index) => steps.push(RELIEF_SHAPES[name].build(settings, valueNoise(seed + NOISE_STRIDE * (index + 1)), steps)));
+  recipe.forEach(({shape: name, ...settings}, index) => steps.push(RELIEF_SHAPES[name].build(settings, valueNoise(seed + NOISE_STRIDE * (index + 1)), [...given, ...steps])));
   return {
-    routeX: steps.find(step => step.routeX)?.routeX,
+    routeX: route ?? steps.find(step => step.routeX)?.routeX,
     // cell: the cell size, in metres, of the mesh that asks. Shapes finer than it can show leave their detail out,
     // so a coarse mesh gets smooth ground instead of noise. Without it the relief is given in full.
     heightAt(x, z, cell = 0) {

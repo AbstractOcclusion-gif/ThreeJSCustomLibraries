@@ -7,7 +7,8 @@ import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from './textures.js';
 // it and validate it with validateBiome to make your own.
 // Where a world lays it (world.js): `weight`, how common it is (1 when left out, 0: only where painted by hand), and
 // `climate` {temperature: [min, max], moisture: [min, max]}, the climate it lives in, each from 0 (cold, dry) to 1
-// (hot, wet). A biome without a climate lives anywhere.
+// (hot, wet). A biome without a climate lives anywhere. Along a corridor (corridor.js): `next`, the ids of the biomes
+// that may follow it; any, when left out.
 export const BIOME_WEIGHT_FIELD = Object.freeze({label: 'How common', min: 0, max: 10, step: .1});
 export const BIOME_CLIMATE_AXES = Object.freeze(['temperature', 'moisture']);
 const ANYWHERE = Object.freeze([0, 1]);
@@ -82,6 +83,7 @@ export function validateBiome(value) {
       if (!Array.isArray(range) || range.length !== 2 || !range.every(Number.isFinite) || range[0] < 0 || range[1] > 1 || range[0] > range[1]) throw new RangeError(`Biome ${value.id} needs a climate ${axis} range within 0..1`);
     }
   }
+  if (value.next !== undefined && (!Array.isArray(value.next) || !value.next.length || value.next.some(id => typeof id !== 'string' || !id))) throw new RangeError(`Biome ${value.id} needs its next biomes as a list of ids`);
   validateRelief(value.relief);
   for (const key of PAINT_KEYS) if (!Object.hasOwn(value.paint ?? {}, key)) throw new RangeError(`Biome ${value.id} has no paint setting: ${key}`);
   validateTerrainPaint(value.paint);
