@@ -53,7 +53,7 @@ const FOREST=Object.freeze({woodEdges:[.34,.66],woodGain:.75,coverGain:1.06,patc
 // Mud needs wet, flat ground: moisture moves the mud line by up to `moisture` x the mud transition, and mud thins out
 // between the two slopes (rise/run). However low the ground, mud only forms where the place is wet (from wet[0],
 // fully at wet[1]).
-const MUD=Object.freeze({moisture:2.2,slope:[.12,.4],wet:[.38,.6]});
+const MUD=Object.freeze({moisture:2.2,slope:[.12,.4],wet:[.48,.72]});
 // Moisture (0 dry .. 1 wet): `hollow` share from how far the ground sits in a hollow, `noise` share from the moisture
 // noise, plus up to `low` below the mud altitude, fading in over `lowRange` x the mud transition above it.
 const MOISTURE=Object.freeze({hollow:.55,noise:.45,low:.3,lowRange:6});

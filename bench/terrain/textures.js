@@ -50,6 +50,7 @@ export function terrainTextureUrl(set, role) {
 }
 
 const BYTE = 255, FLAT_NORMAL = 128;
+const MEAN_STRIDE = 7;   // one pixel in this many is read for the average colour of a set
 
 // layerDetail also returns layerDetailArray: per layer, normal xy in rg and roughness in b (createTerrainMaterial's
 // layerDetailArray). A set without those maps gets a flat normal and the layer's default roughness.
@@ -82,6 +83,8 @@ export async function loadTerrainTextures(renderer, {snowDetail = false, layerDe
   texture.needsUpdate = true;
   return texture;
  }
+ // Average colour of each slice, linear: lets the material shift a set toward the colour of its role.
+ const means = [];
  const layers = Object.fromEntries(images.map(([layer, color, height]) => {
   canvas.width = color.width;
   canvas.height = color.height;
@@ -89,6 +92,10 @@ export async function loadTerrainTextures(renderer, {snowDetail = false, layerDe
   const pixels = context.getImageData(0, 0, color.width, color.height).data;
   context.drawImage(height, 0, 0, color.width, color.height);
   const relief = context.getImageData(0, 0, color.width, color.height).data;
+  const sum = [0, 0, 0];
+  for (let i = 0; i < pixels.length; i += MEAN_STRIDE * 4) for (let channel = 0; channel < 3; channel++) sum[channel] += pixels[i + channel];
+  const sampled = Math.ceil(pixels.length / (MEAN_STRIDE * 4));
+  means.push(new THREE.Color().setRGB(...sum.map(total => total / sampled / BYTE), THREE.SRGBColorSpace));
   for (let i = 0; i < pixels.length; i += 4) pixels[i + 3] = relief[i];
   return [layer, createDataTexture(new Uint8Array(pixels.buffer), color.width, color.height,
    {flipY: true, colorSpace: THREE.SRGBColorSpace, wrap: THREE.RepeatWrapping, filter: 'mipmap', anisotropy})];
@@ -124,5 +131,5 @@ export async function loadTerrainTextures(renderer, {snowDetail = false, layerDe
   normal: configure(new THREE.Texture(snowMaps[0])),
   roughness: configure(new THREE.Texture(snowMaps[1])),
  };
- return {layerArray, layerDetailArray, rock: layers[sliceOf('rock')], detail: configure(new THREE.Texture(rockNormal)), snowMaterial};
+ return {layerArray, layerDetailArray, means, rock: layers[sliceOf('rock')], detail: configure(new THREE.Texture(rockNormal)), snowMaterial};
 }

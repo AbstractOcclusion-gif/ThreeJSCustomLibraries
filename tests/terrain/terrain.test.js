@@ -109,6 +109,9 @@ test('terrain material in palette mode needs the palette map and one layer slice
  assert.throws(() => createTerrainMaterial({}, {field: {...field, paletteMap: array(1)}, palette, layerArray: array(6), detailNormal}), /palette map/);
  assert.throws(() => createTerrainMaterial({}, {field, palette, layerArray: array(5), detailNormal}), /one layer array slice per set/);
  assert.throws(() => createTerrainMaterial({}, {field, palette: {...palette, roles: ['lava']}, layerArray: array(6), detailNormal}), /roles/);
+ assert.throws(() => createTerrainMaterial({}, {field, palette: {...palette, means: [new THREE.Color()]}, layerArray: array(6), detailNormal}), /one colour per set/);
+ const harmonised = createTerrainMaterial({}, {field, palette: {...palette, means: palette.roles.map(() => new THREE.Color(.2, .15, .1))}, layerArray: array(6), detailNormal});
+ harmonised.dispose();
  material.dispose();
 });
 

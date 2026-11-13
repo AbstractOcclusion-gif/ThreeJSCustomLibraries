@@ -41,6 +41,9 @@ export const TERRAIN_LAYER_ROUGHNESS = Object.freeze({grass: .95, rock: .85, sno
 // The same for every palette role (TERRAIN_PALETTE_ROLES order).
 export const TERRAIN_PALETTE_ROUGHNESS = Object.freeze({...TERRAIN_LAYER_ROUGHNESS, scree: .9, soil: .93});
 
+// The colour each palette role is drawn toward (appearance.harmony): one earthy family, so no layer stands out.
+export const TERRAIN_ROLE_TINTS = Object.freeze({grass: '#6f8f3a', rock: '#86817a', snow: '#eef1f3', mud: '#5f5238', forest: '#55682f', scree: '#8a8274', soil: '#7a6648'});
+
 export function createTerrainAppearance() {
  return {
   tiling: {value: .45}, rockScale: {value: .55}, sharpness: {value: 3.5}, antiTiling: {value: .85},
@@ -52,6 +55,13 @@ export function createTerrainAppearance() {
   dryTint: {value: new THREE.Color(1.12, 1, .68)}, lushTint: {value: new THREE.Color(.62, 1.08, .5)},
   climateTint: {value: .75},   // strength of that tint (0 = off)
   macroVariation: {value: .5}, // large-scale light and dark patches over every layer, so far ground is not one flat colour (0 = off)
+  // Palette mode: every texture set is shifted toward the colour of its role, so the layers of a landscape belong
+  // together instead of each keeping the average colour of its photograph. The detail of the texture is kept.
+  harmony: {value: .7},        // share of that shift (0 = the textures as they are)
+  roleTints: {value: TERRAIN_PALETTE_ROLES.map(role => new THREE.Color(TERRAIN_ROLE_TINTS[role]))},
+  // Junction sharpness applies near the camera and fades out between these two distances (m): from afar a sharp
+  // edge between two flat colours reads as a pattern.
+  edgeFade: {value: new THREE.Vector2(25, 110)},
   waterLevel: {value: 0}, shoreWidth: {value: .8}, shoreWetness: {value: 1},
  };
 }
@@ -102,7 +112,10 @@ uniform highp sampler2DArray terrainPaletteWeights;
 uniform int terrainPaletteRole[TERRAIN_PALETTE_SIZE];
 uniform int terrainPaletteSnow;
 const float terrainRoleRoughness[${TERRAIN_PALETTE_ROLES.length}] = float[](${TERRAIN_PALETTE_ROLES.map(name => TERRAIN_PALETTE_ROUGHNESS[name].toFixed(3)).join(', ')});
-uniform float terrainMacroVariation;
+uniform float terrainMacroVariation, terrainHarmony;
+uniform vec3 terrainPaletteMean[TERRAIN_PALETTE_SIZE];   // average colour of each set, linear
+uniform vec3 terrainRoleTint[${TERRAIN_PALETTE_ROLES.length}];
+uniform vec2 terrainEdgeFade;
 #ifdef TERRAIN_CLIMATE
 uniform sampler2D terrainClimate;   // r = moisture, 0 dry .. 1 wet
 uniform vec3 terrainDryTint, terrainLushTint;
@@ -226,7 +239,11 @@ vec2 terrainEdgeWarp(vec2 world) {
 // line where two layers are equal. That line already follows the texture relief (terrainHeightBlend).
 float terrainEdge(float weight, float strongest) {
  const float fullPower = 7.0;   // exponent added at edge sharpness 1
- return weight > 0.0 ? weight * pow(weight / strongest, terrainEdgeSharpness * fullPower) : 0.0;
+ float sharpness = terrainEdgeSharpness;
+ #ifdef TERRAIN_PALETTE
+ sharpness *= 1.0 - smoothstep(terrainEdgeFade.x, terrainEdgeFade.y, length(vViewPosition));
+ #endif
+ return weight > 0.0 ? weight * pow(weight / strongest, sharpness * fullPower) : 0.0;
 }
 
 float terrainHeightAt(vec2 grid, out vec3 groundNormal) {
@@ -365,14 +382,16 @@ const TERRAIN_FRAGMENT = /* glsl */`
   paletteScale[i] = role == TERRAIN_ROCK ? terrainRockScale : role == TERRAIN_MUD ? mudScale : 1.0;
   if (paletteWeight[i] <= 0.0 && !(snowLies && i == terrainPaletteSnow)) continue;
   paletteTexel[i] = terrainTriplanar(i, terrainP * paletteScale[i], terrainDx * paletteScale[i], terrainDy * paletteScale[i], terrainSign, terrainAxes);
+  paletteTexel[i].rgb *= mix(vec3(1.0), terrainRoleTint[role] / max(terrainPaletteMean[i], vec3(.02)), terrainHarmony);
   if (role == TERRAIN_GRASS || role == TERRAIN_FOREST) paletteTexel[i].rgb *= climateTint;
   if (i == terrainPaletteSnow) terrainSnowAlbedo = paletteTexel[i].rgb;
   paletteWeight[i] *= exp2((paletteTexel[i].a - .5) * terrainHeightBlend * 8.0);
   strongest = max(strongest, paletteWeight[i]);
  }
  float totalWeight = 0.0;
+ bool sharpEdges = terrainEdgeSharpness > 0.0 && length(vViewPosition) < terrainEdgeFade.y;
  for (int i = 0; i < TERRAIN_PALETTE_SIZE; i++) {
-  if (terrainEdgeSharpness > 0.0) paletteWeight[i] = terrainEdge(paletteWeight[i], strongest);
+  if (sharpEdges) paletteWeight[i] = terrainEdge(paletteWeight[i], strongest);
   totalWeight += paletteWeight[i];
  }
  totalWeight = max(totalWeight, .0001);
@@ -537,7 +556,8 @@ export function createTerrainMaterial(parameters = {}, {
  if (palette !== undefined) {
   if (!Number.isInteger(palette?.size) || palette.size < 4 || palette.size % 4 || !Array.isArray(palette.roles) || !palette.roles.length) throw Error('Terrain palette needs a size in fours and the role of each set');
   if (palette.roles.some(role => !TERRAIN_PALETTE_ROLES.includes(role)) || palette.roles.length > palette.size) throw Error('Terrain palette roles must be palette roles, at most one per weight');
-  for (const key of ['dryTint', 'lushTint', 'climateTint', 'macroVariation']) if (!appearance[key]) throw Error(`Terrain appearance needs ${key}: build it with createTerrainAppearance()`);
+  if (palette.means !== undefined && (!Array.isArray(palette.means) || palette.means.length < palette.roles.length || palette.means.some(mean => !mean?.isColor))) throw Error('Terrain palette means must be one colour per set');
+  for (const key of ['dryTint', 'lushTint', 'climateTint', 'macroVariation', 'harmony', 'roleTints', 'edgeFade']) if (!appearance[key]) throw Error(`Terrain appearance needs ${key}: build it with createTerrainAppearance()`);
   if (!field?.paletteMap?.isDataArrayTexture || field.paletteMap.image.depth !== palette.size / 4) throw Error('Terrain palette needs the field palette map: four weights per slice');
   if (!layerArray?.isDataArrayTexture || layerArray.image.depth < palette.roles.length) throw Error('Terrain palette needs one layer array slice per set');
   if (snowMaterial) throw Error('Terrain palette does not take snow detail');
@@ -581,6 +601,9 @@ export function createTerrainMaterial(parameters = {}, {
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap ?? null}, terrainBounds: {value: field.bounds},
   terrainLayerArray: {value: layerArray ?? null},
   ...(palette && {terrainPaletteWeights: {value: field.paletteMap}, terrainPaletteRole: {value: paletteRoles}, terrainPaletteSnow: {value: palette.roles.indexOf('snow')},
+   terrainHarmony: appearance.harmony, terrainRoleTint: appearance.roleTints, terrainEdgeFade: appearance.edgeFade,
+   // A set without a known average is left as it is: its average counts as the colour of its role.
+   terrainPaletteMean: {value: Array.from({length: palette.size}, (_, index) => palette.means?.[index] ?? appearance.roleTints.value[paletteRoles[index]])},
    terrainMacroVariation: appearance.macroVariation, terrainClimate: {value: field.climateMap ?? null},
    terrainDryTint: appearance.dryTint, terrainLushTint: appearance.lushTint, terrainClimateTint: appearance.climateTint}),
   terrainLayerDetailArray: {value: layerDetailArray ?? null}, terrainLayerDetail: appearance.layerDetail ?? {value: 0},

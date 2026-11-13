@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
@@ -68,7 +68,7 @@ export async function mountValley() {
     return loadTerrainTextures(renderer, {layerDetail: true, sets: Object.fromEntries(bundled.map((set, slice) => ['slice' + slice, set])),
       roles: Object.fromEntries(roles.map((role, slice) => ['slice' + slice, role]))});
   }
-  const disposeTextures = set => { for (const texture of Object.values(set ?? {})) texture?.dispose?.(); };
+  const disposeTextures = set => { for (const texture of Object.values(set ?? {})) texture?.dispose?.(); };   // the entries that are textures
   let textures, texturesKey = '';
   const appearance = createTerrainAppearance();
   appearance.shoreWetness.value = 0;
@@ -190,7 +190,7 @@ export async function mountValley() {
     world = next;
     disposeTerrain();
     clipmap = createTerrainClipmap({world, ...CLIP, tint, createMaterial: field =>
-      createTerrainMaterial({}, {field, palette: world.palette, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook})});
+      createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook})});
     scene.add(clipmap.group);
     clipmap.update(focus.x, focus.z);
     clearDressing();
@@ -331,6 +331,12 @@ export async function mountValley() {
     return {seed, regionSize, blend, wander, biomes: worldBiomes, ...(settings.handPlaced && {map})};
   })}, 'copy').name('Copy world as JSON');
   const materialFolder = appearanceControls(gui, appearance, 'Material').close();
+  materialFolder.add(appearance.harmony, 'value', 0, 1, .01).name('Colour harmony between layers');
+  const tints = materialFolder.addFolder('Layer target colours').close();
+  TERRAIN_PALETTE_ROLES.forEach((role, index) => {
+    const edit = {color: '#' + appearance.roleTints.value[index].getHexString()};
+    tints.addColor(edit, 'color').name(role).onChange(value => appearance.roleTints.value[index].set(value));
+  });
   materialFolder.add(appearance.macroVariation, 'value', 0, 1, .01).name('Large-scale colour variation');
   materialFolder.add(appearance.climateTint, 'value', 0, 1, .01).name('Dry-to-lush grass tint');
   for (const [key, label] of [['dryTint', 'Dry grass tint'], ['lushTint', 'Lush grass tint']]) {
