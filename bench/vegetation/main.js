@@ -42,9 +42,10 @@ const bushes = new LeavedTrees({scene, profile: 'bush', lighting, sampleGround: 
 const treeTint = new THREE.Color();
 const shade = new THREE.Color('#2f6b1f'), highlight = new THREE.Color('#779640');
 const comparison = [
-  {profile: 'oak', x: -10, h: 5, r: 2.1},
-  {profile: 'birch', x: 0, h: 6, r: 1.35},
-  {profile: 'hawthorn', x: 10, h: 2.4, r: 1.5},
+  {profile: 'oak', x: -13.5, h: 5, r: 2.1},
+  {profile: 'birch', x: -4.5, h: 6, r: 1.35},
+  {profile: 'hawthorn', x: 4.5, h: 2.4, r: 1.5},
+  {profile: 'pine', x: 13.5, h: 6, r: 1.9},
 ];
 const variantRows = [4, 0, -4];
 const specimens = comparison.map(({profile, x, h, r}) => {
@@ -142,7 +143,7 @@ function applyView() {
   trees.group.visible = bushes.group.visible = !compare;
   for (const plants of specimens) plants.group.visible = compare;
   $('species-order').hidden = !compare;
-  camera.position.set(...(compare ? [0, 10, 30] : [13, 5.5, 16]));
+  camera.position.set(...(compare ? [0, 11, 39] : [13, 5.5, 16]));
   controls.target.set(0, compare ? 2.6 : 1, 0);
   controls.update();
 }

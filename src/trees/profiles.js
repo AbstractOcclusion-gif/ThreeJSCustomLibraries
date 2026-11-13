@@ -43,8 +43,15 @@ export const SPECIES = Object.freeze({
   hawthorn: mergeProfile(BUSH_PROFILE, {
     name: 'hawthorn', crown: {mainRadius: .49, mainCentreY: .67, fixedSquash: .59},
     lobes: {count: [7, 9], radius: [.26, .45], offset: [.42, .86], drop: [-.24, .33], baseY: .52},
-    core: {radiusShare: .49}, cards: {size: [.26, .44], perUnitArea: 82, subcells: 1},
-    branches: {origin: [0, .14], radius: .049, tipRadius: .012, bend: .04},
+    core: {radiusShare: .52}, cards: {size: [.3, .48], perUnitArea: 106, subcells: 1},
+    branches: {count: 3, origin: [0, .08], radius: .041, tipRadius: .01, bend: .04},
+  }),
+  pine: mergeProfile(TREE_PROFILE, {
+    name: 'pine', trunk: {radiusBottom: .105, radiusTop: .03, topIntoCrown: .91, color: '#a26e45'},
+    crown: {depth: .42, mainRadius: .53, mainCentreY: .86, fixedSquash: .31},
+    lobes: {count: [6, 8], radius: [.24, .43], offset: [.39, .81], drop: [-.26, .65], baseY: .79},
+    core: {radiusShare: .44}, cards: {needle: true, size: [.26, .43], perUnitArea: 112, subcells: 1},
+    branches: {origin: [.58, .81], radius: .055, tipRadius: .013, bend: .035},
   }),
 });
 export const PROFILES = Object.freeze({tree: TREE_PROFILE, bush: BUSH_PROFILE, ...SPECIES});

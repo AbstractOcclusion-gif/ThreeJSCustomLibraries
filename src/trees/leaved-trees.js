@@ -26,9 +26,13 @@ export class LeavedTrees {
     // Without a `lighting` hook the trees own a default one, which setEnvironment() may drive.
     this.ownsLighting = !lighting; lighting ??= createLighting(); this.environment = null;
     this.ownsLeaf = !leafTexture;
-    this.leafTexture = leafTexture ?? createVegetationAtlas({twigCards: Boolean(resolveProfile(profile).branches)});
+    const initialProfile = resolveProfile(profile);
+    this.cardStyle = initialProfile.cards.needle ? 'needle' : initialProfile.branches ? 'twig' : 'cluster';
+    this.leafTexture = leafTexture ?? createVegetationAtlas({twigCards: this.cardStyle === 'twig', needleCards: this.cardStyle === 'needle'});
     this.leafRect = leafRect ?? (leafTexture ? [0, 0, 1, 1] : FREE_ATLAS_RECTS.leaf);
     const luminance = leafLuminance ?? meanLeafLuminance(this.leafTexture, this.leafRect);
+    this.barkUsesLeafAtlas = this.ownsLeaf && !barkTexture;
+    this.leafLuminance = leafLuminance;
     this.material = createLeavedMaterial({lighting, leafTexture: this.leafTexture, leafCutoff, leafLuminance: luminance, canopy, nearHole,
       barkTexture: barkTexture ?? (this.ownsLeaf ? this.leafTexture : null),
       barkRect: barkRect ?? (barkTexture ? [0, 0, 1, 1] : FREE_ATLAS_RECTS.bark)});
@@ -38,6 +42,16 @@ export class LeavedTrees {
   /** Rebuild the silhouette templates from a profile; re-places the current items. */
   setProfile(profile) {
     this.profile = resolveProfile(profile);
+    const style = this.profile.cards.needle ? 'needle' : this.profile.branches ? 'twig' : 'cluster';
+    if (this.ownsLeaf && style !== this.cardStyle) {
+      const atlas = createVegetationAtlas({twigCards: style === 'twig', needleCards: style === 'needle'});
+      this.leafTexture.dispose();
+      this.leafTexture = atlas;
+      this.cardStyle = style;
+      this.material.uniforms.uLeaf.value = atlas;
+      this.material.uniforms.uLeafLuminance.value = this.leafLuminance ?? meanLeafLuminance(atlas, this.leafRect);
+      if (this.barkUsesLeafAtlas) this.material.uniforms.uBark.value = atlas;
+    }
     for (const t of this.templates ?? []) t.dispose();
     this.templates = Array.from({length: this.profile.variants}, (_, v) => leavedTreeGeometry(this.profile, v, this.leafRect));
     if (this.items.length) this.place(this.items, this.scaleMultiplier);

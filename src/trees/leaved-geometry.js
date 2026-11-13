@@ -134,7 +134,11 @@ export function leavedTreeGeometry(profile, variant, leafRect = [0, 0, 1, 1]) {
   }
   for (const lobe of lobes) appendCore(out, P, noise, lobe.centre, lobe.radius, squash, lobe.seed, band);
   for (const lobe of lobes) appendCards(out, P, noise, lobe.centre, lobe.radius, squash, lobe.seed, lobe.tint, band, leafRect);
-  if (P.branches) for (const lobe of lobes.slice(P.trunk.enabled ? 1 : 0)) appendBranch(out, P, lobe, band);
+  if (P.branches) {
+    const limbLobes = lobes.slice(P.trunk.enabled ? 1 : 0);
+    const count = Math.min(P.branches.count ?? limbLobes.length, limbLobes.length);
+    for (let i = 0; i < count; i++) appendBranch(out, P, limbLobes[Math.floor(i * limbLobes.length / count)], band);
+  }
   if (P.trunk.enabled) appendTrunk(out, P.trunk, crownBottomY + depth * P.trunk.topIntoCrown, Boolean(P.branches));
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(out.positions, 3));
