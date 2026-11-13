@@ -2,7 +2,7 @@ import {valueNoise} from '../core/value-noise.js';
 import {hash2} from '../core/hash.js';
 import {validateBiome} from './biomes.js';
 import {createRelief} from './relief.js';
-import {createTerrainRules, TERRAIN_LAYERS} from './terrain-rules.js';
+import {createTerrainRules, PAINT_REACH, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
 
 // A world lays biomes out in square regions and stitches them: across a border the relief and the layer paint of
 // the two biomes blend, along a line that wanders so the grid of regions does not show. A region takes the biome
@@ -20,8 +20,12 @@ export const WORLD_FIELDS = Object.freeze({
 });
 export const WORLD_MAX_BIOMES = 16;
 export const WORLD_MAP_AUTO = -1;       // map cell left to the seed
+export const WORLD_PALETTE_MAX = 16;    // texture sets a world can show: one weight each in the terrain material
+const PALETTE_GROUP = 4;                // palette weights travel four to a texel
 const WANDER = Object.freeze({scale: .6, seeds: [211, 223]});   // wander features, in regions; noise seed offsets
 const REGION_SEED = 97;
+// The terrain layer each palette role counts as where only the layers are known.
+const LEGACY_LAYER = TERRAIN_PALETTE_ROLES.map(role => TERRAIN_LAYERS.indexOf({scree: 'rock', soil: 'mud'}[role] ?? role));
 const smooth = (from, to, value) => {
   const t = Math.max(0, Math.min(1, (value - from) / (to - from)));
   return t * t * (3 - 2 * t);
@@ -51,6 +55,19 @@ export function createTerrainWorld({seed, biomes, map, ...overrides} = {}) {
   const count = biomes.length;
   const reliefs = biomes.map(biome => createRelief(seed, biome.relief));
   const rules = biomes.map(biome => createTerrainRules(seed, {...biome.paint, mudFromRunout: false}));
+  // The palette: every texture set the biomes use, once per layer role. slices[biome][layer] is its place in it.
+  const paletteSets = [], paletteRoles = [];
+  const slices = biomes.map(biome => TERRAIN_PALETTE_ROLES.map(role => {
+    const set = biome.textures[role];
+    let slice = paletteSets.findIndex((other, index) => other === set && paletteRoles[index] === role);
+    if (slice < 0) { slice = paletteSets.length; paletteSets.push(set); paletteRoles.push(role); }
+    return slice;
+  }));
+  if (paletteSets.length > WORLD_PALETTE_MAX) throw new RangeError(`A world shows at most ${WORLD_PALETTE_MAX} texture sets; these biomes use ${paletteSets.length}`);
+  const palette = Object.freeze({
+    sets: Object.freeze(paletteSets), roles: Object.freeze(paletteRoles),
+    size: Math.ceil(paletteSets.length / PALETTE_GROUP) * PALETTE_GROUP,   // weights per sample, the unused ones zero
+  });
   const wanderX = valueNoise(seed + WANDER.seeds[0]), wanderZ = valueNoise(seed + WANDER.seeds[1]);
   const wanderSize = regionSize * WANDER.scale;
 
@@ -89,23 +106,46 @@ export function createTerrainWorld({seed, biomes, map, ...overrides} = {}) {
     return height;
   }
 
-  // Layer weights (TERRAIN_LAYERS order) and sand of the stitched biomes: the paintAt callback of createTerrainField.
-  const paintScratch = new Float32Array(count);
+  // How far the ground at a point lies below the mean of its surroundings, in metres (negative on a ridge).
+  function hollowAt(x, z) {
+    const reach = PAINT_REACH.hollow;
+    return (heightAt(x - reach, z) + heightAt(x + reach, z) + heightAt(x, z - reach) + heightAt(x, z + reach)) / 4 - heightAt(x, z);
+  }
+
+  // The full paint sample of a point, measured on the relief itself: for a few points (placing props); a mesh
+  // fills its samples from its own heights.
+  function sampleAt(x, z) {
+    const reach = PAINT_REACH.slope;
+    const dx = (heightAt(x + reach, z) - heightAt(x - reach, z)) / (2 * reach), dz = (heightAt(x, z + reach) - heightAt(x, z - reach)) / (2 * reach);
+    return {x, z, height: heightAt(x, z), slope: Math.hypot(dx, dz), dx, dz, hollow: hollowAt(x, z), curvature: 0};
+  }
+
+  // Paint of the stitched biomes at a sample (the terrain signals of the rules' paint()): `layers` (TERRAIN_LAYERS
+  // order, scree counted as rock and soil as mud) and `sand` are what createTerrainField's paintAt callback takes;
+  // `palette` holds one weight per palette set, so each biome keeps its own textures; `moisture` is 0 dry .. 1 wet.
+  // `palette` is reused: read it before the next call.
+  const paintScratch = new Float32Array(count), paletteWeights = new Float32Array(palette.size);
   function paintAt(sample) {
     weightsAt(sample.x, sample.z, paintScratch);
     const layers = new Array(TERRAIN_LAYERS.length).fill(0);
-    let sand = 0;
+    paletteWeights.fill(0);
+    let sand = 0, moisture = 0;
     for (let i = 0; i < count; i++) {
       const share = paintScratch[i];
       if (share <= 0) continue;
-      rules[i].weights(sample).forEach((weight, layer) => { layers[layer] += weight * share; });
+      const painted = rules[i].paint(sample);
+      painted.roles.forEach((weight, role) => {
+        layers[LEGACY_LAYER[role]] += weight * share;
+        paletteWeights[slices[i][role]] += weight * share;
+      });
       sand += rules[i].sand(sample) * share;
+      moisture += painted.moisture * share;
     }
-    return {layers, sand};
+    return {layers, sand, moisture, palette: paletteWeights};
   }
 
   return {
-    settings, biomes, heightAt, weightsAt, paintAt, regionBiome,
+    settings, biomes, palette, paintReach: PAINT_REACH, heightAt, hollowAt, sampleAt, weightsAt, paintAt, regionBiome,
     // A valley route only makes sense in a world of one biome.
     routeX: count === 1 ? reliefs[0].routeX : undefined,
   };

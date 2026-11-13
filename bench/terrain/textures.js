@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {TERRAIN_LAYERS} from '../../src/terrain/terrain-rules.js';
-import {TERRAIN_LAYER_ROUGHNESS} from '../../src/terrain/index.js';
+import {TERRAIN_PALETTE_ROUGHNESS} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS, getTerrainTextureMap} from '../../src/terrain/textures.js';
 import {configureTexture, createDataTexture} from '../../src/core/data-texture.js';
 
@@ -9,12 +9,13 @@ const files = import.meta.glob([
 ], {eager: true, query: '?url', import: 'default'});
 
 // The layer images share the same resolution and color space. Upload them as one texture unit.
-export function packTerrainLayers(layers) {
- const source = layers.grass;
+// `order` names the slices: the terrain layers by default, any list of keys of `layers` otherwise.
+export function packTerrainLayers(layers, order = TERRAIN_LAYERS) {
+ const source = layers[order[0]];
  const {width, height} = source.image;
  const rowBytes = width * 4, layerBytes = rowBytes * height;
- const pixels = new Uint8Array(layerBytes * TERRAIN_LAYERS.length);
- TERRAIN_LAYERS.forEach((name, layer) => {
+ const pixels = new Uint8Array(layerBytes * order.length);
+ order.forEach((name, layer) => {
   const texture = layers[name];
   const {data, width: w, height: h} = texture.image;
   if (w !== width || h !== height) throw Error('Terrain layer images must share a resolution');
@@ -24,7 +25,7 @@ export function packTerrainLayers(layers) {
    pixels.set(data.subarray(row, row + rowBytes), layer * layerBytes + y * rowBytes);
   }
  });
- const array = new THREE.DataArrayTexture(pixels, width, height, TERRAIN_LAYERS.length);
+ const array = new THREE.DataArrayTexture(pixels, width, height, order.length);
  array.colorSpace = source.colorSpace;
  array.wrapS = source.wrapS;
  array.wrapT = source.wrapT;
@@ -52,11 +53,16 @@ const BYTE = 255, FLAT_NORMAL = 128;
 
 // layerDetail also returns layerDetailArray: per layer, normal xy in rg and roughness in b (createTerrainMaterial's
 // layerDetailArray). A set without those maps gets a flat normal and the layer's default roughness.
-export async function loadTerrainTextures(renderer, {snowDetail = false, layerDetail = false, sets = DEFAULT_TERRAIN_TEXTURES} = {}) {
+// `sets` maps each slice to a catalogue set: the terrain layers by default. For other slices (a world palette), `roles`
+// gives the palette role each slice plays; the shared detail normal and `rock` come from the first rock slice.
+export async function loadTerrainTextures(renderer, {snowDetail = false, layerDetail = false, sets = DEFAULT_TERRAIN_TEXTURES, roles} = {}) {
+ const order = Object.keys(sets);
+ const roleOf = slice => roles?.[slice] ?? slice;
+ const sliceOf = role => order.find(slice => roleOf(slice) === role);
  const loader = new THREE.ImageLoader();
  const load = (set, role) => loader.loadAsync(terrainTextureUrl(set, role));
  const loadDetail = (layer, role) => {
-  const set = sets[layer];
+  const set = sets[sliceOf(layer)];
   return load(TERRAIN_TEXTURE_SETS[set]?.maps[role] ? set : DEFAULT_TERRAIN_TEXTURES[layer], role);
  };
  const optional = (set, role) => TERRAIN_TEXTURE_SETS[set]?.maps[role] ? load(set, role) : null;
@@ -87,10 +93,10 @@ export async function loadTerrainTextures(renderer, {snowDetail = false, layerDe
   return [layer, createDataTexture(new Uint8Array(pixels.buffer), color.width, color.height,
    {flipY: true, colorSpace: THREE.SRGBColorSpace, wrap: THREE.RepeatWrapping, filter: 'mipmap', anisotropy})];
  }));
- const layerArray = packTerrainLayers(layers);
+ const layerArray = packTerrainLayers(layers, order);
  let layerDetailArray;
  if (surfaces) {
-  const {width, height} = layers.grass.image;
+  const {width, height} = layers[order[0]].image;
   const read = image => {
    canvas.width = width; canvas.height = height;
    context.drawImage(image, 0, 0, width, height);
@@ -99,7 +105,7 @@ export async function loadTerrainTextures(renderer, {snowDetail = false, layerDe
   const packed = Object.fromEntries(surfaces.map(([layer, normal, roughness]) => {
    const pixels = new Uint8Array(width * height * 4).fill(BYTE);
    const tilt = normal && read(normal), rough = roughness && read(roughness);
-   const flatRoughness = Math.round(TERRAIN_LAYER_ROUGHNESS[layer] * BYTE);
+   const flatRoughness = Math.round(TERRAIN_PALETTE_ROUGHNESS[roleOf(layer)] * BYTE);
    for (let i = 0; i < pixels.length; i += 4) {
     pixels[i] = tilt ? tilt[i] : FLAT_NORMAL;
     pixels[i + 1] = tilt ? tilt[i + 1] : FLAT_NORMAL;
@@ -108,15 +114,15 @@ export async function loadTerrainTextures(renderer, {snowDetail = false, layerDe
    return [layer, createDataTexture(pixels, width, height,
     {flipY: true, wrap: THREE.RepeatWrapping, filter: 'mipmap', anisotropy})];
   }));
-  layerDetailArray = packTerrainLayers(packed);
+  layerDetailArray = packTerrainLayers(packed, order);
   for (const texture of Object.values(packed)) texture.dispose();
  }
  for (const [name, texture] of Object.entries(layers)) {
-  if (name !== 'rock') texture.dispose();
+  if (name !== sliceOf('rock')) texture.dispose();
  }
  const snowMaterial = snowMaps && {
   normal: configure(new THREE.Texture(snowMaps[0])),
   roughness: configure(new THREE.Texture(snowMaps[1])),
  };
- return {layerArray, layerDetailArray, rock: layers.rock, detail: configure(new THREE.Texture(rockNormal)), snowMaterial};
+ return {layerArray, layerDetailArray, rock: layers[sliceOf('rock')], detail: configure(new THREE.Texture(rockNormal)), snowMaterial};
 }

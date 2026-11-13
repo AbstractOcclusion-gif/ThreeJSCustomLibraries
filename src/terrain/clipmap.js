@@ -12,9 +12,16 @@ export const CLIPMAP_DEFAULTS = Object.freeze({
 });
 export const CLIPMAP_LIMITS = Object.freeze({levels: [1, 10], cells: [8, 512], cellSize: [.05, 8]});
 const BYTE = 255, LAYER_CHANNELS = 4, FOREST_LAYER = 4;
+const PALETTE_GROUP = 4;   // palette weights per slice of the palette map
+// Hollows change slowly: rings with cells under maxCell read them from a lattice of world points `spacing` m apart
+// (kept up to `keep` points per ring), the coarser rings from their own heights.
+const HOLLOW_LATTICE = Object.freeze({spacing: 6, maxCell: 2, keep: 20000});
 const SNAP_CELLS = 2;   // a ring moves by this many of its cells, so it stays aligned with the cells of the ring outside
 
-// world: {heightAt(x, z), paintAt({x, z, height, slope, curvature}) -> {layers, sand}} (createTerrainWorld).
+// world: {heightAt(x, z), paintAt({x, z, height, slope, curvature}) -> {layers, sand, palette}} (createTerrainWorld).
+// With world.palette, each ring also carries paletteMap: the weight of every palette set, four per slice.
+// With world.paintReach ({slope, hollow}, metres) and world.hollowAt, samples carry the slopes dx and dz and the
+// hollow measured over those distances, whatever the cell of the ring, and each ring carries climateMap (moisture).
 // createMaterial(field, level) returns the material of a ring; tint(x, z, paint, color) writes an optional vertex colour.
 export function createTerrainClipmap({world, createMaterial, tint, ...overrides} = {}) {
   const {levels, cells, cellSize} = {...CLIPMAP_DEFAULTS, ...overrides};
@@ -26,6 +33,9 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     throw new TypeError('A clipmap needs a world with heightAt and paintAt, and a material factory');
   }
   const n = cells + 1, count = n * n;
+  const paletteSize = world.palette?.size ?? 0, paletteGroups = paletteSize / PALETTE_GROUP;
+  if (!Number.isInteger(paletteGroups)) throw new RangeError('A world palette holds its weights in fours');
+  const reach = world.paintReach && typeof world.hollowAt === 'function' ? world.paintReach : null;
   const group = new THREE.Group();
   const color = new THREE.Color();
 
@@ -51,6 +61,8 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     const cell = cellSize * 2 ** level, size = cells * cell;
     const heights = new Float32Array(count), weights = new Uint8Array(count * LAYER_CHANNELS);
     const forest = new Uint8Array(count), sand = new Uint8Array(count);
+    const palette = paletteSize ? new Uint8Array(count * paletteSize) : null;
+    const climate = reach ? new Uint8Array(count) : null;
     const positions = new Float32Array(count * 3), normals = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) { positions[i * 3] = (i % n) * cell; positions[i * 3 + 2] = Math.floor(i / n) * cell; }
     const geometry = new THREE.BufferGeometry();
@@ -65,12 +77,22 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       forestMap: createDataTexture(forest, n, n, {format: THREE.RedFormat, filter: 'linear'}),
       sandMap: createDataTexture(sand, n, n, {format: THREE.RedFormat, filter: 'linear'}),
     };
+    if (palette) {
+      field.paletteMap = new THREE.DataArrayTexture(palette, n, n, paletteGroups);
+      field.paletteMap.minFilter = field.paletteMap.magFilter = THREE.LinearFilter;
+      field.paletteMap.needsUpdate = true;
+    }
+    if (climate) field.climateMap = createDataTexture(climate, n, n, {format: THREE.RedFormat, filter: 'linear'});
     const material = createMaterial(field, level);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.frustumCulled = false;   // the ring surrounds the camera
     mesh.receiveShadow = true;
     group.add(mesh);
-    return {level, cell, size, heights, weights, forest, sand, positions, normals, colors, geometry, field, material, mesh, origin: null, hole: undefined};
+    const signals = reach && {
+      slopeStride: Math.max(1, Math.round(reach.slope / cell)), hollowStride: Math.max(1, Math.round(reach.hollow / cell)),
+      lattice: cell < HOLLOW_LATTICE.maxCell ? new Map() : null,
+    };
+    return {level, cell, size, heights, weights, forest, sand, palette, climate, signals, positions, normals, colors, geometry, field, material, mesh, origin: null, hole: undefined};
   });
 
   // Moves what a ring keeps when its origin shifts by (dx, dz) cells: the new [i, j] is the old [i + dx, j + dz].
@@ -86,7 +108,27 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     }
   }
 
-  const sample = {x: 0, z: 0, height: 0, slope: 0, curvature: 0};
+  const sample = {x: 0, z: 0, height: 0, slope: 0, curvature: 0, dx: 0, dz: 0, hollow: 0};
+  // Height of sample (i, j) of a ring, from the world when it lies outside the ring; rounded like the stored ones.
+  function heightOf(ring, i, j) {
+    if (i >= 0 && j >= 0 && i <= cells && j <= cells) return ring.heights[j * n + i];
+    return Math.fround(world.heightAt(ring.origin[0] + i * ring.cell, ring.origin[1] + j * ring.cell));
+  }
+  // Hollow at a world point, interpolated between the lattice points around it.
+  function latticeHollow(lattice, x, z) {
+    const g = HOLLOW_LATTICE.spacing, u = x / g, v = z / g, column = Math.floor(u), row = Math.floor(v);
+    const at = (c, r) => {
+      const key = c * 2097152 + r;   // columns and rows stay far below 2^21
+      let value = lattice.get(key);
+      if (value === undefined) {
+        if (lattice.size >= HOLLOW_LATTICE.keep) lattice.clear();
+        lattice.set(key, value = world.hollowAt(c * g, r * g));
+      }
+      return value;
+    };
+    const tu = u - column, tv = v - row;
+    return (at(column, row) * (1 - tu) + at(column + 1, row) * tu) * (1 - tv) + (at(column, row + 1) * (1 - tu) + at(column + 1, row + 1) * tu) * tv;
+  }
   // Paint, normal and tint of sample (i, j) from its four neighbours; a neighbour outside the ring comes from the world.
   function shade(ring, i, j) {
     const {cell, heights, origin} = ring, index = j * n + i;
@@ -100,10 +142,24 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     ring.normals[index * 3] = -dx / length; ring.normals[index * 3 + 1] = 1 / length; ring.normals[index * 3 + 2] = -dz / length;
     sample.x = x; sample.z = z; sample.height = height; sample.slope = Math.hypot(dx, dz);
     sample.curvature = (west + east + north + south - 4 * height) / (cell * cell);
+    if (ring.signals) {
+      // The signals the rules paint from, over their fixed distances rather than over one cell of this ring.
+      const {slopeStride: s, hollowStride: h, lattice} = ring.signals;
+      sample.dx = (heightOf(ring, i + s, j) - heightOf(ring, i - s, j)) / (2 * s * cell);
+      sample.dz = (heightOf(ring, i, j + s) - heightOf(ring, i, j - s)) / (2 * s * cell);
+      sample.slope = Math.hypot(sample.dx, sample.dz);
+      sample.hollow = lattice ? latticeHollow(lattice, x, z)
+        : (heightOf(ring, i - h, j) + heightOf(ring, i + h, j) + heightOf(ring, i, j - h) + heightOf(ring, i, j + h)) / 4 - height;
+    }
     const paint = world.paintAt(sample);
     for (let layer = 0; layer < LAYER_CHANNELS; layer++) ring.weights[index * LAYER_CHANNELS + layer] = Math.round(paint.layers[layer] * BYTE);
     ring.forest[index] = Math.round((paint.layers[FOREST_LAYER] ?? 0) * BYTE);
     ring.sand[index] = Math.round(paint.sand * BYTE);
+    if (ring.climate) ring.climate[index] = Math.round((paint.moisture ?? 0) * BYTE);
+    // Slice `group` of the palette map holds weights group x 4 .. group x 4 + 3 of every sample.
+    for (let slot = 0; slot < paletteSize; slot++) {
+      ring.palette[(Math.floor(slot / PALETTE_GROUP) * count + index) * PALETTE_GROUP + slot % PALETTE_GROUP] = Math.round(paint.palette[slot] * BYTE);
+    }
     if (ring.colors && tint) {
       tint(x, z, paint, color);
       ring.colors[index * 3] = color.r; ring.colors[index * 3 + 1] = color.g; ring.colors[index * 3 + 2] = color.b;
@@ -165,8 +221,11 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
         const all = Math.abs(dx) >= n || Math.abs(dz) >= n;
         ring.origin = next;
         if (!all) {
-          for (const [array, stride] of [[ring.heights, 1], [ring.weights, LAYER_CHANNELS], [ring.forest, 1], [ring.sand, 1], [ring.normals, 3], [ring.colors, 3]]) {
+          for (const [array, stride] of [[ring.heights, 1], [ring.weights, LAYER_CHANNELS], [ring.forest, 1], [ring.sand, 1], [ring.climate, 1], [ring.normals, 3], [ring.colors, 3]]) {
             if (array) slide(array, stride, dx, dz);
+          }
+          for (let group = 0; group < paletteGroups; group++) {
+            slide(ring.palette.subarray(group * count * PALETTE_GROUP, (group + 1) * count * PALETTE_GROUP), PALETTE_GROUP, dx, dz);
           }
         }
         fill(ring, dx, dz, all);

@@ -29,6 +29,10 @@ export const TERRAIN_TEXTURE_SETS = Object.freeze(Object.fromEntries([
   textureSet('gravelly_sand', 'Gravelly Sand'),
   textureSet('brown_mud_03', 'Brown Mud 03'),
   textureSet('forest_leaves_03', 'Forest Leaves 03'),
+  textureSet('leafy_grass', 'Leafy Grass'),
+  textureSet('grass_path_2', 'Grass Path 2'),
+  textureSet('rocky_terrain_02', 'Rocky Terrain 02'),
+  textureSet('forest_leaves_02', 'Forest Leaves 02'),
 ].map(set => [set.id, set])));
 
 export const DEFAULT_TERRAIN_TEXTURES = Object.freeze({

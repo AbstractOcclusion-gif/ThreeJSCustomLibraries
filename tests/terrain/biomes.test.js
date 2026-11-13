@@ -33,6 +33,16 @@ test('relief is repeatable per seed and each shape does what its name says', () 
  assert.equal(createRelief(1, [reliefShape('base', {height: 12})]).heightAt(3, 9), 12);
  const [ridgeLow] = sampleRange(createRelief(1, [reliefShape('ridged', {amplitude: 50, floor: .2})]));
  assert.ok(ridgeLow >= 10);
+ // Eroded ground stays inside its height, and erosion smooths steep flanks more than gentle ground.
+ const [erodedLow, erodedHigh] = sampleRange(createRelief(1, [reliefShape('eroded', {amplitude: 100})]), 1000, 20);
+ assert.ok(erodedLow >= 0 && erodedHigh <= 100 && erodedHigh - erodedLow > 40);
+ assert.notEqual(createRelief(1, [reliefShape('eroded', {erosion: 0})]).heightAt(40, 70), createRelief(1, [reliefShape('eroded', {erosion: 1})]).heightAt(40, 70));
+ // A warp moves where the following shapes are read, and nothing else.
+ const plain = createRelief(1, [reliefShape('rolling', {amplitude: 20})]);
+ const still = createRelief(1, [reliefShape('warp', {strength: 0}), reliefShape('rolling', {amplitude: 20})]);
+ const bent = createRelief(1, [reliefShape('warp', {strength: 50}), reliefShape('rolling', {amplitude: 20})]);
+ assert.equal(createRelief(1, [reliefShape('base', {height: 5}), reliefShape('warp')]).heightAt(3, 4), 5);
+ assert.notEqual(bent.heightAt(13, 7), plain.heightAt(13, 7));
  const [plateauLow, plateauHigh] = sampleRange(createRelief(1, [reliefShape('plateau', {amplitude: 30})]));
  assert.ok(plateauLow >= 0 && plateauHigh <= 30 && plateauHigh - plateauLow > 20);
  const [duneLow, duneHigh] = sampleRange(createRelief(1, [reliefShape('dunes', {amplitude: 5})]), 60, 1);

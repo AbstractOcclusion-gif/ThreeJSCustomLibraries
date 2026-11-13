@@ -78,15 +78,67 @@ test('the paint rules put rock on steep ground, snow above its line, mud in basi
  assert.ok(mean(rules, {height: 50, slope: 0, wall: 1.5})[ROCK] > .99);
  assert.ok(mean(rules, {height: 200, slope: 0})[SNOW] > .99);
  assert.ok(Math.abs(mean(rules, {height: 150, slope: 0})[SNOW] - .5) < .1);
- assert.ok(mean(rules, {height: -3, slope: 0})[MUD] > .99);
+ assert.ok(mean(rules, {height: -12, slope: 0})[MUD] > .99);
+ const atMudLine = mean(createTerrainRules(1, {mudFromRunout: false, mudBelow: 0}), {height: 0, slope: 0}, 3600)[MUD];
+ assert.ok(atMudLine > .25 && atMudLine < .75, 'moisture decides around the mud line');
  assert.ok(mean(rules, {height: 50, slope: 0})[MUD] < .01);
  assert.equal(mean(createTerrainRules(1, {}), {height: -3, slope: 0})[MUD], 0);
- const flat = mean(rules, {height: 50, slope: 0});
- assert.ok(Math.abs(flat[FOREST] - .5) < .1 && Math.abs(flat[GRASS] - .5) < .1);
- const shares = [.1, .3, .5, .7, .9].map(forestCover => mean(createTerrainRules(1, {forestCover}), {height: 50, slope: 0})[FOREST]);
- assert.ok(shares[0] < .02 && shares.at(-1) > .98);
- for (let i = 1; i < shares.length; i++) assert.ok(shares[i] > shares[i - 1] || shares[i] === 1);
- assert.ok(shares[1] > .02 && shares[3] < .98, 'forest coverage must act over the middle of its range');
+ // Forest floor grows with its coverage, lies in woodlands with clearings, and stops on steep ground and at the tree line.
+ const shares = [.05, .3, .5, .7, .95].map(forestCover => mean(createTerrainRules(1, {forestCover}), {height: 50, slope: 0}, 3600)[FOREST]);
+ assert.ok(shares[0] < .03 && shares.at(-1) > .6);
+ for (let i = 1; i < shares.length; i++) assert.ok(shares[i] > shares[i - 1]);
+ assert.ok(shares[2] > .2 && shares[2] < .6, 'half coverage gives woodland over a good part of the ground');
+ const flat = mean(rules, {height: 50, slope: 0}, 3600);
+ assert.ok(Math.abs(flat[FOREST] + flat[GRASS] - 1) < .01);
+ assert.ok(mean(rules, {height: 50, slope: .95}, 3600)[FOREST] < .01);
+ const treeLine = createTerrainRules(1, {mudFromRunout: false, forestCover: .9, treeLine: 60, treeBlend: 5, snowJitter: 0});
+ assert.ok(mean(treeLine, {height: 40, slope: 0})[FOREST] > .4 && mean(treeLine, {height: 80, slope: 0})[FOREST] === 0);
+ // Mud needs flat ground as well as low ground.
+ assert.ok(mean(rules, {height: -30, slope: .6})[MUD] < .01);
+});
+
+test('terrain material in palette mode needs the palette map and one layer slice per set', async () => {
+ const {createTerrainMaterial} = await import('../../src/terrain/index.js');
+ const array = depth => new THREE.DataArrayTexture(new Uint8Array(4 * depth), 1, 1, depth);
+ const detailNormal = new THREE.DataTexture(new Uint8Array(4), 1, 1), heightMap = new THREE.DataTexture(new Float32Array(1), 1, 1);
+ const palette = {size: 8, roles: ['grass', 'rock', 'snow', 'mud', 'forest', 'grass'], sets: []};
+ const field = {heightMap, bounds: new THREE.Vector4(0, 0, 1, 1), paletteMap: array(2)};
+ const material = createTerrainMaterial({}, {field, palette, layerArray: array(6), detailNormal});
+ assert.equal(material.defines.TERRAIN_PALETTE_SIZE, 8);
+ assert.equal(material.defines.TERRAIN_FOREST_FLOOR, undefined);
+ assert.throws(() => createTerrainMaterial({}, {field: {...field, paletteMap: array(1)}, palette, layerArray: array(6), detailNormal}), /palette map/);
+ assert.throws(() => createTerrainMaterial({}, {field, palette, layerArray: array(5), detailNormal}), /one layer array slice per set/);
+ assert.throws(() => createTerrainMaterial({}, {field, palette: {...palette, roles: ['lava']}, layerArray: array(6), detailNormal}), /roles/);
+ material.dispose();
+});
+
+test('the rules paint scree under rock, bare soil on dry ridges, mud in wet hollows and keep snow lower in shade', async () => {
+ const {createTerrainRules, TERRAIN_PALETTE_ROLES} = await import('../../src/terrain/index.js');
+ const rules = createTerrainRules(1, {mudFromRunout: false, forestCover: .5, mudBelow: 0});
+ const role = name => TERRAIN_PALETTE_ROLES.indexOf(name);
+ const mean = (sample, count = 1600) => {
+  const total = new Array(TERRAIN_PALETTE_ROLES.length + 1).fill(0);
+  for (let i = 0; i < count; i++) {
+   const {roles, moisture} = rules.paint({x: (i % 40) * 7.1, z: Math.floor(i / 40) * 6.3, height: 20, slope: 0, ...sample});
+   assert.ok(Math.abs(roles.reduce((sum, weight) => sum + weight) - 1) < 1e-9 && roles.every(weight => weight >= -1e-12));
+   roles.forEach((weight, index) => { total[index] += weight / count; });
+   total[roles.length] += moisture / count;
+  }
+  return total;
+ };
+ const MOISTURE = TERRAIN_PALETTE_ROLES.length;
+ const even = mean({}), hollow = mean({hollow: 4}), ridge = mean({hollow: -4});
+ assert.ok(ridge[MOISTURE] < even[MOISTURE] && even[MOISTURE] < hollow[MOISTURE]);
+ assert.ok(ridge[role('soil')] > .2 && hollow[role('soil')] < .02);
+ assert.ok(hollow[role('forest')] > ridge[role('forest')]);
+ assert.ok(mean({slope: .75})[role('scree')] > .2 && even[role('scree')] === 0);
+ assert.ok(mean({slope: .5, hollow: -4})[role('rock')] > mean({slope: .5})[role('rock')] - 1e-9);
+ assert.ok(mean({height: -8, hollow: 4})[role('mud')] > .9 && mean({height: -8, hollow: -4})[role('mud')] < .1);
+ const shaded = mean({height: 145, dx: Math.cos(150 * Math.PI / 180) * .4, dz: Math.sin(150 * Math.PI / 180) * .4});
+ const sunny = mean({height: 145, dx: -Math.cos(150 * Math.PI / 180) * .4, dz: -Math.sin(150 * Math.PI / 180) * .4});
+ assert.ok(shaded[role('snow')] > sunny[role('snow')] + .1);
+ // The layers alone leave scree and soil out.
+ assert.equal(rules.weights({x: 3, z: 4, height: 20, slope: .75}).length, 5);
 });
 
 test('ocean coast terrain builds on the lighting hook and shares its uniforms', () => {

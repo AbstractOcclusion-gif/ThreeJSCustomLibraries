@@ -18,7 +18,12 @@ export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
     rules[key] ??= TERRAIN_PAINT_DEFAULTS[key];
     detail.add(rules, key, spec.min, spec.max, spec.step).name(spec.label).onFinishChange(onLayersChanged);
   }
-  const textures = gui.addFolder('Triplanar textures');
+  appearanceControls(gui, appearance);
+}
+
+// Texture and material look shared by every terrain material (createTerrainAppearance).
+export function appearanceControls(gui, appearance, title = 'Triplanar textures') {
+  const textures = gui.addFolder(title);
   for (const [key, label, min, max, step] of [
     ['rockScale', 'Rock tiling', .15, 1.2, .01],
     ['tiling', 'Tiling', .1, 2, .05],
@@ -32,6 +37,7 @@ export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
   ]) {
     textures.add(appearance[key], 'value', min, max, step).name(label);
   }
+  return textures;
 }
 
 // Snow layer settings (field.snowSettings). The track settings act on the next track; the others re-lay the snow.

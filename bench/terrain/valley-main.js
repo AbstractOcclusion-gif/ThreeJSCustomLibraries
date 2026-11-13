@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {CLIPMAP_DEFAULTS, cloneBiome, createTerrainAppearance, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES} from '../../src/terrain/index.js';
+import {BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchPanel} from '../panel.js';
 import {hasTerrainTextureSet, loadTerrainTextures} from './textures.js';
-import {textureSetControls} from './controls.js';
+import {appearanceControls, sandLookControls, textureSetControls} from './controls.js';
 import '../bench.css';
 
 // Terrain rings around the focus (createTerrainClipmap) and the wireframe colour of each ring, inner to outer.
@@ -20,9 +20,9 @@ const VIEW = {
   speed: 16, low: 7, lookAhead: 20,
 };
 // Trees and rocks are placed per square tile, in the tiles within `reach` tiles of the focus, at most `tilesPerFrame`
-// new tiles a frame. slopeStep is the distance over which the ground slope is measured.
+// new tiles a frame.
 const DRESSING = {
-  tileSize: 32, reach: 5, tilesPerFrame: 2, slopeStep: 1,
+  tileSize: 32, reach: 5, tilesPerFrame: 2,
   seed: 238, attemptsPerTile: 34, hashX: 73856093, hashZ: 19349663, routeClearance: 9, minScale: .65, maxScale: 1.65,
   tree: {color: 0x355a37, radius: 1.2, height: 5.2, sides: 6, maxSlope: .63},
   rock: {color: 0x81837d, radius: 1.1, depthScale: .7, rate: .65},
@@ -34,7 +34,8 @@ const LAYER_NAMES = Object.keys(LAYER_COLORS);
 const layerColors = LAYER_NAMES.map(name => [name, new THREE.Color(LAYER_COLORS[name])]);
 const CONTROLS = {density: [0, 1, .01]};
 const VIEWS = ['Textures', 'Layer colours', 'Biome colours', 'LOD wireframe'];
-const JUNCTIONS = {edgeSharpness: ['Junction sharpness', 0, 1, .01, .25], edgeBreakup: ['Junction break-up', 0, 1, .01, .6], heightBlend: ['Texture height blend', 0, 1, .05, .24]};
+// Softer junctions than the library default: they read better at the scale of a landscape.
+const TOOL_APPEARANCE = {edgeSharpness: .25};
 // Hand-placed biome map: regions per side, and one debug colour per world biome (also the 'Biome colours' view).
 const MAP = {columns: 8, rows: 8, autoAlpha: .35, focusColor: '#ffffff', focusRadius: 4, font: '11px sans-serif', ink: '#10201f'};
 const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48fd1, 0xe0d36a, 0x8c9a6b,
@@ -47,8 +48,7 @@ export async function mountValley() {
   const worldBiomes = [cloneBiome(DEFAULT_TERRAIN_BIOME)];
   let biome = worldBiomes[0];
   const map = {columns: MAP.columns, rows: MAP.rows, cells: new Array(MAP.columns * MAP.rows).fill(WORLD_MAP_AUTO)};
-  // The world shares one texture palette: the texture sets of its first biome.
-  const palette = () => worldBiomes[0].textures;
+
 
   const renderer = benchRenderer();
   const scene = new THREE.Scene();
@@ -61,17 +61,19 @@ export async function mountValley() {
   orbit.update();
   // A catalogue set whose files are not bundled falls back to the layer's default set and is named in the status.
   let missingSets = [];
-  function bundledSets(sets) {
-    missingSets = [...new Set(Object.values(sets).filter(set => !hasTerrainTextureSet(set)))];
-    return Object.fromEntries(Object.entries(sets).map(([layer, set]) => [layer, hasTerrainTextureSet(set) ? set : DEFAULT_TERRAIN_TEXTURES[layer]]));
+  // Loads one slice per set of a world palette ({sets, roles}), keyed by its place in the palette.
+  function loadPalette({sets, roles}) {
+    missingSets = [...new Set(sets.filter(set => !hasTerrainTextureSet(set)))];
+    const bundled = sets.map((set, slice) => hasTerrainTextureSet(set) ? set : BIOME_TEXTURE_DEFAULTS[roles[slice]]);
+    return loadTerrainTextures(renderer, {layerDetail: true, sets: Object.fromEntries(bundled.map((set, slice) => ['slice' + slice, set])),
+      roles: Object.fromEntries(roles.map((role, slice) => ['slice' + slice, role]))});
   }
-  const loadTextures = sets => loadTerrainTextures(renderer, {layerDetail: true, sets: bundledSets(sets)});
-  const disposeTextures = set => { for (const texture of Object.values(set)) texture?.dispose?.(); };
-  let textures = await loadTextures(palette());
+  const disposeTextures = set => { for (const texture of Object.values(set ?? {})) texture?.dispose?.(); };
+  let textures, texturesKey = '';
   const appearance = createTerrainAppearance();
   appearance.shoreWetness.value = 0;
-  // Softer than the library default: junctions read better at the scale of a landscape.
-  for (const [key, [, , , , value]] of Object.entries(JUNCTIONS)) appearance[key].value = value;
+  for (const [key, value] of Object.entries(TOOL_APPEARANCE)) appearance[key].value = value;
+  const sandLook = createSandLook();
   const overlays = LOD_COLORS.map(color => new THREE.MeshBasicMaterial({color, wireframe: true}));
   const biomeMaterial = new THREE.MeshLambertMaterial({vertexColors: true});
   const treeGeometry = new THREE.ConeGeometry(DRESSING.tree.radius, DRESSING.tree.height, DRESSING.tree.sides);
@@ -90,12 +92,8 @@ export async function mountValley() {
   const layerTint = Object.fromEntries(layerColors), tintScratch = new THREE.Color();
 
   // Layer weights and ground slope at a point, as the terrain paints them.
-  const paintSample = {x: 0, z: 0, height: 0, slope: 0, curvature: 0};
   function sample(x, z) {
-    const step = DRESSING.slopeStep;
-    const dx = (world.heightAt(x + step, z) - world.heightAt(x - step, z)) / (2 * step);
-    const dz = (world.heightAt(x, z + step) - world.heightAt(x, z - step)) / (2 * step);
-    Object.assign(paintSample, {x, z, height: world.heightAt(x, z), slope: Math.hypot(dx, dz)});
+    const paintSample = world.sampleAt(x, z);
     const {layers, sand} = world.paintAt(paintSample);
     // Sand lies over the other layers.
     return {slope: paintSample.slope, height: paintSample.height, forest: layers[TERRAIN_LAYERS.indexOf('forest')] * (1 - sand), rock: layers[TERRAIN_LAYERS.indexOf('rock')] * (1 - sand)};
@@ -175,13 +173,24 @@ export async function mountValley() {
     clipmap = undefined;
   }
 
-  // Rebuilds the world and the terrain rings around the focus from the edited biomes.
-  function regenerate() {
+  // Rebuilds the world and the terrain rings around the focus from the edited biomes. The textures are reloaded
+  // when the world's palette of texture sets changed; a newer rebuild started meanwhile wins.
+  let building = 0;
+  async function regenerate() {
     const {seed, regionSize, blend, wander} = settings;
-    world = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced ? map : undefined, regionSize, blend, wander});
+    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced ? map : undefined, regionSize, blend, wander});
+    const build = ++building, key = next.palette.sets.join() + '|' + next.palette.roles.join();
+    if (key !== texturesKey) {
+      const loaded = await loadPalette(next.palette);
+      if (build !== building) { disposeTextures(loaded); return; }
+      disposeTerrain();
+      disposeTextures(textures);
+      textures = loaded; texturesKey = key;
+    }
+    world = next;
     disposeTerrain();
     clipmap = createTerrainClipmap({world, ...CLIP, tint, createMaterial: field =>
-      createTerrainMaterial({}, {field, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance})});
+      createTerrainMaterial({}, {field, palette: world.palette, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook})});
     scene.add(clipmap.group);
     clipmap.update(focus.x, focus.z);
     clearDressing();
@@ -230,21 +239,12 @@ export async function mountValley() {
   $map.addEventListener('pointerdown', paintMap, {signal: mapEvents.signal});
   $map.addEventListener('pointermove', event => { if (event.buttons & 1) paintMap(event); }, {signal: mapEvents.signal});
   focus.copy(orbit.target);
-  regenerate();
+  await regenerate();
   const gui = createBenchPanel('Terrain generation');
   const presets = Object.fromEntries(Object.values(TERRAIN_BIOMES).map(entry => [entry.label, entry.id]));
   const report = error => { $error.hidden = !error; $error.textContent = error?.message ?? ''; };
   // Rebuilds the terrain from the edited biome. A biome the validation refuses is reported and not built.
-  function rebuild() {
-    try { regenerate(); report(); } catch (error) { report(error); }
-  }
-  async function applyTextures(sets) {
-    const next = await loadTextures(sets);
-    for (const {material} of clipmap.rings) material.setLayerTextures({layerArray: next.layerArray, layerDetailArray: next.layerDetailArray, detailNormal: next.detail});
-    disposeTextures(textures);
-    textures = next;
-  }
-  const refreshTextures = () => applyTextures(palette()).then(rebuild, report);
+  const rebuild = () => regenerate().then(() => report(), report);
   gui.add(settings, 'seed').listen().onFinishChange(value => {
     settings.seed = Number.isSafeInteger(Math.trunc(value)) ? Math.trunc(value) : SEED;
     rebuild();
@@ -282,7 +282,7 @@ export async function mountValley() {
         map.cells = map.cells.map(cell => cell === removed ? WORLD_MAP_AUTO : cell > removed ? cell - 1 : cell);
         biome = worldBiomes[Math.min(removed, worldBiomes.length - 1)];
         mountWorld(); mountEditor();
-        if (removed === 0) refreshTextures(); else rebuild();
+        rebuild();
       }}, 'remove').name('Remove edited biome');
     }
     for (const [key, {label, min, max, step}] of Object.entries(WORLD_FIELDS)) worldFolder.add(settings, key, min, max, step).name(label).onFinishChange(rebuild);
@@ -291,12 +291,11 @@ export async function mountValley() {
   mountWorld();
   function mountEditor() {
     clear(biomeFolder);
-    const first = biome === worldBiomes[0];
     biomeFolder.add({preset: ''}, 'preset', {'Load a preset…': '', ...presets}).name(biomeName(worldBiomes.indexOf(biome))).onChange(id => {
       if (!id) return;
       worldBiomes[worldBiomes.indexOf(biome)] = biome = cloneBiome(id);
       mountWorld(); mountEditor();
-      if (first) refreshTextures(); else rebuild();
+      rebuild();
     });
     const reliefFolder = biomeFolder.addFolder('Relief (applied top to bottom)');
     biome.relief.forEach((entry, index) => {
@@ -319,8 +318,7 @@ export async function mountValley() {
     }
     const paintFolder = biomeFolder.addFolder('Paint rules').close();
     for (const [key, {label, min, max, step}] of Object.entries(TERRAIN_PAINT_FIELDS)) paintFolder.add(biome.paint, key, min, max, step).name(label).onFinishChange(rebuild);
-    // Only the first biome's sets are shown: the world shares them.
-    if (first) textureSetControls(biomeFolder, {sets: biome.textures, catalogue: TERRAIN_TEXTURE_SETS, onChange: applyTextures});
+    textureSetControls(biomeFolder, {sets: biome.textures, catalogue: TERRAIN_TEXTURE_SETS, onChange: regenerate});
   }
   mountEditor();
   const copy = value => () => {
@@ -332,8 +330,15 @@ export async function mountValley() {
     const {seed, regionSize, blend, wander} = settings;
     return {seed, regionSize, blend, wander, biomes: worldBiomes, ...(settings.handPlaced && {map})};
   })}, 'copy').name('Copy world as JSON');
-  const junctions = gui.addFolder('Texture junctions').close();
-  for (const [key, [label, min, max, step]] of Object.entries(JUNCTIONS)) junctions.add(appearance[key], 'value', min, max, step).name(label);
+  const materialFolder = appearanceControls(gui, appearance, 'Material').close();
+  materialFolder.add(appearance.macroVariation, 'value', 0, 1, .01).name('Large-scale colour variation');
+  materialFolder.add(appearance.climateTint, 'value', 0, 1, .01).name('Dry-to-lush grass tint');
+  for (const [key, label] of [['dryTint', 'Dry grass tint'], ['lushTint', 'Lush grass tint']]) {
+    // The tints multiply the texture colour and may exceed 1: shown and edited as a colour at half strength.
+    const edit = {color: '#' + appearance[key].value.clone().multiplyScalar(.5).getHexString()};
+    materialFolder.addColor(edit, 'color').name(label).onChange(value => appearance[key].value.set(value).multiplyScalar(2));
+  }
+  sandLookControls(materialFolder, sandLook);
   const view = gui.addFolder('View');
   view.add(settings, 'density', ...CONTROLS.density).name('Dressing density').onFinishChange(clearDressing);
   view.add({reroll() { settings.dressingSeed = nextSeed(settings.dressingSeed); clearDressing(); }}, 'reroll').name('Reroll dressing');
@@ -375,7 +380,8 @@ export async function mountValley() {
       if (settings.handPlaced) drawMap();
       status.textContent = `${clipmap.levels} rings · cells ${meters(clipmap.cellSize)} to ${meters(clipmap.rings.at(-1).cell)} · ${clipmap.extent} m across`
         + (settings.view === VIEWS[1] ? '\nLayer colours · ' + LAYER_NAMES.join(', ') : '')
-        + (worldBiomes.length > 1 ? '\nWorld · ' + worldBiomes.map((entry, index) => biomeName(index)).join(', ') + '\nTextures · shared, from biome 1' : '')
+        + (worldBiomes.length > 1 ? '\nWorld · ' + worldBiomes.map((entry, index) => biomeName(index)).join(', ') : '')
+        + `\nTexture sets in view · ${world.palette.sets.length} of ${WORLD_PALETTE_MAX}`
         + (missingSets.length ? '\nTexture sets not bundled, default used · ' + missingSets.join(', ') + ' · run npm run textures:fetch' : '');
     }
     renderer.render(scene, camera);

@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import {SKY_GLSL} from '../core/sky.js';
 import {createWeatherSurfaceMaterial} from '../surface/index.js';
-import {TERRAIN_LAYERS} from './terrain-rules.js';
+import {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
 import {createRunoffLook} from './runoff.js';
 export {createRunoffLook, createTerrainRunoff} from './runoff.js';
 export {createTerrainField, SNOW_DEPTH_SCALE, SNOW_DEFAULTS, SNOW_FIELDS, validateSnow} from './field.js';
 export {createTerrainDrainage} from './drainage.js';
-export {TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
+export {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, PAINT_REACH, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
 export {valueNoise} from '../core/value-noise.js';
 export {OceanCoastTerrain, TERRAIN_DEFAULTS as OCEAN_COAST_DEFAULTS, WET_DEFAULTS as OCEAN_COAST_WET_DEFAULTS} from './coast.js';
 
@@ -38,6 +38,8 @@ export function createSandLook() {
 
 // Roughness of each layer where it has no roughness map (TERRAIN_LAYERS order).
 export const TERRAIN_LAYER_ROUGHNESS = Object.freeze({grass: .95, rock: .85, snow: .82, mud: .75, forest: .92});
+// The same for every palette role (TERRAIN_PALETTE_ROLES order).
+export const TERRAIN_PALETTE_ROUGHNESS = Object.freeze({...TERRAIN_LAYER_ROUGHNESS, scree: .9, soil: .93});
 
 export function createTerrainAppearance() {
  return {
@@ -46,6 +48,10 @@ export function createTerrainAppearance() {
   edgeSharpness: {value: .6},  // junctions between layers: 0 = even fade, 1 = the layer standing higher wins outright
   edgeBreakup: {value: .6},    // fine wander of the junctions that hides the steps of the weight grid (0 = off)
   layerDetail: {value: 1},     // share of each layer's own normal and roughness (needs layerDetailArray): 0 = shared rock detail
+  // Palette mode with a climate map: grass and forest floor are tinted from dry to lush by the moisture of the place.
+  dryTint: {value: new THREE.Color(1.12, 1, .68)}, lushTint: {value: new THREE.Color(.62, 1.08, .5)},
+  climateTint: {value: .75},   // strength of that tint (0 = off)
+  macroVariation: {value: .5}, // large-scale light and dark patches over every layer, so far ground is not one flat colour (0 = off)
   waterLevel: {value: 0}, shoreWidth: {value: .8}, shoreWetness: {value: 1},
  };
 }
@@ -70,12 +76,13 @@ uniform sampler2D terrainForest;
 uniform sampler2D terrainForestWeight;
 #endif
 ${TERRAIN_LAYERS.map((name, index) => `const int TERRAIN_${name.toUpperCase()} = ${index};`).join('\n')}
-const int TERRAIN_DETAIL = ${TERRAIN_LAYERS.length};
+// Ids past the layer slices, for the samplers terrainSample also serves.
+const int TERRAIN_DETAIL = 64;
 #ifdef TERRAIN_LAYER_DETAIL
 // rg = tangent normal xy (OpenGL), b = roughness, one slice per layer. Sampled as layer TERRAIN_LAYER_SURFACE + index.
 uniform highp sampler2DArray terrainLayerDetailArray;
 uniform float terrainLayerDetail;
-const int TERRAIN_LAYER_SURFACE = 16;
+const int TERRAIN_LAYER_SURFACE = 32;
 #endif
 #ifdef TERRAIN_SNOW_DETAIL
 const int TERRAIN_SNOW_NORMAL = TERRAIN_DETAIL + 1;
@@ -88,6 +95,20 @@ uniform float terrainRockScale;
 uniform float terrainWaterLevel, terrainShoreWidth, terrainShoreWetness, terrainContactBand;
 uniform bool terrainProp;
 uniform bool terrainSnowCover;
+#ifdef TERRAIN_PALETTE
+// Palette mode: TERRAIN_PALETTE_SIZE texture sets, each with its own weight (four per slice of the weight array)
+// and the layer role that sets its tiling and default roughness. terrainPaletteSnow: the snow set, or -1.
+uniform highp sampler2DArray terrainPaletteWeights;
+uniform int terrainPaletteRole[TERRAIN_PALETTE_SIZE];
+uniform int terrainPaletteSnow;
+const float terrainRoleRoughness[${TERRAIN_PALETTE_ROLES.length}] = float[](${TERRAIN_PALETTE_ROLES.map(name => TERRAIN_PALETTE_ROUGHNESS[name].toFixed(3)).join(', ')});
+uniform float terrainMacroVariation;
+#ifdef TERRAIN_CLIMATE
+uniform sampler2D terrainClimate;   // r = moisture, 0 dry .. 1 wet
+uniform vec3 terrainDryTint, terrainLushTint;
+uniform float terrainClimateTint;
+#endif
+#endif
 uniform sampler2D terrainSnowDepth;
 
 #ifdef TERRAIN_DRAINAGE
@@ -323,6 +344,78 @@ const TERRAIN_FRAGMENT = /* glsl */`
  terrainAxes /= dot(terrainAxes, vec3(1.0));
  vec3 terrainSign = sign(terrainNormal + vec3(.00001));
  vec2 terrainWeightUV = (terrainGrid + .5 + (terrainEdgeBreakup > 0.0 ? terrainEdgeWarp(terrainGround.xz) : vec2(0.0))) / terrainSize;
+ const float mudScale = 1.4;   // mud texture repeats per repeat of the other layers
+ #ifdef TERRAIN_PALETTE
+ float paletteWeight[TERRAIN_PALETTE_SIZE];
+ vec4 paletteTexel[TERRAIN_PALETTE_SIZE];
+ float paletteScale[TERRAIN_PALETTE_SIZE];
+ for (int group = 0; group < TERRAIN_PALETTE_SIZE / 4; group++) {
+  vec4 four = textureLod(terrainPaletteWeights, vec3(terrainWeightUV, float(group)), 0.0);
+  paletteWeight[group * 4] = four.x; paletteWeight[group * 4 + 1] = four.y; paletteWeight[group * 4 + 2] = four.z; paletteWeight[group * 4 + 3] = four.w;
+ }
+ bool snowLies = terrainSnowCover && !terrainProp;
+ float strongest = .0001;
+ vec3 climateTint = vec3(1.0);
+ #ifdef TERRAIN_CLIMATE
+ climateTint = mix(vec3(1.0), mix(terrainDryTint, terrainLushTint, textureLod(terrainClimate, terrainWeightUV, 0.0).r), terrainClimateTint);
+ #endif
+ for (int i = 0; i < TERRAIN_PALETTE_SIZE; i++) {
+  paletteTexel[i] = vec4(0.0);
+  int role = terrainPaletteRole[i];
+  paletteScale[i] = role == TERRAIN_ROCK ? terrainRockScale : role == TERRAIN_MUD ? mudScale : 1.0;
+  if (paletteWeight[i] <= 0.0 && !(snowLies && i == terrainPaletteSnow)) continue;
+  paletteTexel[i] = terrainTriplanar(i, terrainP * paletteScale[i], terrainDx * paletteScale[i], terrainDy * paletteScale[i], terrainSign, terrainAxes);
+  if (role == TERRAIN_GRASS || role == TERRAIN_FOREST) paletteTexel[i].rgb *= climateTint;
+  if (i == terrainPaletteSnow) terrainSnowAlbedo = paletteTexel[i].rgb;
+  paletteWeight[i] *= exp2((paletteTexel[i].a - .5) * terrainHeightBlend * 8.0);
+  strongest = max(strongest, paletteWeight[i]);
+ }
+ float totalWeight = 0.0;
+ for (int i = 0; i < TERRAIN_PALETTE_SIZE; i++) {
+  if (terrainEdgeSharpness > 0.0) paletteWeight[i] = terrainEdge(paletteWeight[i], strongest);
+  totalWeight += paletteWeight[i];
+ }
+ totalWeight = max(totalWeight, .0001);
+ vec3 terrainColor = vec3(0.0);
+ float layerRoughness = 0.0;
+ terrainGroundRelief = 0.0;
+ for (int i = 0; i < TERRAIN_PALETTE_SIZE; i++) {
+  paletteWeight[i] /= totalWeight;
+  terrainColor += paletteTexel[i].rgb * paletteWeight[i];
+  terrainGroundRelief += paletteTexel[i].a * paletteWeight[i];
+  layerRoughness += terrainRoleRoughness[terrainPaletteRole[i]] * paletteWeight[i];
+ }
+ if (terrainMacroVariation > 0.0) {
+  // Two sizes of light and dark, far larger than any texture repeat.
+  const vec2 macroMeters = vec2(55.0, 340.0);
+  const float macroShade = .22;   // albedo lost or gained at full variation
+  float macro = valueNoise(vec3(terrainGround.xz / macroMeters.x, 91.0)) * .45 + valueNoise(vec3(terrainGround.xz / macroMeters.y, 97.0)) * .55;
+  terrainColor *= 1.0 + (macro - .5) * 2.0 * macroShade * terrainMacroVariation;
+ }
+ if (terrainProp) {
+  float seam = terrainContactBand * clamp(1.0 + (terrainGroundRelief - .5) * terrainHeightBlend, .55, 1.45);
+  terrainContact = 1.0 - smoothstep(0.0, seam, aboveGround);
+ }
+ diffuseColor.rgb = mix(diffuseColor.rgb, terrainColor, terrainContact);
+ vec3 layerNormalDetail = vec3(0.0);
+ float layerDetailShare = 0.0;
+ #ifdef TERRAIN_LAYER_DETAIL
+ layerDetailShare = terrainLayerDetail;
+ if (layerDetailShare > 0.0) {
+  const float minShare = .02;   // a set under this share is not sampled: it would not show
+  vec4 surface = vec4(0.0);
+  float sampled = 0.0;
+  for (int i = 0; i < TERRAIN_PALETTE_SIZE; i++) {
+   if (paletteWeight[i] <= minShare) continue;
+   surface += terrainNormalDetail(TERRAIN_LAYER_SURFACE + i, terrainP * paletteScale[i], terrainDx * paletteScale[i], terrainDy * paletteScale[i], terrainSign, terrainAxes) * paletteWeight[i];
+   sampled += paletteWeight[i];
+  }
+  surface /= max(sampled, .0001);
+  layerNormalDetail = surface.xyz;
+  layerRoughness = mix(layerRoughness, surface.w, layerDetailShare);
+ }
+ #endif
+ #else
  vec4 terrainWeights = textureLod(terrainLayers, terrainWeightUV, 0.0);
  vec4 grass = vec4(0.0), rock = vec4(0.0), snow = vec4(0.0), mud = vec4(0.0);
  if (terrainWeights.x > 0.0) grass = terrainTriplanar(TERRAIN_GRASS, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
@@ -331,7 +424,6 @@ const TERRAIN_FRAGMENT = /* glsl */`
   snow = terrainTriplanar(TERRAIN_SNOW, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
   terrainSnowAlbedo = snow.rgb;
  }
- const float mudScale = 1.4;   // mud texture repeats per repeat of the other layers
  if (terrainWeights.w > 0.0) mud = terrainTriplanar(TERRAIN_MUD, terrainP * mudScale, terrainDx * mudScale, terrainDy * mudScale, terrainSign, terrainAxes);
  vec4 microHeight = vec4(grass.a, rock.a, snow.a, mud.a);
  terrainWeights *= exp2((microHeight - .5) * terrainHeightBlend * 8.0);
@@ -380,6 +472,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
   layerNormalDetail = surface.xyz;
   layerRoughness = mix(layerRoughness, surface.w, layerDetailShare);
  }
+ #endif
  #endif
  roughnessFactor = mix(roughnessFactor, layerRoughness, terrainContact);
  metalnessFactor *= 1.0 - terrainContact;
@@ -437,9 +530,19 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, layerDetailArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, ...surface
+ field, layers, layerArray, layerDetailArray, palette, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, ...surface
 } = {}) {
- const hasLayers = layerArray !== undefined ?
+ // palette: {size, roles, sets} of a terrain world. The field then brings paletteMap (size / 4 slices of four weights)
+ // and the layer arrays hold one slice per palette set.
+ if (palette !== undefined) {
+  if (!Number.isInteger(palette?.size) || palette.size < 4 || palette.size % 4 || !Array.isArray(palette.roles) || !palette.roles.length) throw Error('Terrain palette needs a size in fours and the role of each set');
+  if (palette.roles.some(role => !TERRAIN_PALETTE_ROLES.includes(role)) || palette.roles.length > palette.size) throw Error('Terrain palette roles must be palette roles, at most one per weight');
+  for (const key of ['dryTint', 'lushTint', 'climateTint', 'macroVariation']) if (!appearance[key]) throw Error(`Terrain appearance needs ${key}: build it with createTerrainAppearance()`);
+  if (!field?.paletteMap?.isDataArrayTexture || field.paletteMap.image.depth !== palette.size / 4) throw Error('Terrain palette needs the field palette map: four weights per slice');
+  if (!layerArray?.isDataArrayTexture || layerArray.image.depth < palette.roles.length) throw Error('Terrain palette needs one layer array slice per set');
+  if (snowMaterial) throw Error('Terrain palette does not take snow detail');
+ }
+ const hasLayers = palette ? true : layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
   TERRAIN_LAYERS.slice(0, 4).every(name => layers?.[name]?.isTexture);
  if (!appearance.edgeSharpness || !appearance.edgeBreakup) throw Error('Terrain appearance needs edgeSharpness and edgeBreakup: build it with createTerrainAppearance()');
@@ -448,7 +551,7 @@ export function createTerrainMaterial(parameters = {}, {
   if (!layerDetailArray?.isDataArrayTexture || layerDetailArray.image.depth !== layerArray.image.depth) throw Error('Terrain layer detail needs one slice per layer of the layer array');
   if (!appearance.layerDetail) throw Error('Terrain appearance needs layerDetail: build it with createTerrainAppearance()');
  }
- if (!field?.heightMap || !field?.weightMap || !hasLayers || !detailNormal?.isTexture) {
+ if (!field?.heightMap || !(field?.weightMap || palette) || !hasLayers || !detailNormal?.isTexture) {
   throw Error('Terrain material needs a field, layer textures and a detail normal');
  }
  if (contactBand !== undefined && (!Number.isFinite(contactBand) || contactBand < 0)) throw Error('Contact band must be a non-negative distance');
@@ -459,7 +562,10 @@ export function createTerrainMaterial(parameters = {}, {
  if (drainage) material.defines = {...material.defines, TERRAIN_DRAINAGE: 1};
  if (drainage && puddleSky) material.defines = {...material.defines, TERRAIN_PUDDLE_SKY: 1};
  if (snowMaterial) material.defines = {...material.defines, TERRAIN_SNOW_DETAIL: 1};
- if (field.forestMap) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
+ if (field.forestMap && !palette) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
+ if (palette) material.defines = {...material.defines, TERRAIN_PALETTE: 1, TERRAIN_PALETTE_SIZE: palette.size};
+ if (palette && field.climateMap) material.defines = {...material.defines, TERRAIN_CLIMATE: 1};
+ const paletteRoles = palette ? Array.from({length: palette.size}, (_, index) => Math.max(0, TERRAIN_PALETTE_ROLES.indexOf(palette.roles[index]))) : [];
  if (field.sandMap) material.defines = {...material.defines, TERRAIN_SAND: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  if (layerDetailArray) material.defines = {...material.defines, TERRAIN_LAYER_DETAIL: 1};
@@ -472,8 +578,11 @@ export function createTerrainMaterial(parameters = {}, {
   terrainRunoffSource: runoffLook.sourceArea, terrainRunoffFull: runoffLook.fullArea, terrainRunoffRutSource: runoffLook.rutSourceArea,
   terrainRunoffSpeed: runoffLook.speed, terrainRunoffRippleSize: runoffLook.rippleSize, terrainRunoffRippleStrength: runoffLook.rippleStrength,
   terrainPuddleFill: drainage?.fill ?? {value: 0},
-  terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap}, terrainBounds: {value: field.bounds},
+  terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap ?? null}, terrainBounds: {value: field.bounds},
   terrainLayerArray: {value: layerArray ?? null},
+  ...(palette && {terrainPaletteWeights: {value: field.paletteMap}, terrainPaletteRole: {value: paletteRoles}, terrainPaletteSnow: {value: palette.roles.indexOf('snow')},
+   terrainMacroVariation: appearance.macroVariation, terrainClimate: {value: field.climateMap ?? null},
+   terrainDryTint: appearance.dryTint, terrainLushTint: appearance.lushTint, terrainClimateTint: appearance.climateTint}),
   terrainLayerDetailArray: {value: layerDetailArray ?? null}, terrainLayerDetail: appearance.layerDetail ?? {value: 0},
   terrainGrass: {value: layers?.grass}, terrainRock: {value: layers?.rock}, terrainSnow: {value: layers?.snow}, terrainMud: {value: layers?.mud},
   terrainForest: {value: layers?.forest}, terrainForestWeight: {value: field.forestMap ?? null},
@@ -729,6 +838,6 @@ export function createTerrainMaterial(parameters = {}, {
 
 export {createProceduralTerrain, createValley, terrainWindowOrigin, TERRAIN_LANDFORMS, VALLEY_DEFAULTS} from './valley.js';
 export {createRelief, reliefShape, validateRelief, RELIEF_SHAPES, RELIEF_MAX_SHAPES} from './relief.js';
-export {TERRAIN_BIOMES, DEFAULT_TERRAIN_BIOME, cloneBiome, validateBiome} from './biomes.js';
-export {createTerrainWorld, validateWorld, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAX_BIOMES, WORLD_MAP_AUTO} from './world.js';
+export {TERRAIN_BIOMES, BIOME_TEXTURE_DEFAULTS, DEFAULT_TERRAIN_BIOME, cloneBiome, validateBiome} from './biomes.js';
+export {createTerrainWorld, validateWorld, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAX_BIOMES, WORLD_MAP_AUTO, WORLD_PALETTE_MAX} from './world.js';
 export {createTerrainClipmap, CLIPMAP_DEFAULTS, CLIPMAP_LIMITS} from './clipmap.js';

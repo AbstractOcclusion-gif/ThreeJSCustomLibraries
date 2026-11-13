@@ -1,8 +1,9 @@
 import {fbm, valueNoise} from '../core/value-noise.js';
 
 // Relief as data: a recipe is a list of shapes applied in order to a height that starts at zero. Additive shapes
-// (base, rolling, ridged, plateau, dunes) raise the ground; modifiers (terraces, valley, island) reshape what the
-// shapes before them built, so their place in the list matters. Distances and heights are metres.
+// (base, rolling, ridged, eroded, plateau, dunes) raise the ground; modifiers (terraces, valley, island) reshape what
+// the shapes before them built, and warp bends the ground plan for the shapes after it, so the place of a shape in
+// the list matters. Distances and heights are metres.
 const number = (label, min, max, step) => Object.freeze({label, min, max, step});
 const smooth = (from, to, value) => {
   const t = Math.max(0, Math.min(1, (value - from) / (to - from)));
@@ -14,6 +15,11 @@ export const RELIEF_MAX_SHAPES = 12;
 const NOISE_STRIDE = 31;                 // seed offset between two shapes of a recipe, so each gets its own noise
 const DUNE = Object.freeze({lee: .3, wanderScale: 3, patchScale: 5, patchFloor: .4});   // lee: share of a dune on its steep side
 const DEGREES = Math.PI / 180;
+// Eroded ground: octaves of noise, each `lacunarity` x finer and `gain` x weaker and turned by `turn` radians so no
+// axis shows. slopeStep is the distance, in noise cells, over which the slope of an octave is measured; slopeGain
+// scales how much the slope gathered so far flattens the finer octaves at erosion 1.
+const ERODED = Object.freeze({octaves: 7, lacunarity: 2, gain: .5, turn: .6, slopeStep: .02, slopeGain: .35});
+const WARP_OFFSET = 31.7;   // noise offset between the two axes of a warp, so they bend independently
 
 function shape(label, fields, defaults, build) {
   return Object.freeze({label, fields: Object.freeze(fields), defaults: Object.freeze(defaults), build});
@@ -32,6 +38,44 @@ export const RELIEF_SHAPES = Object.freeze({
     floor: number('Valley floor share', 0, 1, .01),
   }, {amplitude: 60, scale: 84, floor: .15}, ({amplitude, scale, floor}, noise) => ({
     apply: (value, x, z) => value + amplitude * (floor + Math.abs(fbm(noise, x / scale, z / scale))),
+  })),
+  eroded: shape('Eroded mountains', {
+    amplitude: number('Height · m', 0, 600, 1), scale: number('Feature size · m', 20, 3000, 5),
+    ridges: number('Ridge sharpness', 0, 1, .01), erosion: number('Erosion', 0, 1, .01),
+  }, {amplitude: 120, scale: 400, ridges: .85, erosion: .6}, ({amplitude, scale, ridges, erosion}, noise) => {
+    const {octaves, lacunarity, gain, turn, slopeStep, slopeGain} = ERODED;
+    const cos = Math.cos(turn), sin = Math.sin(turn);
+    let total = 0;
+    for (let octave = 0, weight = 1; octave < octaves; octave++, weight *= gain) total += weight;
+    return {apply(value, x, z) {
+      // Turned from the start, so the first octave does not follow the world axes either.
+      let px = (x * cos - z * sin) / scale, pz = (x * sin + z * cos) / scale, weight = 1, sum = 0, slopeX = 0, slopeZ = 0;
+      for (let octave = 0; octave < octaves; octave++) {
+        const here = noise(px, pz);
+        const dx = (noise(px + slopeStep, pz) - here) / slopeStep, dz = (noise(px, pz + slopeStep) - here) / slopeStep;
+        // Rounded hills (0..1 from the noise) or ridges (1 - |noise|), and the slope of whichever shows.
+        const fold = here < 0 ? 1 : -1;
+        const height = (here * .5 + .5) * (1 - ridges) + (1 - Math.abs(here)) * ridges;
+        // Steep ground sheds its fine detail, as water would carry it off: flanks turn into smooth runs and gullies.
+        // The slope is that of the coarser octaves, so the main shape stands whole.
+        sum += weight * height / (1 + erosion * slopeGain * (slopeX * slopeX + slopeZ * slopeZ));
+        slopeX += dx * (.5 * (1 - ridges) + fold * ridges);
+        slopeZ += dz * (.5 * (1 - ridges) + fold * ridges);
+        weight *= gain;
+        const turned = (px * cos - pz * sin) * lacunarity;
+        pz = (px * sin + pz * cos) * lacunarity;
+        px = turned;
+      }
+      return value + amplitude * sum / total;
+    }};
+  }),
+  warp: shape('Warp what follows', {
+    strength: number('Shift · m', 0, 400, 1), scale: number('Feature size · m', 10, 3000, 5),
+  }, {strength: 30, scale: 180}, ({strength, scale}, noise) => ({
+    // Moves the point the following shapes are read at: straight features bend and round ones stretch.
+    moveX: (x, z) => x + strength * noise(x / scale, z / scale),
+    moveZ: (x, z) => z + strength * noise(x / scale + WARP_OFFSET, z / scale - WARP_OFFSET),
+    apply: value => value,
   })),
   plateau: shape('Plateaus and cliffs', {
     amplitude: number('Height · m', 0, 200, .5), scale: number('Feature size · m', 10, 800, 1),
@@ -124,7 +168,10 @@ export function createRelief(seed, recipe) {
     routeX: steps.find(step => step.routeX)?.routeX,
     heightAt(x, z) {
       let height = 0;
-      for (const step of steps) height = step.apply(height, x, z);
+      for (const step of steps) {
+        if (step.moveX) { const movedX = step.moveX(x, z); z = step.moveZ(x, z); x = movedX; }
+        height = step.apply(height, x, z);
+      }
       return height;
     },
   };

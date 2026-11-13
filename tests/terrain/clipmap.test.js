@@ -6,7 +6,7 @@ import {cloneBiome, createTerrainClipmap, createTerrainWorld} from '../../src/te
 const CONFIG = {levels: 3, cells: 16, cellSize: .5};
 const world = () => createTerrainWorld({seed: 9, biomes: [cloneBiome('hills'), cloneBiome('desert')], regionSize: 40});
 const build = (overrides = {}) => createTerrainClipmap({world: world(), createMaterial: () => new THREE.MeshBasicMaterial(), ...CONFIG, ...overrides});
-const maps = ring => ['heightMap', 'weightMap', 'forestMap', 'sandMap'].map(name => ring.field[name].image.data);
+const maps = ring => ['heightMap', 'weightMap', 'forestMap', 'sandMap', 'paletteMap', 'climateMap'].map(name => ring.field[name].image.data);
 
 test('a clipmap validates its settings and nests rings of doubling cell size around the focus', () => {
  assert.throws(() => build({cells: 18}), /multiple of 4/);
@@ -23,6 +23,7 @@ test('a clipmap validates its settings and nests rings of doubling cell size aro
   const [x, z] = clipmap.originOf(level);
   assert.ok(Math.abs(x + ring.size / 2 - 3) <= ring.cell && Math.abs(z + ring.size / 2 + 2) <= ring.cell);
   assert.deepEqual([...ring.field.bounds.toArray()], [x, z, ring.size, ring.size]);
+  assert.equal(ring.field.paletteMap.image.depth, 3);   // hills and desert: 9 sets, in three groups of four
   // The inner ring starts on a cell corner of this ring, and this ring leaves that square out.
   if (level > 0) {
    const [innerX, innerZ] = clipmap.originOf(level - 1);

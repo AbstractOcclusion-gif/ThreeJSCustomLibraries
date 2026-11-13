@@ -17,6 +17,10 @@ These 1K JPEG maps are from Poly Haven under [CC0](https://polyhaven.com/license
 | `gravelly_sand` | [Gravelly Sand](https://polyhaven.com/a/gravelly_sand) |
 | `brown_mud_03` | [Brown Mud 03](https://polyhaven.com/a/brown_mud_03) |
 | `forest_leaves_03` | [Forest Leaves 03](https://polyhaven.com/a/forest_leaves_03) |
+| `leafy_grass` | [Leafy Grass](https://polyhaven.com/a/leafy_grass) |
+| `grass_path_2` | [Grass Path 2](https://polyhaven.com/a/grass_path_2) |
+| `rocky_terrain_02` | [Rocky Terrain 02](https://polyhaven.com/a/rocky_terrain_02) |
+| `forest_leaves_02` | [Forest Leaves 02](https://polyhaven.com/a/forest_leaves_02) |
 
 The terrain bench packs height into the color map’s alpha channel and uses the rock normal as shared detail. Color is sRGB. Normal, height, and roughness are data maps.
 
