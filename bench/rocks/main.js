@@ -7,6 +7,7 @@ import {createBenchPanel} from '../panel.js';
 import '../bench.css';
 
 const PREVIEW = {roughness: .9, maxPixelRatio: 2, fov: 42, near: .02, far: 150, framing: 1.3};
+const DETAIL = {scale: 3.4, strength: .35, minScale: 1, maxScale: 16, maxStrength: 2, step: .05};
 const scene = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, PREVIEW.maxPixelRatio));
@@ -17,7 +18,10 @@ const camera = new THREE.PerspectiveCamera(PREVIEW.fov, 1, PREVIEW.near, PREVIEW
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
 const direction = new THREE.Vector3(1, .72, 1.3).normalize();
-const state = {...ROCK_DEFAULTS, finish: 'Rock', normalStrength: 1};
+const state = {
+  ...ROCK_DEFAULTS, finish: 'Rock', normalStrength: 1,
+  detailScale: DETAIL.scale, detailStrength: DETAIL.strength,
+};
 const status = document.querySelector('#status');
 const loader = new THREE.TextureLoader();
 const files = import.meta.glob('../../assets/terrain/{rock_wall_02,mossy_rock}/{color,normal,roughness}.jpg', {
@@ -31,8 +35,26 @@ function finish(id) {
     return [slot, texture];
   }));
 }
-const finishes = {Rock: finish('rock_wall_02'), 'Mossy rock': finish('mossy_rock'), Plain: {map: null, normalMap: null, roughnessMap: null}};
+const finishes = {Rock: finish('rock_wall_02'), 'Mossy rock': finish('mossy_rock')};
 const material = new THREE.MeshStandardMaterial({roughness: PREVIEW.roughness, ...finishes[state.finish]});
+const detailScale = {value: state.detailScale};
+const detailStrength = {value: state.detailStrength};
+material.onBeforeCompile = shader => {
+  Object.assign(shader.uniforms, {rockDetailScale: detailScale, rockDetailStrength: detailStrength});
+  shader.fragmentShader = shader.fragmentShader.replace('#include <normalmap_pars_fragment>', `
+    #include <normalmap_pars_fragment>
+    uniform float rockDetailScale;
+    uniform float rockDetailStrength;
+  `).replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace(
+    'normal = normalize( tbn * mapN );', `
+    if (rockDetailStrength > 0.0) {
+      vec3 detail = texture2D(normalMap, vNormalMapUv * rockDetailScale).xyz * 2.0 - 1.0;
+      // Add the fine tangent-plane tilt to the existing base normal.
+      mapN.xy += detail.xy * rockDetailStrength * mapN.z;
+    }
+    normal = normalize(tbn * mapN);
+  `));
+};
 let rocks;
 
 function frame() {
@@ -68,7 +90,11 @@ panel.add(state, 'finish', Object.keys(finishes)).onChange(() => {
   material.setValues(finishes[state.finish]);
   material.needsUpdate = true;
 });
-panel.add(state, 'normalStrength', 0, 2, .05).name('Normal strength').onChange(value => material.normalScale.setScalar(value));
+panel.add(state, 'normalStrength', 0, 2, .05).name('Base normal strength').onChange(value => material.normalScale.setScalar(value));
+panel.add(state, 'detailScale', DETAIL.minScale, DETAIL.maxScale, DETAIL.step).name('Detail normal scale')
+  .onChange(value => { detailScale.value = value; });
+panel.add(state, 'detailStrength', 0, DETAIL.maxStrength, DETAIL.step).name('Detail normal strength')
+  .onChange(value => { detailStrength.value = value; });
 panel.add({frame}, 'frame').name('Frame rocks');
 panel.add({async export() {
   try {

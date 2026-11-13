@@ -403,7 +403,10 @@ Bundled assets include generated textures, WebAquarium fish models and CC0 [terr
 Open the bench at `/bench/?tool=rocks`. Choose Stone, Boulder, Scatter or
 Cliff and pick an alpine, desert, coast or woodland shape profile. Change
 the seed for a new arrangement. The standalone preview uses standard PBR
-rock and mossy rock finishes from the bundled texture catalogue.
+rock and mossy rock finishes from the bundled texture catalogue. Detail
+normal scale controls repeats per base normal repeat. Detail normal strength
+controls the added relief independently of base normal strength. GLB export
+carries the base normal map. The detail layer runs in the bench shader.
 
 ```js
 import {createRocks} from '@abstractocclusion/three-kit/rocks';
