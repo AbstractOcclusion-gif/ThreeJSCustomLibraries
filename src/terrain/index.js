@@ -105,6 +105,7 @@ uniform float terrainRockScale;
 uniform float terrainWaterLevel, terrainShoreWidth, terrainShoreWetness, terrainContactBand;
 uniform bool terrainProp;
 uniform bool terrainSnowCover;
+uniform vec4 terrainCutout;   // world XZ origin and size of a square this material leaves to another mesh; no size: none
 #ifdef TERRAIN_PALETTE
 // Palette mode: TERRAIN_PALETTE_SIZE texture sets, each with its own weight (four per slice of the weight array)
 // and the layer role that sets its tiling and default roughness. terrainPaletteSnow: the snow set, or -1.
@@ -336,6 +337,7 @@ vec4 terrainNormalDetail(int layer, vec3 p, vec3 dx, vec3 dy, vec3 signN, vec3 a
 `;
 
 const TERRAIN_FRAGMENT = /* glsl */`
+ if (terrainCutout.z > 0.0 && all(greaterThan(vSurfaceWorld.xz, terrainCutout.xy)) && all(lessThan(vSurfaceWorld.xz, terrainCutout.xy + terrainCutout.zw))) discard;
  vec2 terrainUV = (vSurfaceWorld.xz - terrainBounds.xy) / terrainBounds.zw;
  bool terrainInside = all(greaterThanEqual(terrainUV, vec2(0.0))) && all(lessThanEqual(terrainUV, vec2(1.0)));
  vec2 terrainSize = vec2(textureSize(terrainHeights, 0));
@@ -549,7 +551,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, layerDetailArray, palette, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, ...surface
+ field, layers, layerArray, layerDetailArray, palette, cutout, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, ...surface
 } = {}) {
  // palette: {size, roles, sets} of a terrain world. The field then brings paletteMap (size / 4 slices of four weights)
  // and the layer arrays hold one slice per palette set.
@@ -599,6 +601,8 @@ export function createTerrainMaterial(parameters = {}, {
   terrainRunoffSpeed: runoffLook.speed, terrainRunoffRippleSize: runoffLook.rippleSize, terrainRunoffRippleStrength: runoffLook.rippleStrength,
   terrainPuddleFill: drainage?.fill ?? {value: 0},
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap ?? null}, terrainBounds: {value: field.bounds},
+  // cutout: a shared {value: Vector4(x, z, sizeX, sizeZ)}: the square of ground another mesh draws in this one's place.
+  terrainCutout: cutout ?? {value: new THREE.Vector4()},
   terrainLayerArray: {value: layerArray ?? null},
   ...(palette && {terrainPaletteWeights: {value: field.paletteMap}, terrainPaletteRole: {value: paletteRoles}, terrainPaletteSnow: {value: palette.roles.indexOf('snow')},
    terrainHarmony: appearance.harmony, terrainRoleTint: appearance.roleTints, terrainEdgeFade: appearance.edgeFade,

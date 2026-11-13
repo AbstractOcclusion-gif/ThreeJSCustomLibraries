@@ -24,7 +24,7 @@ export const TRACK_RADIUS = Object.freeze({sphere: .31, box: .39});
 const IMPACT_CHIPS = Object.freeze({max: 26, perVolume: 30, size: 1.2, maxShock: 70, shockPerSpeed: 6});
 const MAX_BLOCKS = 8, ICE_BREAK_ENERGY = 1100, ICE_CRACK_RADIUS = 1.8, FALL_OUT_HEIGHT = -12;   // blocks; J; m; m
 const MAX_SUBSTEPS = 6;
-export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips, surfaces = CONTACT_SURFACES, trackRadius = TRACK_RADIUS}) {
+export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips, surfaces = CONTACT_SURFACES, trackRadius = TRACK_RADIUS, fallOutHeight = FALL_OUT_HEIGHT}) {
  const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
  world.defaultContactMaterial.friction = .52;
  world.defaultContactMaterial.restitution = .12;
@@ -50,11 +50,11 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
 
  function stamp(entry, point, previous, strength) {
   if (entry.kind === 'sphere') {
-   tracks.stamp(previous ?? point, point, trackRadius.sphere, strength);
+   tracks.stamp(previous ?? point, point, trackRadius.sphere * entry.scale, strength);
    return;
   }
   // Extend along the longest projected box axis. The stamp follows body orientation.
-  const dimensions = [.71, .47, .9];
+  const dimensions = [.71, .47, .9].map(half => half * entry.scale);
   let extent = 0;
   localAxes.forEach((basis, i) => {
    entry.body.quaternion.vmult(basis, axis);
@@ -62,8 +62,8 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    if (projected > extent) { extent = projected; bestAxis.copy(axis); }
   });
   const angle = Math.atan2(bestAxis.z, bestAxis.x), dx = Math.cos(angle) * extent * .7, dz = Math.sin(angle) * extent * .7;
-  tracks.stamp({x: point.x - dx, z: point.z - dz}, {x: point.x + dx, z: point.z + dz}, trackRadius.box, strength);
-  if (previous) tracks.stamp(previous, point, trackRadius.box, strength);
+  tracks.stamp({x: point.x - dx, z: point.z - dz}, {x: point.x + dx, z: point.z + dz}, trackRadius.box * entry.scale, strength);
+  if (previous) tracks.stamp(previous, point, trackRadius.box * entry.scale, strength);
  }
 
  world.addEventListener('postStep', () => {
@@ -89,7 +89,7 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    const mix = key => THREE.MathUtils.lerp(base[key] ?? 0, surfaces.sand[key], sand);
    const joined = entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.joinDistance;
    stamp(entry, point, joined ? entry.last : null, impact ? 1 : CONTACT.rollingStrength);
-   const radius = impact ? CONTACT.radius.impact : entry.kind === 'box' ? CONTACT.radius.box : CONTACT.radius.sphere;
+   const radius = (impact ? CONTACT.radius.impact : entry.kind === 'box' ? CONTACT.radius.box : CONTACT.radius.sphere) * entry.scale;
    const volume = style.load !== undefined && snowy
     ? field.compactSnow(point.x, point.z, radius, impact ? style.impactLoad : style.load, updateSample)
     : field.deform(point.x, point.z, radius, impact ? mix('impact') : mix('print') * CONTACT.printDepthShare, updateSample, {rimShare: snowy ? 0 : mix('rimShare')});
@@ -111,15 +111,20 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    chips?.clear();
    return field.setSnowCover(surface === 'snow', updateSample);
   },
-  launch(kind, surface, iceDrop) {
+  // at: {position: [x, z], velocity: [x, z], scale} places the body anywhere on the field, `scale` times its size.
+  launch(kind, surface, iceDrop, at) {
    if (active.size >= MAX_BLOCKS) remove(active.values().next().value);
-   const rolling = kind === 'sphere';
-   const x = iceDrop ? (iceDrop.hard ? -7 : -12) : rolling ? 10 : 7.5;
-   const z = iceDrop ? 2 : rolling ? 13.5 : 12.5;
-   const y = iceDrop ? iceDrop.level + (iceDrop.hard ? 8 : .65) : field.heightAt(x, z) + (rolling ? .88 : 6);
-   const body = new Body({mass: rolling ? 22 : 36, shape: rolling ? new Sphere(.72) : new Box(new Vec3(.71, .47, .9)),
+   const rolling = kind === 'sphere', scale = at?.scale ?? 1;
+   if (!(scale > 0)) throw Error('A launched body needs a positive scale');
+   const x = at?.position?.[0] ?? (iceDrop ? (iceDrop.hard ? -7 : -12) : rolling ? 10 : 7.5);
+   const z = at?.position?.[1] ?? (iceDrop ? 2 : rolling ? 13.5 : 12.5);
+   const ground = field.heightAt(x, z);
+   if (!iceDrop && ground === undefined) throw Error('A body must be launched over the field');
+   const y = iceDrop ? iceDrop.level + (iceDrop.hard ? 8 : .65) : ground + (rolling ? .88 : 6) * scale;
+   // Mass follows the volume.
+   const body = new Body({mass: (rolling ? 22 : 36) * scale ** 3, shape: rolling ? new Sphere(.72 * scale) : new Box(new Vec3(.71, .47, .9).scale(scale)),
     material: blockMaterial, position: new Vec3(x, y, z),
-    velocity: new Vec3(iceDrop ? (iceDrop.hard ? 0 : 3.2) : rolling ? -5.5 : -.9, 0, rolling ? -.75 : 0), angularDamping: .34});
+    velocity: new Vec3(at?.velocity?.[0] ?? (iceDrop ? (iceDrop.hard ? 0 : 3.2) : rolling ? -5.5 : -.9), 0, at?.velocity?.[1] ?? (rolling ? -.75 : 0)), angularDamping: .34});
    if (rolling) body.angularVelocity.set(-1, 0, 7.5);
    else body.quaternion.setFromEuler(iceDrop ? 0 : .13, .52, iceDrop ? 0 : .16);
    if (ice) body.addEventListener('collide', ({body: other, contact}) => {
@@ -129,10 +134,11 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    });
    const mesh = new THREE.Mesh(geometries[kind], material);
    mesh.castShadow = mesh.receiveShadow = true;
+   mesh.scale.setScalar(scale);
    mesh.position.copy(body.position); mesh.quaternion.copy(body.quaternion);
    scene.add(mesh); world.addBody(body);
    lightOccluders?.push(mesh);
-   active.set(body, {body, mesh, kind, surface, last: null, lastImpact: -Infinity});
+   active.set(body, {body, mesh, kind, surface, scale, last: null, lastImpact: -Infinity});
   },
   update(dt, iceProgress = 0, waterLevel = 0) {
    if (ice?.sync(world, iceProgress, waterLevel)) for (const body of active.keys()) body.wakeUp();
@@ -145,7 +151,7 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
     if (ice.sync(world, iceProgress, waterLevel)) for (const body of active.keys()) body.wakeUp();
    }
    for (const entry of active.values()) {
-    if (entry.body.position.y < FALL_OUT_HEIGHT) { remove(entry); continue; }
+    if (entry.body.position.y < fallOutHeight) { remove(entry); continue; }
     entry.mesh.position.copy(entry.body.position); entry.mesh.quaternion.copy(entry.body.quaternion);
    }
    chips?.tick(dt);

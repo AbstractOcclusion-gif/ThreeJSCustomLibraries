@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
+import {createTrackMask} from '../../src/surface/index.js';
+import {createTerrainImpacts} from './impacts.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchPanel} from '../panel.js';
 import {hasTerrainTextureSet, loadTerrainTextures} from './textures.js';
@@ -35,6 +37,13 @@ const layerColors = LAYER_NAMES.map(name => [name, new THREE.Color(LAYER_COLORS[
 const CONTROLS = {density: [0, 1, .01]};
 // Stand-in water surface of the tool: a flat tinted sheet at the water level, as wide as the terrain.
 const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
+// The play area: a square of deformable ground (a terrain field, 25 cm cells) laid in place of the rings where the
+// test balls roll, so they leave ruts and marks. It sits on a `snap` m grid so its edge follows the cells of every
+// ring; the rings leave it a square `margin` m smaller and it is drawn just in front of them. A ball is launched
+// `ahead` m in front of the focus; one started within `edge` m of the border moves the area there (its marks are lost).
+const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, trackResolution: 512, trackContrast: .12, edge: 12, ahead: 6,
+  ball: {radius: 1.5, minRadius: .4, maxRadius: 4, baseRadius: .72, speed: 7, color: 0x8d8478, roughness: .8}, fallBelow: 12,
+  offset: -1};
 const VIEWS = ['Textures', 'Layer colours', 'Biome colours', 'LOD wireframe'];
 // Softer junctions than the library default: they read better at the scale of a landscape.
 const TOOL_APPEARANCE = {edgeSharpness: .25};
@@ -45,7 +54,7 @@ const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48f
 const biomeColors = BIOME_SWATCHES.map((color, index) => ['biome' + index, new THREE.Color(color)]);
 export async function mountValley() {
   const settings = {seed: SEED, dressingSeed: DRESSING.seed, density: .62, view: VIEWS[0], flyover: false,
-    ...WORLD_DEFAULTS, handPlaced: false, water: true};
+    ...WORLD_DEFAULTS, handPlaced: false, water: true, ballRadius: PLAY.ball.radius};
   // The world's biomes: copies of catalogue biomes, so the catalogue stays as shipped. `biome` is the one being edited.
   const worldBiomes = [cloneBiome(DEFAULT_TERRAIN_BIOME)];
   let biome = worldBiomes[0];
@@ -93,7 +102,9 @@ export async function mountValley() {
   const instance = new THREE.Object3D();
   const dressing = new THREE.Group();
   scene.add(dressing);
-  let world, clipmap;
+  let world, clipmap, play;
+  const cutout = {value: new THREE.Vector4()};
+  const ballMaterial = new THREE.MeshStandardMaterial({color: PLAY.ball.color, roughness: PLAY.ball.roughness});
   const focus = new THREE.Vector3();
   const layerTint = Object.fromEntries(layerColors), tintScratch = new THREE.Color();
 
@@ -175,7 +186,53 @@ export async function mountValley() {
     }
   }
 
+  function disposePlay() {
+    if (!play) return;
+    play.impacts.dispose();
+    scene.remove(play.mesh);
+    play.material.dispose(); play.field.dispose(); play.tracks.dispose();
+    play = undefined;
+    cutout.value.set(0, 0, 0, 0);
+  }
+
+  // Lays the play area around a point. Its ground is sampled and painted from the world, like the rings.
+  function createPlay(x, z) {
+    disposePlay();
+    const {size, cells, snap, margin} = PLAY, n = cells + 1, step = size / cells;
+    const origin = [Math.round((x - size / 2) / snap) * snap, Math.round((z - size / 2) / snap) * snap];
+    let lowest = Infinity;
+    const heights = Float32Array.from({length: n * n}, (_, index) => {
+      const height = world.heightAt(origin[0] + index % n * step, origin[1] + Math.floor(index / n) * step);
+      lowest = Math.min(lowest, height);
+      return height;
+    });
+    const field = createTerrainField({origin, size: [size, size], resolution: [n, n], heights, seed: settings.seed, rules: worldBiomes[0].paint,
+      paintAt: sample => world.paintAt(world.sampleAt(sample.x, sample.z)), paletteSize: world.palette.size, snowTrackRims: true});
+    const tracks = createTrackMask({origin, size: [size, size], resolution: PLAY.trackResolution, directional: true});
+    const material = createTerrainMaterial({polygonOffset: true, polygonOffsetFactor: PLAY.offset, polygonOffsetUnits: PLAY.offset}, {
+      field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray,
+      detailNormal: textures.detail, appearance, sandLook, tracks, trackContrast: PLAY.trackContrast});
+    const mesh = new THREE.Mesh(field.geometry, material);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    cutout.value.set(origin[0] + margin, origin[1] + margin, size - 2 * margin, size - 2 * margin);
+    const impacts = createTerrainImpacts({scene, field, tracks, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow});
+    play = {field, tracks, material, mesh, impacts, origin};
+  }
+
+  // Rolls a ball from just ahead of the focus, away from the camera.
+  function rollBall() {
+    const heading = new THREE.Vector3().subVectors(focus, camera.position).setY(0);
+    if (heading.lengthSq() === 0) heading.set(0, 0, 1);
+    heading.normalize();
+    const x = focus.x + heading.x * PLAY.ahead, z = focus.z + heading.z * PLAY.ahead;
+    const inside = play && [x - play.origin[0], z - play.origin[1]].every(offset => offset > PLAY.edge && offset < PLAY.size - PLAY.edge);
+    if (!inside) createPlay(x, z);
+    play.impacts.launch('sphere', 'mud', undefined, {position: [x, z], velocity: [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale: settings.ballRadius / PLAY.ball.baseRadius});
+  }
+
   function disposeTerrain() {
+    disposePlay();
     if (clipmap) { scene.remove(clipmap.group); clipmap.dispose(); }
     clipmap = undefined;
   }
@@ -197,7 +254,7 @@ export async function mountValley() {
     world = next;
     disposeTerrain();
     clipmap = createTerrainClipmap({world, ...CLIP, tint, createMaterial: field =>
-      createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook})});
+      createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook, cutout})});
     scene.add(clipmap.group);
     clipmap.update(focus.x, focus.z);
     // The ground darkens where it meets the water; a dry world has no shore.
@@ -358,6 +415,10 @@ export async function mountValley() {
     materialFolder.addColor(edit, 'color').name(label).onChange(value => appearance[key].value.set(value).multiplyScalar(2));
   }
   sandLookControls(materialFolder, sandLook);
+  const playFolder = gui.addFolder('Test balls');
+  playFolder.add(settings, 'ballRadius', PLAY.ball.minRadius, PLAY.ball.maxRadius, .1).name('Ball radius · m');
+  playFolder.add({roll: () => { try { rollBall(); report(); } catch (error) { report(error); } }}, 'roll').name('Roll a ball from the focus');
+  playFolder.add({clear: () => play?.impacts.reset()}, 'clear').name('Clear balls, ruts and marks');
   const view = gui.addFolder('View');
   view.add(settings, 'density', ...CONTROLS.density).name('Dressing density').onFinishChange(clearDressing);
   view.add({reroll() { settings.dressingSeed = nextSeed(settings.dressingSeed); clearDressing(); }}, 'reroll').name('Reroll dressing');
@@ -390,6 +451,7 @@ export async function mountValley() {
     focus.copy(settings.flyover ? camera.position : orbit.target);
     clipmap.update(focus.x, focus.z);
     updateDressing();
+    play?.impacts.update(dt);
     waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
     stage.update(camera);
     for (const {mesh, material, level} of clipmap.rings) {
@@ -406,6 +468,7 @@ export async function mountValley() {
     }
     renderer.render(scene, camera);
   });
+  window.terrainTool = {get world() { return world; }, get clipmap() { return clipmap; }, get play() { return play; }, focus, camera, orbit, settings, appearance};
   onLeave(() => {
     renderer.setAnimationLoop(null);
     unbind();
@@ -417,6 +480,7 @@ export async function mountValley() {
     for (const {geometry, material} of Object.values(props)) { geometry.dispose(); material.dispose(); }
     for (const overlay of overlays) overlay.dispose();
     waterSheet.geometry.dispose(); waterSheet.material.dispose();
+    ballMaterial.dispose();
     disposeTextures(textures);
     biomeMaterial.dispose();
     stage.dispose();

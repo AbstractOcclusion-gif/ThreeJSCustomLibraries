@@ -134,3 +134,22 @@ test('a world with water paints banks and beds below its water level and none wh
  assert.ok(dry.paintAt(dry.sampleAt(x, 40)).palette[scree] < .1);
  assert.equal(wet.paintAt(wet.sampleAt(x, 40)).palette[grass], 0);
 });
+
+test('a terrain field keeps the palette weights and moisture a world paints', () => {
+ const world = createTerrainWorld({seed: SEED, biomes: [cloneBiome('plains'), cloneBiome('desert')], map: map([0, 0, 0, 0, 0, 1, 0, 0, 0]), regionSize: SIZE, wander: 0});
+ const n = 21, heights = Float32Array.from({length: n * n}, (_, i) => world.heightAt(i % n * 10, Math.floor(i / n) * 10));
+ const options = {origin: [0, 0], size: [200, 200], resolution: [n, n], heights, seed: SEED, rules: world.biomes[0].paint};
+ assert.throws(() => createTerrainField({...options, paletteSize: world.palette.size}), /paintAt/);
+ assert.throws(() => createTerrainField({...options, paintAt: world.paintAt, paletteSize: 6}), /fours/);
+ assert.throws(() => createTerrainField({...options, paintAt: sample => ({layers: [1, 0, 0, 0, 0], sand: 0}), paletteSize: 4}), /palette weight/);
+ const field = createTerrainField({...options, paintAt: sample => world.paintAt(world.sampleAt(sample.x, sample.z)), paletteSize: world.palette.size});
+ assert.equal(field.paletteMap.image.depth, world.palette.size / 4);
+ const count = n * n, data = field.paletteMap.image.data, index = 5 * n + 5;   // (50, 50): the plains region
+ let total = 0;
+ for (let slot = 0; slot < world.palette.size; slot++) total += data[(Math.floor(slot / 4) * count + index) * 4 + slot % 4];
+ assert.ok(Math.abs(total - 255) <= world.palette.size);
+ const expected = world.paintAt(world.sampleAt(50, 50));
+ assert.equal(field.climateMap.image.data[index], Math.round(expected.moisture * 255));
+ assert.equal(createTerrainField(options).paletteMap, null);
+ field.dispose();
+});

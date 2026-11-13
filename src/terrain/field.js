@@ -5,6 +5,7 @@ import {valueNoise} from '../core/value-noise.js';
 
 const MAX_RESOLUTION = 1025;   // samples per side
 const BYTE = 255;              // 8-bit weight and coverage scale
+const PALETTE_GROUP = 4;       // palette weights per slice of the palette map
 const BASE_LAYERS = 4;         // grass, rock, snow, mud: one RGBA weight texel; layer 4 (forest floor) has its own map
 const FOREST_LAYER = 4;
 const MAX_DIG = .65;           // m below the original surface a deformation may dig
@@ -52,7 +53,9 @@ const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: rec
 const SNOW_DRIFT = Object.freeze({flatness: [.55, .95], stretch: 2.6, octave: 2.3, detail: .45, seed: 91});
 
 // Heights are row-major along +X and +Z, in metres. The mesh and shaders share this grid.
-export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, paintAt, snow: snowOverrides, snowTrackRims = false} = {}) {
+// paletteSize (a multiple of four, with paintAt): the field also keeps paletteMap, the weight of each palette set that
+// paintAt returns in `palette`, four per slice, and climateMap, its `moisture` (see createTerrainWorld).
+export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, paintAt, paletteSize = 0, snow: snowOverrides, snowTrackRims = false} = {}) {
  const [nx, nz] = resolution ?? [];
  if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
@@ -89,6 +92,15 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  // Sand has its own map too: it lies over the other layers. Pass rules.sandBelow to enable it.
  const sandWeights = paintAt || settings?.sandBelow !== undefined ? new Uint8Array(samples.length) : null;
  const sandMap = sandWeights ? createDataTexture(sandWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
+ if (!Number.isInteger(paletteSize / PALETTE_GROUP) || paletteSize < 0 || (paletteSize && typeof paintAt !== 'function')) throw Error('A field palette needs paintAt and a size in fours');
+ const paletteWeights = paletteSize ? new Uint8Array(samples.length * paletteSize) : null;
+ const climate = paletteSize ? new Uint8Array(samples.length) : null;
+ let paletteMap = null, climateMap = null;
+ if (paletteWeights) {
+  paletteMap = new THREE.DataArrayTexture(paletteWeights, nx, nz, paletteSize / PALETTE_GROUP);
+  paletteMap.minFilter = paletteMap.magFilter = THREE.LinearFilter;
+  climateMap = createDataTexture(climate, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
+ }
  const bounds = new THREE.Vector4(...origin, ...size);
  function updateRules(values = {}) {
   if (!forestMap && values.forestCover > 0) throw Error('Enable forest cover when creating the terrain field');
@@ -107,7 +119,16 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    for (let i = 0; i < BASE_LAYERS; i++) weights[index * BASE_LAYERS + i] = Math.round(layers[i] * BYTE);
    if (forestWeights) forestWeights[index] = Math.round((layers[FOREST_LAYER] ?? 0) * BYTE);
    if (sandWeights) sandWeights[index] = Math.round((paint?.sand ?? rules.sand(sample)) * BYTE);
+   if (paletteWeights) {
+    if (paint?.palette?.length !== paletteSize) throw Error('paintAt must return one palette weight per palette set');
+    // Slice `group` of the palette map holds weights group x 4 .. group x 4 + 3 of every sample.
+    for (let slot = 0; slot < paletteSize; slot++) {
+     paletteWeights[(Math.floor(slot / PALETTE_GROUP) * samples.length + index) * PALETTE_GROUP + slot % PALETTE_GROUP] = Math.round(paint.palette[slot] * BYTE);
+    }
+    climate[index] = Math.round((paint.moisture ?? 0) * BYTE);
+   }
   }
+  if (paletteMap) paletteMap.needsUpdate = climateMap.needsUpdate = true;
   weightMap.needsUpdate = true;
   if (forestMap) forestMap.needsUpdate = true;
   if (sandMap) sandMap.needsUpdate = true;
@@ -365,6 +386,6 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, forestMap, sandMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, sandWeightAt, updateRules, deform, compactSnow, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
-  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); sandMap?.dispose(); snowMap.dispose(); }};
+ return {geometry, bounds, heightMap, weightMap, forestMap, sandMap, paletteMap, climateMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, sandWeightAt, updateRules, deform, compactSnow, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
+  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); sandMap?.dispose(); paletteMap?.dispose(); climateMap?.dispose(); snowMap.dispose(); }};
 }
