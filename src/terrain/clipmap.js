@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {createDataTexture} from '../core/data-texture.js';
+import {createSkyVisibility, bakeSkyRow} from './sky-visibility.js';
 
 // Camera-centred terrain: square rings of the same vertex count around a focus point, each ring's cells twice the
 // size of the ring inside it, so detail is fine near the focus and the view reaches far. When the focus moves, a
@@ -13,6 +14,10 @@ export const CLIPMAP_DEFAULTS = Object.freeze({
   // shape of the ground still reads where its cells are large. It applies to rings with cells of `normalFromCell` m
   // or more and is baked in the background, `normalSamples` relief samples per update. normalDetail 1 turns it off.
   normalDetail: 2, normalFromCell: 2, normalSamples: 5000,
+  // Each ring carries skyMap: the sky visibility of its ground (sky-visibility.js), one texel per `snapCells` cells,
+  // baked in the background, about `skySamples` relief samples per update. skySamples 0: no sky map.
+  // `sky`: settings of the measure (SKY_VISIBILITY_DEFAULTS).
+  skySamples: 4000,
   // snapCells: a ring moves by this many of its cells at a time (even, at most a quarter of `cells`): larger steps
   // mean fewer, larger updates. Default: a thirty-second of `cells`, between 2 and 8.
 });
@@ -35,8 +40,9 @@ const defaultSnap = cells => Math.min(SNAP.max, Math.max(SNAP.min, Math.floor(ce
 // hollow measured over those distances, whatever the cell of the ring, and each ring carries climateMap (moisture).
 // createMaterial(field, level) returns the material of a ring; tint(x, z, paint, color) writes an optional vertex colour.
 export function createTerrainClipmap({world, createMaterial, tint, ...overrides} = {}) {
-  const {levels, cells, cellSize, normalDetail, normalFromCell, normalSamples, snapCells = defaultSnap(overrides.cells ?? CLIPMAP_DEFAULTS.cells)} = {...CLIPMAP_DEFAULTS, ...overrides};
+  const {levels, cells, cellSize, normalDetail, normalFromCell, normalSamples, skySamples, sky: skySettings, snapCells = defaultSnap(overrides.cells ?? CLIPMAP_DEFAULTS.cells)} = {...CLIPMAP_DEFAULTS, ...overrides};
   if (!Number.isInteger(normalDetail) || normalDetail < 1 || normalDetail > 4 || !(normalFromCell > 0) || !(normalSamples >= 1)) throw new RangeError('Invalid clipmap normal bake settings');
+  if (!(skySamples >= 0)) throw new RangeError('Invalid clipmap sky bake budget');
   const within = (value, [min, max]) => Number.isFinite(value) && value >= min && value <= max;
   if (!Number.isInteger(levels) || !within(levels, CLIPMAP_LIMITS.levels)) throw new RangeError('Invalid clipmap levels');
   if (!Number.isInteger(cells) || cells % 4 || !within(cells, CLIPMAP_LIMITS.cells)) throw new RangeError('Clipmap cells must be a multiple of 4 in range');
@@ -52,6 +58,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
   const reach = world.paintReach && typeof world.hollowAt === 'function' ? world.paintReach : null;
   const group = new THREE.Group();
   const color = new THREE.Color();
+  const visibility = skySamples > 0 ? createSkyVisibility(world.heightAt, skySettings) : null;
 
   // Index buffers, shared by the rings: the cells of one chunk, except those in the square hole the inner ring
   // fills (hole: [x, z] in cells). A ring's hole takes few places, so few buffers are ever built.
@@ -118,6 +125,13 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       bake = {side, data, spacing: cell / normalDetail, jobs: []};
       field.normalMap = createDataTexture(data, side, side, {filter: 'linear'});
     }
+    // The sky visibility of the ring's ground, open (1) until baked.
+    let skyBake = null;
+    if (visibility) {
+      const side = cells / snapCells + 1, data = new Uint8Array(side * side).fill(BYTE);
+      skyBake = {side, data, spacing: cell * snapCells, jobs: []};
+      field.skyMap = createDataTexture(data, side, side, {format: THREE.RedFormat, filter: 'linear'});
+    }
     const material = createMaterial(field, level);
     // The chunks share the vertices of the ring; each has its own index and bounds.
     const ringGroup = new THREE.Group();
@@ -136,7 +150,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       slopeStride: Math.max(1, Math.round(reach.slope / cell)), hollowStride: Math.max(1, Math.round(reach.hollow / cell)),
       lattice: cell < HOLLOW_LATTICE.maxCell ? new Map() : null,
     };
-    const ring = {level, cell, size, heights, weights, forest, sand, palette, climate, signals, bake, positions, normals, coarse, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
+    const ring = {level, cell, size, heights, weights, forest, sand, palette, climate, signals, bake, skyBake, positions, normals, coarse, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
     if (tint) colour(ring);
     return ring;
   });
@@ -266,7 +280,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     const {field, origin, cell, low, high} = ring;
     field.bounds.set(origin[0], origin[1], ring.size, ring.size);
     ring.group.position.set(origin[0], 0, origin[1]);
-    for (const [name, texture] of Object.entries(field)) if (texture.isTexture && name !== 'normalMap') texture.needsUpdate = true;
+    for (const [name, texture] of Object.entries(field)) if (texture.isTexture && name !== 'normalMap' && name !== 'skyMap') texture.needsUpdate = true;
     for (const attribute of Object.values(ring.attributes)) attribute.needsUpdate = true;
     // Bounds of each chunk, for the renderer to skip the ones out of view: its square, over the heights of the ring.
     const span = chunkCells * cell, radius = Math.hypot(span, span, high - low) / 2;
@@ -276,13 +290,13 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     }
   }
 
-  // Queues every texel of a ring's normal map, or after a move of (dx, dz) cells keeps what stays and queues the rest.
-  function queueBake(ring, dx, dz, all) {
-    const {bake} = ring;
+  // Queues every texel of a baked map of a ring, or after a move of (fx, fz) texels keeps what stays and queues the
+  // rest. stride: bytes per texel; blank: the value of a texel not baked yet.
+  function queueBake(bake, texture, stride, blank, fx, fz, all) {
     if (!bake) return;
-    const {side, data} = bake, last = side - 1, fx = dx * normalDetail, fz = dz * normalDetail;
-    if (all) { data.fill(0); bake.jobs = [[0, last, 0, last]]; ring.field.normalMap.needsUpdate = true; return; }
-    slide(data, 4, fx, fz, side);
+    const {side, data} = bake, last = side - 1;
+    if (all) { data.fill(blank); bake.jobs = [[0, last, 0, last]]; texture.needsUpdate = true; return; }
+    slide(data, stride, fx, fz, side);
     // Pending rectangles move with the texels they name; the strips that came into view are blank and queued.
     bake.jobs = bake.jobs.map(([i0, i1, j0, j1]) => [Math.max(0, i0 - fx), Math.min(last, i1 - fx), Math.max(0, j0 - fz), Math.min(last, j1 - fz)])
       .filter(([i0, i1, j0, j1]) => i0 <= i1 && j0 <= j1);
@@ -290,10 +304,29 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     if (fx > 0) strips.push([side - fx, last, 0, last]); else if (fx < 0) strips.push([0, -fx - 1, 0, last]);
     if (fz > 0) strips.push([0, last, side - fz, last]); else if (fz < 0) strips.push([0, last, 0, -fz - 1]);
     for (const [i0, i1, j0, j1] of strips) {
-      for (let j = j0; j <= j1; j++) data.fill(0, (j * side + i0) * 4, (j * side + i1 + 1) * 4);
+      for (let j = j0; j <= j1; j++) data.fill(blank, (j * side + i0) * stride, (j * side + i1 + 1) * stride);
       bake.jobs.unshift([i0, i1, j0, j1]);   // the newest ground first
     }
-    ring.field.normalMap.needsUpdate = true;
+    texture.needsUpdate = true;
+  }
+  const pendingTexels = bake => bake ? bake.jobs.reduce((sum, [i0, i1, j0, j1]) => sum + (i1 - i0 + 1) * (j1 - j0 + 1), 0) : 0;
+
+  // Bakes queued sky visibility, nearest ring first, a row at a time, until `budget` relief samples are spent.
+  function bakeSky(budget) {
+    let spent = 0;
+    for (const {skyBake, origin, field} of rings) {
+      if (!skyBake || !origin) continue;
+      const {side, data, spacing, jobs} = skyBake, cost = visibility.samples(spacing);
+      while (jobs.length && spent < budget) {
+        const job = jobs[0];
+        bakeSkyRow(visibility, data, side, origin, spacing, job[2], job[0], job[1]);
+        spent += (job[1] - job[0] + 1) * cost;
+        if (++job[2] > job[3]) jobs.shift();
+        field.skyMap.needsUpdate = true;
+      }
+      if (spent >= budget) break;
+    }
+    return spent;
   }
 
   // Bakes queued normals, nearest ring first, for at most `budget` relief samples. Returns the samples spent.
@@ -348,7 +381,9 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     // Samples generated by the last update: a measure of its cost.
     get samplesGenerated() { return samplesGenerated; },
     // Texels of the far normal maps still to bake: 0 once the far relief is fully lit.
-    get bakePending() { return rings.reduce((total, {bake}) => total + (bake ? bake.jobs.reduce((sum, [i0, i1, j0, j1]) => sum + (i1 - i0 + 1) * (j1 - j0 + 1), 0) : 0), 0); },
+    get bakePending() { return rings.reduce((total, {bake}) => total + pendingTexels(bake), 0); },
+    // Texels of the sky maps still to bake.
+    get skyPending() { return rings.reduce((total, {skyBake}) => total + pendingTexels(skyBake), 0); },
     originOf: level => rings[level].origin,
     heightAt: (x, z) => world.heightAt(x, z),
     // Centres the rings on a point. Returns true when a ring moved. maxRings spreads the work: at most that many
@@ -378,7 +413,8 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
           }
         }
         fill(ring, dx, dz, all);
-        queueBake(ring, dx, dz, all);
+        queueBake(ring.bake, ring.field.normalMap, 4, 0, dx * normalDetail, dz * normalDetail, all);
+        queueBake(ring.skyBake, ring.field.skyMap, 1, BYTE, dx / snapCells, dz / snapCells, all);
         samplesGenerated += all ? count : count - (n - Math.abs(dx)) * (n - Math.abs(dz));
         lift(ring);
         upload(ring);
@@ -386,6 +422,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
         budget--;
       }
       bakeNormals(normalSamples);
+      if (visibility) bakeSky(skySamples);
       if (moved) {
         rings.forEach((ring, level) => {
           const inner = rings[level - 1];

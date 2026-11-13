@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {bakeSkyMap, BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
+import {createDataTexture} from '../../src/core/data-texture.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createTerrainImpacts} from './impacts.js';
@@ -42,7 +43,7 @@ const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
 // test balls roll, so they leave ruts and marks. It sits on a `snap` m grid so its edge follows the cells of every
 // ring; the rings leave it a square `margin` m smaller and it is drawn just in front of them. A ball is launched
 // `ahead` m in front of the focus; one started within `edge` m of the border moves the area there (its marks are lost).
-const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, trackResolution: 512, trackContrast: .12, edge: 12, ahead: 6,
+const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, skyTexel: 2, trackResolution: 512, trackContrast: .12, edge: 12, ahead: 6,
   ball: {radius: 1.5, minRadius: .4, maxRadius: 4, baseRadius: .72, speed: 7, color: 0x8d8478, roughness: .8}, fallBelow: 12,
   offset: -1};
 // Rings moved per frame: one keeps the cost of a frame even; the others catch up on the next frames.
@@ -208,7 +209,7 @@ export async function mountValley() {
     if (!play) return;
     play.impacts.dispose();
     scene.remove(play.mesh);
-    play.material.dispose(); play.field.dispose(); play.tracks.dispose();
+    play.material.dispose(); play.field.dispose(); play.tracks.dispose(); play.sky.map.dispose();
     play = undefined;
     cutout.value.set(0, 0, 0, 0);
   }
@@ -228,16 +229,19 @@ export async function mountValley() {
     const field = createTerrainField({origin, size: [size, size], resolution: [n, n], heights, seed: settings.seed, rules: worldBiomes[0].paint,
       paintAt: sample => world.paintAt(world.sampleAt(sample.x, sample.z)), paletteSize: world.palette.size, snowTrackRims: true});
     const tracks = createTrackMask({origin, size: [size, size], resolution: PLAY.trackResolution, directional: true});
+    // The play area's own sky map, measured like the rings' so the ambient light does not change at its edge.
+    const skySide = size / PLAY.skyTexel + 1;
+    const sky = {map: createDataTexture(bakeSkyMap(createSkyVisibility(world.heightAt), origin, size, skySide), skySide, skySide, {format: THREE.RedFormat, filter: 'linear'}), bounds: field.bounds};
     const material = createTerrainMaterial({polygonOffset: true, polygonOffsetFactor: PLAY.offset, polygonOffsetUnits: PLAY.offset}, {
       field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray,
-      detailNormal: textures.detail, appearance, sandLook, weather, tracks, trackContrast: PLAY.trackContrast});
+      detailNormal: textures.detail, appearance, sandLook, weather, tracks, trackContrast: PLAY.trackContrast, sky});
     const mesh = new THREE.Mesh(field.geometry, material);
     mesh.receiveShadow = true;
     scene.add(mesh);
     cutout.value.set(origin[0] + margin, origin[1] + margin, size - 2 * margin, size - 2 * margin);
     const impacts = createTerrainImpacts({scene, field, tracks, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow,
       surround: {heightAt: world.heightAt, lift: () => settings.snow ? SNOW_DEFAULTS.driftDepth : 0}});
-    play = {field, tracks, material, mesh, impacts, origin};
+    play = {field, tracks, material, mesh, impacts, origin, sky};
     applySnow();
   }
 
@@ -430,6 +434,7 @@ export async function mountValley() {
     tints.addColor(edit, 'color').name(role).onChange(value => appearance.roleTints.value[index].set(value));
   });
   materialFolder.add(appearance.bakedNormals, 'value', 0, 1, .01).name('Baked far relief lighting');
+  materialFolder.add(appearance.skyOcclusion, 'value', 0, 1, .01).name('Sky occlusion (ambient in valleys)');
   materialFolder.add(appearance.farTiling.value, 'z', .05, 1, .01).name('Far texture size (1 = off)');
   materialFolder.add(appearance.farTiling.value, 'x', 10, 400, 5).name('Far textures from · m');
   materialFolder.add(appearance.farTiling.value, 'y', 20, 800, 5).name('Far textures fully at · m');

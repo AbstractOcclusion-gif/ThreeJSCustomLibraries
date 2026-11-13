@@ -69,6 +69,7 @@ export function createTerrainAppearance() {
   // of the near tiling (1 = off).
   farTiling: {value: new THREE.Vector3(60, 220, .23)},
   bakedNormals: {value: 1},    // share of the baked normals of the far rings (0 = the normals of the mesh)
+  skyOcclusion: {value: 1},    // how much the ambient light dims where the relief hides the sky (0 = off)
   waterLevel: {value: 0}, shoreWidth: {value: .8}, shoreWetness: {value: 1},
  };
 }
@@ -115,6 +116,11 @@ uniform bool terrainSnowCover;
 #ifdef TERRAIN_NORMAL_MAP
 uniform sampler2D terrainNormalMap;   // rg = world normal x and z, a = how far the texel is baked
 uniform float terrainBakedNormals;
+#endif
+#ifdef TERRAIN_SKY_MAP
+uniform sampler2D terrainSkyMap;   // r = share of the sky the ground sees
+uniform vec4 terrainSkyBounds;     // world XZ origin and size of that map
+uniform float terrainSkyOcclusion;
 #endif
 uniform vec4 terrainCutout;   // world XZ origin and size of a square this material leaves to another mesh; no size: none
 #ifdef TERRAIN_PALETTE
@@ -589,8 +595,12 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, layerDetailArray, palette, cutout, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, ...surface
+ field, layers, layerArray, layerDetailArray, palette, cutout, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, sky, ...surface
 } = {}) {
+ // sky: {map, bounds} - a sky visibility map (bakeSkyMap) and the Vector4 world XZ origin and size it covers.
+ // Default: the field's own skyMap (a clipmap ring), over the field.
+ const skyMap = sky ?? (field?.skyMap ? {map: field.skyMap, bounds: field.bounds} : null);
+ if (skyMap && (!skyMap.map?.isTexture || !skyMap.bounds?.isVector4)) throw Error('Terrain sky needs a map texture and its bounds');
  // palette: {size, roles, sets} of a terrain world. The field then brings paletteMap (size / 4 slices of four weights)
  // and the layer arrays hold one slice per palette set.
  if (palette !== undefined) {
@@ -643,6 +653,7 @@ export function createTerrainMaterial(parameters = {}, {
   terrainCutout: cutout ?? {value: new THREE.Vector4()},
   ...(field.morph && {terrainMorph: field.morph}),
   ...(field.normalMap && {terrainNormalMap: {value: field.normalMap}, terrainBakedNormals: appearance.bakedNormals ?? {value: 1}}),
+  ...(skyMap && {terrainSkyMap: {value: skyMap.map}, terrainSkyBounds: {value: skyMap.bounds}, terrainSkyOcclusion: appearance.skyOcclusion ?? {value: 1}}),
   terrainLayerArray: {value: layerArray ?? null},
   ...(palette && {terrainPaletteWeights: {value: field.paletteMap}, terrainPaletteRole: {value: paletteRoles}, terrainPaletteSnow: {value: palette.roles.indexOf('snow')},
    terrainHarmony: appearance.harmony, terrainRoleTint: appearance.roleTints, terrainEdgeFade: appearance.edgeFade, terrainDetailFade: appearance.detailFade, terrainFarTiling: appearance.farTiling,
@@ -698,6 +709,8 @@ export function createTerrainMaterial(parameters = {}, {
  if (field.morph) material.defines = {...material.defines, TERRAIN_MORPH: 1};
  // field.normalMap (a far clipmap ring): the ground is lit from normals baked finer than its mesh.
  if (field.normalMap) material.defines = {...material.defines, TERRAIN_NORMAL_MAP: 1};
+ // A sky map (sky-visibility.js): ambient light, diffuse and reflected, dims where the relief hides the sky.
+ if (skyMap) material.defines = {...material.defines, TERRAIN_SKY_MAP: 1};
  material.onBeforeCompile = shader => {
   compileSurface(shader);
   Object.assign(shader.uniforms, uniforms);
@@ -708,6 +721,17 @@ uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the n
    vec2 fromFocus = abs((modelMatrix * vec4(position, 1.0)).xz - terrainMorph.xy);
    transformed.y = mix(transformed.y, terrainCoarse, smoothstep(terrainMorph.z, terrainMorph.w, max(fromFocus.x, fromFocus.y)));
   `);
+  }
+  if (skyMap) {
+   if (!shader.fragmentShader.includes('#include <aomap_fragment>')) throw Error('Terrain sky occlusion needs the ambient occlusion stage of the material');
+   shader.fragmentShader = shader.fragmentShader.replace('#include <aomap_fragment>', `#include <aomap_fragment>
+   {
+    vec2 skySize = vec2(textureSize(terrainSkyMap, 0));
+    vec2 skyUV = clamp((vSurfaceWorld.xz - terrainSkyBounds.xy) / terrainSkyBounds.zw, 0.0, 1.0);
+    float skySeen = mix(1.0, texture2D(terrainSkyMap, (skyUV * (skySize - 1.0) + .5) / skySize).r, terrainSkyOcclusion);
+    reflectedLight.indirectDiffuse *= skySeen;
+    reflectedLight.indirectSpecular *= skySeen;
+   }`);
   }
   shader.fragmentShader = shader.fragmentShader.replace('void main() {', `${TERRAIN_GLSL}\nvoid main() {`)
    .replace('float up = inverseTransformDirection', `${TERRAIN_FRAGMENT}\nfloat up = inverseTransformDirection`)
@@ -921,3 +945,4 @@ export {createRelief, reliefShape, validateRelief, RELIEF_SHAPES, RELIEF_MAX_SHA
 export {TERRAIN_BIOMES, BIOME_TEXTURE_DEFAULTS, DEFAULT_TERRAIN_BIOME, cloneBiome, validateBiome} from './biomes.js';
 export {createTerrainWorld, validateWorld, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAX_BIOMES, WORLD_MAP_AUTO, WORLD_PALETTE_MAX} from './world.js';
 export {createTerrainClipmap, CLIPMAP_DEFAULTS, CLIPMAP_LIMITS} from './clipmap.js';
+export {createSkyVisibility, bakeSkyMap, SKY_VISIBILITY_DEFAULTS, SKY_VISIBILITY_LIMITS} from './sky-visibility.js';
