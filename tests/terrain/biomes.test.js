@@ -37,6 +37,15 @@ test('relief is repeatable per seed and each shape does what its name says', () 
  const [erodedLow, erodedHigh] = sampleRange(createRelief(1, [reliefShape('eroded', {amplitude: 100})]), 1000, 20);
  assert.ok(erodedLow >= 0 && erodedHigh <= 100 && erodedHigh - erodedLow > 40);
  assert.notEqual(createRelief(1, [reliefShape('eroded', {erosion: 0})]).heightAt(40, 70), createRelief(1, [reliefShape('eroded', {erosion: 1})]).heightAt(40, 70));
+ // Fine relief stays within its height, and a mesh keeps only the bumps its cells can show.
+ const micro = createRelief(1, [reliefShape('micro', {amplitude: .2, size: 3})]);
+ const [microLow, microHigh] = sampleRange(micro, 30, .5);
+ assert.ok(microLow >= -.2 && microHigh <= .2 && microHigh - microLow > .1);
+ assert.equal(micro.heightAt(3.3, 7.1, 16), 0);
+ assert.equal(micro.heightAt(3.3, 7.1, .05), micro.heightAt(3.3, 7.1));
+ let fineRange = 0, coarseRange = 0;
+ for (let x = 0; x < 40; x += .37) { fineRange = Math.max(fineRange, Math.abs(micro.heightAt(x, 2, .25))); coarseRange = Math.max(coarseRange, Math.abs(micro.heightAt(x, 2, 1))); }
+ assert.ok(coarseRange < fineRange);
  // A warp moves where the following shapes are read, and nothing else.
  const plain = createRelief(1, [reliefShape('rolling', {amplitude: 20})]);
  const still = createRelief(1, [reliefShape('warp', {strength: 0}), reliefShape('rolling', {amplitude: 20})]);

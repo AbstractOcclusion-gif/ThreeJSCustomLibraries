@@ -103,10 +103,11 @@ export function createTerrainWorld({seed, biomes, map, water = false, ...overrid
   }
 
   const scratch = new Float32Array(count);
-  function heightAt(x, z) {
+  // cell: the cell size of the mesh that asks, for the fine relief it can show (see createRelief); omit for all of it.
+  function heightAt(x, z, cell = 0) {
     weightsAt(x, z, scratch);
     let height = 0;
-    for (let i = 0; i < count; i++) if (scratch[i] > 0) height += scratch[i] * reliefs[i].heightAt(x, z);
+    for (let i = 0; i < count; i++) if (scratch[i] > 0) height += scratch[i] * reliefs[i].heightAt(x, z, cell);
     return height;
   }
 

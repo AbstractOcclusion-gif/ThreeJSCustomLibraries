@@ -219,7 +219,8 @@ export async function mountValley() {
     const origin = [Math.round((x - size / 2) / snap) * snap, Math.round((z - size / 2) / snap) * snap];
     let lowest = Infinity;
     const heights = Float32Array.from({length: n * n}, (_, index) => {
-      const height = world.heightAt(origin[0] + index % n * step, origin[1] + Math.floor(index / n) * step);
+      // Asked with the cell of the innermost ring, so the play area carries the same fine relief as the ground around it.
+      const height = world.heightAt(origin[0] + index % n * step, origin[1] + Math.floor(index / n) * step, step);
       lowest = Math.min(lowest, height);
       return height;
     });

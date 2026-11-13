@@ -135,7 +135,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
   // Height of sample (i, j) of a ring, from the world when it lies outside the ring; rounded like the stored ones.
   function heightOf(ring, i, j) {
     if (i >= 0 && j >= 0 && i <= cells && j <= cells) return ring.heights[j * n + i];
-    return Math.fround(world.heightAt(ring.origin[0] + i * ring.cell, ring.origin[1] + j * ring.cell));
+    return Math.fround(world.heightAt(ring.origin[0] + i * ring.cell, ring.origin[1] + j * ring.cell, ring.cell));
   }
   // Hollow at a world point, interpolated between the lattice points around it.
   function latticeHollow(lattice, x, z) {
@@ -157,7 +157,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     const {cell, heights, origin} = ring, index = j * n + i;
     const x = origin[0] + i * cell, z = origin[1] + j * cell, height = heights[index];
     // Rounded like the stored heights, so a sample is shaded the same whether its neighbour is stored or not.
-    const beyond = (px, pz) => Math.fround(world.heightAt(px, pz));
+    const beyond = (px, pz) => Math.fround(world.heightAt(px, pz, cell));
     const west = i > 0 ? heights[index - 1] : beyond(x - cell, z), east = i < cells ? heights[index + 1] : beyond(x + cell, z);
     const north = j > 0 ? heights[index - n] : beyond(x, z - cell), south = j < cells ? heights[index + n] : beyond(x, z + cell);
     const dx = (east - west) / (2 * cell), dz = (south - north) / (2 * cell);
@@ -196,13 +196,14 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     const {cell, heights, origin} = ring;
     const fresh = (i, j) => all || (dx > 0 ? i >= n - dx : i < -dx) || (dz > 0 ? j >= n - dz : j < -dz);
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-      if (fresh(i, j)) heights[j * n + i] = world.heightAt(origin[0] + i * cell, origin[1] + j * cell);
+      if (fresh(i, j)) heights[j * n + i] = world.heightAt(origin[0] + i * cell, origin[1] + j * cell, cell);
     }
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (fresh(i, j)) shade(ring, i, j);
   }
 
-  // Writes the heights to the mesh. On the outer edge, the vertices the ring outside does not have sit on the
-  // straight line between their neighbours, so the two rings meet without a crack.
+  // Writes the heights to the mesh. On the outer edge the ring takes the shape of the ring outside it, so the two
+  // meet without a crack: the vertices they share get the height that ring has there (it shows less fine relief),
+  // and the vertices in between sit on the straight line between their neighbours.
   function lift(ring) {
     const {positions, heights} = ring;
     let low = Infinity, high = -Infinity;
@@ -213,9 +214,16 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     }
     ring.low = low; ring.high = high;
     if (ring.level === levels - 1) return;
+    const {cell, origin} = ring;
+    const edges = k => [[k, 1], [cells * n + k, 1], [k * n, n], [k * n + cells, n]];
+    for (let k = 0; k <= cells; k += 2) {
+      for (const [index] of edges(k)) {
+        positions[index * 3 + 1] = Math.fround(world.heightAt(origin[0] + (index % n) * cell, origin[1] + Math.floor(index / n) * cell, cell * 2));
+      }
+    }
     for (let k = 1; k < cells; k += 2) {
-      for (const [index, step] of [[k, 1], [cells * n + k, 1], [k * n, n], [k * n + cells, n]]) {
-        positions[index * 3 + 1] = (heights[index - step] + heights[index + step]) / 2;
+      for (const [index, step] of edges(k)) {
+        positions[index * 3 + 1] = (positions[(index - step) * 3 + 1] + positions[(index + step) * 3 + 1]) / 2;
       }
     }
   }

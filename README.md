@@ -310,7 +310,7 @@ snow, rain and puddles. Source: `src/terrain/`.
 
 | File | What it gives |
 | --- | --- |
-| `relief.js` | `createRelief(seed, recipe)`: a `heightAt(x, z)` sampler from a list of shapes applied in order. `RELIEF_SHAPES`: base, rolling, ridged, eroded, warp, plateau, dunes, terraces, valley, river, island. `reliefShape(name, overrides)` makes an entry. |
+| `relief.js` | `createRelief(seed, recipe)`: a `heightAt(x, z)` sampler from a list of shapes applied in order. `RELIEF_SHAPES`: base, rolling, ridged, eroded, micro (fine ground relief), warp, plateau, dunes, terraces, valley, river, island. `heightAt(x, z, cell)` leaves out the detail a mesh of that cell size cannot show. `reliefShape(name, overrides)` makes an entry. |
 | `biomes.js` | A biome is plain data: a relief recipe, the paint rules and one catalogue texture set per role. `TERRAIN_BIOMES` (twelve presets), `cloneBiome(id)`, `validateBiome(biome)`. |
 | `world.js` | `createTerrainWorld({seed, biomes, regionSize, blend, wander, map, water, waterLevel})`: biomes laid out in regions, drawn from the seed or placed in `map`, with relief and paint blended across wandering borders. `heightAt`, `paintAt`, `sampleAt`, `palette`, `waterLevel`. |
 | `terrain-rules.js` | The paint rules. They read the terrain itself (slope and hollow-or-ridge over fixed distances, `PAINT_REACH`; the shaded side; a moisture built from them; standing water) and return one weight per role (`TERRAIN_PALETTE_ROLES`: grass, rock, snow, mud, forest, scree, soil), sand and moisture. Settings: `TERRAIN_PAINT_DEFAULTS` / `TERRAIN_PAINT_FIELDS`. |

@@ -1,7 +1,7 @@
 import {fbm, valueNoise} from '../core/value-noise.js';
 
 // Relief as data: a recipe is a list of shapes applied in order to a height that starts at zero. Additive shapes
-// (base, rolling, ridged, eroded, plateau, dunes) raise the ground; modifiers (terraces, valley, river, island) reshape what
+// (base, rolling, ridged, eroded, micro, plateau, dunes) raise the ground; modifiers (terraces, valley, river, island) reshape what
 // the shapes before them built, and warp bends the ground plan for the shapes after it, so the place of a shape in
 // the list matters. Distances and heights are metres.
 const number = (label, min, max, step) => Object.freeze({label, min, max, step});
@@ -19,7 +19,10 @@ const DEGREES = Math.PI / 180;
 // axis shows. slopeStep is the distance, in noise cells, over which the slope of an octave is measured; slopeGain
 // scales how much the slope gathered so far flattens the finer octaves at erosion 1.
 const ERODED = Object.freeze({octaves: 7, lacunarity: 2, gain: .5, turn: .6, slopeStep: .02, slopeGain: .35});
-const WARP_OFFSET = 31.7;   // noise offset between the two axes of a warp, so they bend independently
+const WARP_OFFSET = 31.7;
+// Fine relief: octaves of bumps, each `lacunarity` x smaller and `gain` x lower. A mesh of cells `cell` m wide keeps
+// the octaves it can show: one fades out as its bumps shrink from `shown` cells across to `hidden`.
+const MICRO = Object.freeze({octaves: 4, lacunarity: 2.1, gain: .55, shown: 5, hidden: 2.5});   // noise offset between the two axes of a warp, so they bend independently
 
 function shape(label, fields, defaults, build) {
   return Object.freeze({label, fields: Object.freeze(fields), defaults: Object.freeze(defaults), build});
@@ -65,6 +68,23 @@ export const RELIEF_SHAPES = Object.freeze({
         const turned = (px * cos - pz * sin) * lacunarity;
         pz = (px * sin + pz * cos) * lacunarity;
         px = turned;
+      }
+      return value + amplitude * sum / total;
+    }};
+  }),
+  micro: shape('Fine ground relief', {
+    amplitude: number('Height · m', 0, 2, .01), size: number('Largest bump · m', .3, 20, .1),
+  }, {amplitude: .12, size: 3}, ({amplitude, size}, noise) => {
+    const {octaves, lacunarity, gain, shown, hidden} = MICRO;
+    let total = 0;
+    for (let octave = 0, weight = 1; octave < octaves; octave++, weight *= gain) total += weight;
+    return {apply(value, x, z, cell = 0) {
+      let sum = 0, weight = 1, across = size;
+      for (let octave = 0; octave < octaves; octave++) {
+        // Bumps too small for the cells of the mesh that asks would only flicker: they are left out.
+        const kept = cell > 0 ? smooth(hidden * cell, shown * cell, across) : 1;
+        if (kept > 0) sum += weight * kept * noise(x / across + octave * WARP_OFFSET, z / across - octave * WARP_OFFSET);
+        weight *= gain; across /= lacunarity;
       }
       return value + amplitude * sum / total;
     }};
@@ -181,11 +201,13 @@ export function createRelief(seed, recipe) {
   recipe.forEach(({shape: name, ...settings}, index) => steps.push(RELIEF_SHAPES[name].build(settings, valueNoise(seed + NOISE_STRIDE * (index + 1)), steps)));
   return {
     routeX: steps.find(step => step.routeX)?.routeX,
-    heightAt(x, z) {
+    // cell: the cell size, in metres, of the mesh that asks. Shapes finer than it can show leave their detail out,
+    // so a coarse mesh gets smooth ground instead of noise. Without it the relief is given in full.
+    heightAt(x, z, cell = 0) {
       let height = 0;
       for (const step of steps) {
         if (step.moveX) { const movedX = step.moveX(x, z); z = step.moveZ(x, z); x = movedX; }
-        height = step.apply(height, x, z);
+        height = step.apply(height, x, z, cell);
       }
       return height;
     },

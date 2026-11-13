@@ -50,7 +50,7 @@ test('sliding the rings gives exactly what a fresh build at the same focus gives
   assert.deepEqual(moved.originOf(level), fresh.originOf(level));
   maps(ring).forEach((data, index) => assert.deepEqual(data, maps(fresh.rings[level])[index]));
   const [originX, originZ] = moved.originOf(level), heights = ring.field.heightMap.image.data;
-  for (const [i, j] of [[0, 0], [5, 9], [n - 1, n - 1]]) assert.equal(heights[j * n + i], Math.fround(source.heightAt(originX + i * ring.cell, originZ + j * ring.cell)));
+  for (const [i, j] of [[0, 0], [5, 9], [n - 1, n - 1]]) assert.equal(heights[j * n + i], Math.fround(source.heightAt(originX + i * ring.cell, originZ + j * ring.cell, ring.cell)));
   assert.deepEqual(ring.meshes[0].geometry.attributes.normal.array, fresh.rings[level].meshes[0].geometry.attributes.normal.array);
  });
  assert.ok(moved.samplesGenerated > 0 && moved.samplesGenerated < CONFIG.levels * n * n);
@@ -64,8 +64,16 @@ test('a ring meets the ring outside it without a crack and tints on request', ()
  // Odd vertices of the outer edge sit midway between their even neighbours, where the coarser ring has an edge.
  for (let k = 1; k < CONFIG.cells; k += 2) assert.ok(Math.abs(position.getY(k) - (position.getY(k - 1) + position.getY(k + 1)) / 2) < 1e-6);
  const source = world(), [originX, originZ] = tinted.originOf(0);
- assert.equal(position.getY(2), Math.fround(source.heightAt(originX + 2 * inner.cell, originZ)));
- assert.equal(position.getY(n + 1), Math.fround(source.heightAt(originX + inner.cell, originZ + inner.cell)));
+ // A vertex shared with the ring outside has the height that ring has there: it shows less of the fine relief.
+ assert.equal(position.getY(2), Math.fround(source.heightAt(originX + 2 * inner.cell, originZ, inner.cell * 2)));
+ assert.equal(position.getY(n + 1), Math.fround(source.heightAt(originX + inner.cell, originZ + inner.cell, inner.cell)));
+ const outer = tinted.rings[1], outerPosition = outer.meshes[0].geometry.attributes.position, [outerX, outerZ] = tinted.originOf(1);
+ for (let k = 0; k <= CONFIG.cells; k += 2) {
+  for (const [i, j] of [[k, 0], [k, CONFIG.cells], [0, k], [CONFIG.cells, k]]) {
+   const column = (originX + i * inner.cell - outerX) / outer.cell, row = (originZ + j * inner.cell - outerZ) / outer.cell;
+   assert.equal(position.getY(j * n + i), outerPosition.getY(row * n + column), `edge vertex ${i},${j}`);
+  }
+ }
  const colors = inner.meshes[0].geometry.attributes.color;
  assert.equal(colors.getZ(7), 1);
  tinted.reshade((x, z, paint, color) => color.setRGB(0, 1, 0));
