@@ -1,0 +1,131 @@
+import {fbm, valueNoise} from '../core/value-noise.js';
+
+// Relief as data: a recipe is a list of shapes applied in order to a height that starts at zero. Additive shapes
+// (base, rolling, ridged, plateau, dunes) raise the ground; modifiers (terraces, valley, island) reshape what the
+// shapes before them built, so their place in the list matters. Distances and heights are metres.
+const number = (label, min, max, step) => Object.freeze({label, min, max, step});
+const smooth = (from, to, value) => {
+  const t = Math.max(0, Math.min(1, (value - from) / (to - from)));
+  return t * t * (3 - 2 * t);
+};
+const lerp = (a, b, t) => a + (b - a) * t;
+
+export const RELIEF_MAX_SHAPES = 12;
+const NOISE_STRIDE = 31;                 // seed offset between two shapes of a recipe, so each gets its own noise
+const DUNE = Object.freeze({lee: .3, wanderScale: 3, patchScale: 5, patchFloor: .4});   // lee: share of a dune on its steep side
+const DEGREES = Math.PI / 180;
+
+function shape(label, fields, defaults, build) {
+  return Object.freeze({label, fields: Object.freeze(fields), defaults: Object.freeze(defaults), build});
+}
+
+export const RELIEF_SHAPES = Object.freeze({
+  base: shape('Base level', {height: number('Height · m', -60, 200, .5)}, {height: 0},
+    ({height}) => ({apply: value => value + height})),
+  rolling: shape('Rolling ground', {
+    amplitude: number('Height · m', 0, 150, .1), scale: number('Feature size · m', 4, 800, 1),
+  }, {amplitude: 6, scale: 84}, ({amplitude, scale}, noise) => ({
+    apply: (value, x, z) => value + amplitude * fbm(noise, x / scale, z / scale),
+  })),
+  ridged: shape('Ridges and peaks', {
+    amplitude: number('Height · m', 0, 300, .5), scale: number('Feature size · m', 10, 800, 1),
+    floor: number('Valley floor share', 0, 1, .01),
+  }, {amplitude: 60, scale: 84, floor: .15}, ({amplitude, scale, floor}, noise) => ({
+    apply: (value, x, z) => value + amplitude * (floor + Math.abs(fbm(noise, x / scale, z / scale))),
+  })),
+  plateau: shape('Plateaus and cliffs', {
+    amplitude: number('Height · m', 0, 200, .5), scale: number('Feature size · m', 10, 800, 1),
+    from: number('Cliff foot · noise', -1, 1, .01), to: number('Cliff top · noise', -1, 1, .01),
+  }, {amplitude: 36, scale: 84, from: -.09, to: .39}, ({amplitude, scale, from, to}, noise) => {
+    if (to <= from) throw new RangeError('Relief plateau needs its cliff top above its cliff foot');
+    return {apply: (value, x, z) => value + amplitude * smooth(from, to, fbm(noise, x / scale, z / scale))};
+  }),
+  dunes: shape('Dunes', {
+    amplitude: number('Height · m', 0, 40, .1), spacing: number('Crest spacing · m', 4, 300, 1),
+    heading: number('Wind heading · °', 0, 360, 1), wander: number('Crest wander', 0, 2, .01),
+  }, {amplitude: 4, spacing: 30, heading: 35, wander: .6}, ({amplitude, spacing, heading, wander}, noise) => {
+    const windX = Math.cos(heading * DEGREES), windZ = Math.sin(heading * DEGREES);
+    const wanderSize = spacing * DUNE.wanderScale, patchSize = spacing * DUNE.patchScale;
+    return {apply(value, x, z) {
+      const along = (x * windX + z * windZ) / spacing + wander * noise(x / wanderSize, z / wanderSize);
+      const phase = along - Math.floor(along);
+      // Gentle windward rise, steep lee side.
+      const crest = phase < 1 - DUNE.lee ? phase / (1 - DUNE.lee) : (1 - phase) / DUNE.lee;
+      const patches = lerp(DUNE.patchFloor, 1, noise(x / patchSize + 13, z / patchSize - 7) * .5 + .5);
+      return value + amplitude * smooth(0, 1, crest) * patches;
+    }};
+  }),
+  terraces: shape('Terraces', {
+    step: number('Step height · m', .5, 60, .5), strength: number('Strength', 0, 1, .01),
+    riser: number('Riser share of a step', .02, 1, .01),
+  }, {step: 6, strength: .8, riser: .25}, ({step, strength, riser}) => ({
+    apply(value) {
+      const level = value / step, whole = Math.floor(level);
+      const stepped = (whole + smooth(.5 - riser / 2, .5 + riser / 2, level - whole)) * step;
+      return lerp(value, stepped, strength);
+    },
+  })),
+  valley: shape('Valley carve', {
+    width: number('Floor width · m', 2, 300, 1), shoulder: number('Side width · m', 4, 400, 1),
+    bend: number('Bend · m', 0, 150, 1), bendScale: number('Bend length · m', 20, 800, 1),
+    floor: number('Floor height · m', -60, 100, .5),
+    saddleDepth: number('Side pass depth', 0, 1, .01), saddleWidth: number('Side pass width · m', 4, 200, 1),
+  }, {width: 35, shoulder: 72, bend: 21, bendScale: 105, floor: 0, saddleDepth: 0, saddleWidth: 31},
+  ({width, shoulder, bend, bendScale, floor, saddleDepth, saddleWidth}, noise) => {
+    // The valley runs along +Z and wanders in X. The pass lowers the +X side around z = 0.
+    const routeX = z => bend * noise(0, z / bendScale);
+    return {routeX, apply(value, x, z) {
+      const cross = x - routeX(z);
+      const side = smooth(width / 2, width / 2 + shoulder, Math.abs(cross));
+      const pass = cross > 0 ? 1 - saddleDepth * (1 - smooth(0, saddleWidth, Math.abs(z))) : 1;
+      return floor + (value - floor) * side * pass;
+    }};
+  }),
+  island: shape('Island mask', {
+    inner: number('Full land radius · m', 0, 2000, 1), outer: number('Shore radius · m', 1, 4000, 1),
+    sink: number('Sea bed depth · m', 0, 100, .5),
+  }, {inner: 46, outer: 112, sink: 10}, ({inner, outer, sink}) => {
+    if (outer <= inner) throw new RangeError('Relief island needs its shore radius beyond its full land radius');
+    return {apply: (value, x, z) => value * (1 - smooth(inner, outer, Math.hypot(x, z))) - sink};
+  }),
+});
+
+// A recipe entry with every setting of its shape: {shape, ...settings}.
+export function reliefShape(name, overrides = {}) {
+  const spec = Object.hasOwn(RELIEF_SHAPES, name) && RELIEF_SHAPES[name];
+  if (!spec) throw new RangeError(`Unknown relief shape: ${name}`);
+  return {shape: name, ...spec.defaults, ...overrides};
+}
+
+export function validateRelief(recipe) {
+  if (!Array.isArray(recipe) || !recipe.length || recipe.length > RELIEF_MAX_SHAPES) {
+    throw new RangeError(`A relief recipe is a list of 1 to ${RELIEF_MAX_SHAPES} shapes`);
+  }
+  recipe.forEach((entry, index) => {
+    const spec = Object.hasOwn(RELIEF_SHAPES, entry?.shape) && RELIEF_SHAPES[entry.shape];
+    if (!spec) throw new RangeError(`Unknown relief shape at ${index + 1}: ${entry?.shape}`);
+    for (const key of Object.keys(entry)) {
+      if (key !== 'shape' && !Object.hasOwn(spec.fields, key)) throw new RangeError(`Unknown ${entry.shape} setting: ${key}`);
+    }
+    for (const [key, {min, max}] of Object.entries(spec.fields)) {
+      const value = entry[key];
+      if (!Number.isFinite(value) || value < min || value > max) throw new RangeError(`Invalid ${entry.shape} setting at ${index + 1}: ${key}`);
+    }
+  });
+  return recipe;
+}
+
+// Builds the height sampler of a recipe. routeX(z) follows the first valley of the recipe (undefined without one).
+export function createRelief(seed, recipe) {
+  if (!Number.isSafeInteger(seed)) throw new RangeError('Relief needs an integer seed');
+  validateRelief(recipe);
+  const steps = recipe.map(({shape: name, ...settings}, index) => RELIEF_SHAPES[name].build(settings, valueNoise(seed + NOISE_STRIDE * (index + 1))));
+  return {
+    routeX: steps.find(step => step.routeX)?.routeX,
+    heightAt(x, z) {
+      let height = 0;
+      for (const step of steps) height = step.apply(height, x, z);
+      return height;
+    },
+  };
+}

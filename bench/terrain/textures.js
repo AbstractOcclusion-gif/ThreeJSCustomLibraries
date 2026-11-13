@@ -36,6 +36,11 @@ export function packTerrainLayers(layers) {
  return array;
 }
 
+// True when every map of a catalogue set is bundled with the bench (a set added to the catalogue but not fetched is not).
+export function hasTerrainTextureSet(set) {
+ return Object.values(TERRAIN_TEXTURE_SETS[set]?.maps ?? {}).every(map => files[`../../assets/terrain/${map.path}`]) && Boolean(TERRAIN_TEXTURE_SETS[set]);
+}
+
 export function terrainTextureUrl(set, role) {
  const {path} = getTerrainTextureMap(set, role);
  const url = files[`../../assets/terrain/${path}`];

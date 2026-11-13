@@ -728,3 +728,5 @@ export function createTerrainMaterial(parameters = {}, {
 }
 
 export {createProceduralTerrain, createValley, terrainWindowOrigin, TERRAIN_LANDFORMS, VALLEY_DEFAULTS} from './valley.js';
+export {createRelief, reliefShape, validateRelief, RELIEF_SHAPES, RELIEF_MAX_SHAPES} from './relief.js';
+export {TERRAIN_BIOMES, DEFAULT_TERRAIN_BIOME, cloneBiome, validateBiome} from './biomes.js';

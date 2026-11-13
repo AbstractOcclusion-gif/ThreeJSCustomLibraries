@@ -284,4 +284,6 @@ The [Terrain bench](bench/terrain/) previews Plains, Hills, Valley, Island, Clif
 
 `createProceduralTerrain({landform, seed, relief, valleyWidth, woodland})` from the terrain entry point returns world-coordinate `heightAt(x, z)` and `biomeAt(x, z, height, slope)` samplers. Use `terrainWindowOrigin(position, grid)` to anchor successive windows and feed sampled heights into the existing terrain field. Pass a `paintAt({x, z, height, slope, curvature})` callback to the field to supply terrain layer weights in `TERRAIN_LAYERS` order and optional sand coverage. The host owns camera movement, chunk lifetime, and rendering.
 
+Relief and biomes are data. `createRelief(seed, recipe)` builds a `heightAt(x, z)` sampler from a list of shapes (`RELIEF_SHAPES`: base, rolling, ridged, plateau, dunes, terraces, valley, island; `reliefShape(name, overrides)` makes an entry) applied in order. A biome (`TERRAIN_BIOMES`, `cloneBiome(id)`, `validateBiome(biome)`) joins a relief recipe, the paint rules of the terrain field and one catalogue texture set per layer. The Terrain bench edits a biome live and copies it as JSON.
+
 Bundled assets include generated textures, WebAquarium fish models and CC0 [terrain maps](assets/terrain/README.md).
