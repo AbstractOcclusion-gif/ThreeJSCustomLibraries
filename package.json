@@ -42,6 +42,7 @@
     "./terrain/textures": "./src/terrain/textures.js",
     "./vegetation": "./src/vegetation/index.js",
     "./trees": "./src/trees/index.js",
+    "./rocks": "./src/rocks/index.js",
     "./boundaries": "./src/boundaries/index.js",
     "./cable": "./src/cable/index.js",
     "./destruction": "./src/destruction/index.js",

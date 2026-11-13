@@ -102,6 +102,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | terrain (relief recipes, biomes, stitched worlds with water, camera-centred LOD rings, deformable field with 3D snow, terrain-driven texture layers, CC0 texture catalogue) | `three-kit/terrain`, `/terrain/textures` | `bench/terrain/` | ✓ |
 | vegetation (grass with per-instance tint, specimens, procedural meadow tree, generated free assets, Synty loader code) | `three-kit/vegetation` | `bench/vegetation/` | ✓ |
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
+| rocks (seeded stones, boulders, scatter and cliff runs) | `three-kit/rocks` | `bench/rocks/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
 | lighting (light probes: ambient light that follows the ground, for standard and hook materials) | `three-kit/lighting` | `bench/lighting/` | ✓ |
 | cable (articulated rope on cannon-es, tube view) | `three-kit/cable` | `bench/cable/` | ✓ |
@@ -396,3 +397,35 @@ bank. Dependencies: [three.js](https://threejs.org) (MIT), [lil-gui](https://lil
 [cannon-es](https://pmndrs.github.io/cannon-es/) (MIT, used by cable, destruction and some benches).
 
 Bundled assets include generated textures, WebAquarium fish models and CC0 [terrain maps](assets/terrain/README.md).
+
+### Rocks
+
+Open the bench at `/bench/?tool=rocks`. Choose Stone, Boulder, Scatter or
+Cliff and pick an alpine, desert, coast or woodland shape profile. Change
+the seed for a new arrangement. The standalone preview uses standard PBR
+rock and mossy rock finishes from the bundled texture catalogue.
+
+```js
+import {createRocks} from '@abstractocclusion/three-kit/rocks';
+
+const rocks = createRocks({
+  mode: 'scatter', environment: 'coast', seed: 42, count: 24, span: 12,
+  heightAt: (x, z) => terrain.heightAt(x, z),
+  material: projectRockMaterial,
+});
+scene.add(rocks.group);
+// At teardown:
+rocks.dispose();
+```
+
+Each rock is a closed convex hull with flat normals and face-projected UVs
+in metre units. Cliff runs arrange overlapping hulls as individual columns.
+Scatter samples positions independently, so stones can overlap. The caller
+owns any supplied material. A mixed demo can supply its weather material and
+drive snow through its existing surface hook.
+
+Export GLB from the bench to bring the meshes into Blender. For fracture,
+select an individual rock, weld coincident vertices with Merge by Distance
+if import split the faceted normals or UV seams, and use **Build Voronoi
+Pieces** in the [Destruction Author addon](tools/blender/impact_club_destructibles/README.md).
+Export the resulting GLB and destructible JSON from that addon.
