@@ -278,4 +278,10 @@ the Abstract Occlusion WebGpuWater / WebAquarium projects for the water surfaces
 Dawn cloud papers and the general "Enviro-style" layered sky for the volumetric clouds; JONSWAP spectra for the wind-wave
 bank. Dependencies: [three.js](https://threejs.org) (MIT), [lil-gui](https://lil-gui.georgealways.com) (MIT, bench only),
 [cannon-es](https://pmndrs.github.io/cannon-es/) (MIT, used by cable, destruction and some benches).
+### Procedural terrain
+
+The [Terrain bench](bench/terrain/) previews Plains, Hills, Valley, Island, Cliffs, Mountains, Desert, Ice, and Regions with seed, relief, biome, texture, and LOD controls. Infinite streaming moves the sampled window as the camera travels. Regions blends plains and mountains with desert, woodland, and ice using continuous world-space weights. Island has one coastline centered on the world origin, so its outer terrain continues as seabed.
+
+`createProceduralTerrain({landform, seed, relief, valleyWidth, woodland})` from the terrain entry point returns world-coordinate `heightAt(x, z)` and `biomeAt(x, z, height, slope)` samplers. Use `terrainWindowOrigin(position, grid)` to anchor successive windows and feed sampled heights into the existing terrain field. Pass a `paintAt({x, z, height, slope, curvature})` callback to the field to supply terrain layer weights in `TERRAIN_LAYERS` order and optional sand coverage. The host owns camera movement, chunk lifetime, and rendering.
+
 Bundled assets include generated textures, WebAquarium fish models and CC0 [terrain maps](assets/terrain/README.md).

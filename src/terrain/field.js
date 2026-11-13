@@ -52,7 +52,7 @@ const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: rec
 const SNOW_DRIFT = Object.freeze({flatness: [.55, .95], stretch: 2.6, octave: 2.3, detail: .45, seed: 91});
 
 // Heights are row-major along +X and +Z, in metres. The mesh and shaders share this grid.
-export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, snow: snowOverrides, snowTrackRims = false} = {}) {
+export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, paintAt, snow: snowOverrides, snowTrackRims = false} = {}) {
  const [nx, nz] = resolution ?? [];
  if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
@@ -84,10 +84,10 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  const heightMap = createDataTexture(samples, nx, nz, {format: THREE.RedFormat, type: THREE.FloatType});
  const weights = new Uint8Array(samples.length * 4);
  const weightMap = createDataTexture(weights, nx, nz, {filter: 'linear'});
- const forestWeights = settings?.forestCover !== undefined ? new Uint8Array(samples.length) : null;
+ const forestWeights = paintAt || settings?.forestCover !== undefined ? new Uint8Array(samples.length) : null;
  const forestMap = forestWeights ? createDataTexture(forestWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
  // Sand has its own map too: it lies over the other layers. Pass rules.sandBelow to enable it.
- const sandWeights = settings?.sandBelow !== undefined ? new Uint8Array(samples.length) : null;
+ const sandWeights = paintAt || settings?.sandBelow !== undefined ? new Uint8Array(samples.length) : null;
  const sandMap = sandWeights ? createDataTexture(sandWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
  const bounds = new THREE.Vector4(...origin, ...size);
  function updateRules(values = {}) {
@@ -102,10 +102,11 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    const dz = (south - north) / (stepZ * (z === 0 || z === nz - 1 ? 1 : 2));
    const curvature = (left + right - 2 * height) / (stepX * stepX) + (north + south - 2 * height) / (stepZ * stepZ);
    const sample = {x: bounds.x + x * stepX, z: bounds.y + z * stepZ, height, slope: Math.hypot(dx, dz), curvature};
-   const layers = rules.weights(sample);
+   const paint = paintAt?.(sample);
+   const layers = paint?.layers ?? rules.weights(sample);
    for (let i = 0; i < BASE_LAYERS; i++) weights[index * BASE_LAYERS + i] = Math.round(layers[i] * BYTE);
    if (forestWeights) forestWeights[index] = Math.round((layers[FOREST_LAYER] ?? 0) * BYTE);
-   if (sandWeights) sandWeights[index] = Math.round(rules.sand(sample) * BYTE);
+   if (sandWeights) sandWeights[index] = Math.round((paint?.sand ?? rules.sand(sample)) * BYTE);
   }
   weightMap.needsUpdate = true;
   if (forestMap) forestMap.needsUpdate = true;

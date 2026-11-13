@@ -1,6 +1,33 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>three-kit · Terrain</title></head>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>three-kit | Terrain</title>
+</head>
 <body>
-<header><div><small>THREE-KIT / TERRAIN</small><h1>Terrain &amp; surface</h1></div><a href="../" target="_top">All modules ↗</a></header>
-<aside><p><a href="./valley.html">Open Procedural Valley</a></p><p class="intro">Paint tracks, roll a ball, or stamp footsteps in snow. Use Rain and runoff to watch water follow the terrain into shallow puddles.</p><div id="status" role="status">Starting…</div><div id="error" role="alert" hidden></div></aside>
-<script type="module" src="./main.js"></script></body></html>
+<header><div><small>THREE-KIT / TERRAIN</small><h1>Terrain</h1></div><a href="../" target="_top">All modules</a></header>
+<aside><nav aria-label="Terrain tools"><a href="./">Generation</a> · <a href="?mode=surface">Surface effects</a></nav>
+<p class="intro">Choose a landform and biome, then use Flyover to inspect the terrain. Enable Infinite streaming for continuous travel.</p>
+<details open>
+<summary>Terrain textures</summary>
+<p><label>Layer <select id="texture-layer"></select></label></p>
+<p><label>Set <select id="texture-set"></select></label></p>
+<p><label>Map <select id="texture-map"></select></label></p>
+<img id="texture-preview" width="132" height="132" alt="">
+<div class="buttons"><button id="texture-apply" type="button">Apply texture</button><a id="texture-source" target="_blank" rel="noopener">CC0 source</a></div>
+<p id="texture-status" role="status"></p>
+</details>
+<div id="status" role="status"></div><div id="error" role="alert" hidden></div>
+</aside>
+<script type="module">
+if (new URLSearchParams(location.search).get('mode') === 'surface') {
+  document.querySelector('aside details').hidden = true;
+  document.querySelector('.intro').textContent = 'Paint tracks, roll a ball, or test rain and snow.';
+  await import('./main.js');
+} else {
+  const {mountValley} = await import('./valley-main.js');
+  await mountValley();
+}
+</script>
+</body>
+</html>

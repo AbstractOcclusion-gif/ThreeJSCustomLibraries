@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {createTerrainAppearance, createTerrainField, createTerrainMaterial, createValley, VALLEY_DEFAULTS} from '../../src/terrain/index.js';
+import {createTerrainAppearance, createTerrainField, createTerrainMaterial, createProceduralTerrain, TERRAIN_LANDFORMS, terrainWindowOrigin, VALLEY_DEFAULTS} from '../../src/terrain/index.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
@@ -8,11 +8,10 @@ import {createBenchPanel} from '../panel.js';
 import {loadTerrainTextures} from './textures.js';
 import {createValleyTiles} from './valley-tiles.js';
 import {mountTexturePicker} from './valley-textures.js';
-import {createValleyWater, VALLEY_WATER} from './valley-water.js';
 import '../bench.css';
 
 const GRID = {
-  tileCount: 8, tileSize: 32, cells: [32, 16, 8], distances: [65, 125], hysteresis: 8,
+  tileCount: 8, strideTiles: 2, tileSize: 32, cells: [32, 16, 8], distances: [65, 125], hysteresis: 8,
   lodColors: [0x83e4bc, 0xffce78, 0xa7b2ff],
 };
 const VIEW = {
@@ -20,7 +19,7 @@ const VIEW = {
   speed: 16, low: 7, rise: 94, lookAhead: 20, edgeBuffer: 26,
 };
 const DRESSING = {
-  seed: 238, attempts: 2200, routeClearance: 9, minScale: .65, maxScale: 1.65,
+  seed: 238, attemptsPerTile: 34, hashX: 73856093, hashZ: 19349663, routeClearance: 9, minScale: .65, maxScale: 1.65,
   tree: {color: 0x355a37, radius: 1.2, height: 5.2, sides: 6, maxSlope: .63},
   rock: {color: 0x81837d, radius: 1.1, depthScale: .7, rate: .65},
 };
@@ -31,15 +30,14 @@ const BIOMES = {
   Dry: {terrain: {relief: 32, valleyWidth: 48, woodland: .08}, paint: {rockSlope: .38, snowLine: 80}, colors: [0xcbbb79, 0x7c8b52, 0xac8272], labels: 'Dry grassland, sparse scrub, exposed rock'},
   Wetland: {terrain: {relief: 12, valleyWidth: 54, woodland: .65}, paint: {mudBelow: 1.4}, colors: [0xa9b775, 0x3a8066, 0x8a9281], labels: 'Wet meadow, wet woodland, rocky ground'},
 };
+const REGIONAL_LANDFORMS = ['Desert', 'Ice', 'Regions'];
+const REGION_COLORS = {desert: 0xc8a66b, ice: 0xc9e0ee};
 const BIOME_KEYS = ['grassland', 'woodland', 'upland'];
 const CONTROLS = {relief: [8, 54, 1], valleyWidth: [18, 64, 1], woodland: [0, 1, .01], density: [0, 1, .01]};
 const span = GRID.tileSize * GRID.tileCount, half = span / 2;
 const cells = GRID.tileCount * GRID.cells[0], resolution = cells + 1, spacing = span / cells;
-export async function mountValley({
-  title = 'Procedural Valley', waterModes = Object.keys(VALLEY_WATER), initialWater = 'Dry',
-  waterLabel = 'Water placeholder', createWaterView,
-} = {}) {
-  const settings = {...VALLEY_DEFAULTS, biome: 'Temperate', water: initialWater, dressingSeed: DRESSING.seed, density: .62, lod: true, wireframe: false, biomes: false, flyover: false};
+export async function mountValley() {
+  const settings = {...VALLEY_DEFAULTS, biome: 'Temperate', landform: 'Valley', infinite: false, dressingSeed: DRESSING.seed, density: .62, lod: true, wireframe: false, biomes: false, flyover: false};
 
   const renderer = benchRenderer();
   const scene = new THREE.Scene();
@@ -65,12 +63,13 @@ export async function mountValley({
   const instance = new THREE.Object3D();
   const dressing = new THREE.Group();
   scene.add(dressing);
-  let valley, water, waterMesh, waterView, field, material, tiles, flyDistance = 0;
+  let valley, field, material, tiles, flyDistance = 0;
+  let origin = [-half, -half];
 
   function sample(x, z) {
-    const dx = (water.heightAt(x + spacing, z) - water.heightAt(x - spacing, z)) / (2 * spacing);
-    const dz = (water.heightAt(x, z + spacing) - water.heightAt(x, z - spacing)) / (2 * spacing);
-    const weights = valley.biomeAt(x, z, water.heightAt(x, z), Math.hypot(dx, dz));
+    const dx = (valley.heightAt(x + spacing, z) - valley.heightAt(x - spacing, z)) / (2 * spacing);
+    const dz = (valley.heightAt(x, z + spacing) - valley.heightAt(x, z - spacing)) / (2 * spacing);
+    const weights = valley.biomeAt(x, z, valley.heightAt(x, z), Math.hypot(dx, dz));
     return {dx, dz, weights};
   }
 
@@ -83,17 +82,23 @@ export async function mountValley({
 
   function placeDressing() {
     clearDressing();
-    const random = seededRandom(settings.dressingSeed);
     const placements = {tree: [], rock: []};
-    for (let i = 0; i < DRESSING.attempts; i++) {
-      const x = random() * span - half, z = random() * span - half;
-      const chance = random(), species = random(), yaw = random() * Math.PI * 2;
-      const scale = THREE.MathUtils.lerp(DRESSING.minScale, DRESSING.maxScale, random());
-      if (chance >= settings.density || Math.abs(x - valley.routeX(z)) < DRESSING.routeClearance || water.contains(x, z)) continue;
-      const {dx, dz, weights} = sample(x, z);
-      const tree = species < weights.woodland && Math.hypot(dx, dz) <= DRESSING.tree.maxSlope;
-      if (tree || species > 1 - weights.upland * DRESSING.rock.rate) {
-        placements[tree ? 'tree' : 'rock'].push({x, z, yaw, scale});
+    for (const {mesh} of tiles.tiles) {
+      const {x: centerX, z: centerZ} = mesh.position;
+      const tileX = Math.floor(centerX / GRID.tileSize);
+      const tileZ = Math.floor(centerZ / GRID.tileSize);
+      const random = seededRandom(settings.dressingSeed ^ Math.imul(tileX, DRESSING.hashX) ^ Math.imul(tileZ, DRESSING.hashZ));
+      for (let i = 0; i < DRESSING.attemptsPerTile; i++) {
+        const x = centerX + (random() - .5) * GRID.tileSize;
+        const z = centerZ + (random() - .5) * GRID.tileSize;
+        const chance = random(), species = random(), yaw = random() * Math.PI * 2;
+        const scale = THREE.MathUtils.lerp(DRESSING.minScale, DRESSING.maxScale, random());
+        if (chance >= settings.density || (settings.landform === 'Valley' && Math.abs(x - valley.routeX(z)) < DRESSING.routeClearance)) continue;
+        const {dx, dz, weights} = sample(x, z);
+        const tree = species < weights.woodland && Math.hypot(dx, dz) <= DRESSING.tree.maxSlope;
+        if (tree || species > 1 - weights.upland * DRESSING.rock.rate) {
+          placements[tree ? 'tree' : 'rock'].push({x, z, yaw, scale});
+        }
       }
     }
     for (const [kind, points] of Object.entries(placements)) {
@@ -112,38 +117,44 @@ export async function mountValley({
   }
 
   function disposeTerrain() {
-    waterView?.dispose();
     tiles?.dispose();
     material?.dispose();
     field?.dispose();
-    if (waterMesh) {
-      scene.remove(waterMesh);
-      waterMesh.geometry.dispose();
-      waterMesh.material.dispose();
-    }
   }
 
   function createMaterial() {
-    return createTerrainMaterial({}, {field, layerArray: textures.layerArray, detailNormal: textures.detail, appearance});
+    return createTerrainMaterial({}, {field, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance});
+  }
+
+  function windowOrigin(position) {
+    return settings.infinite ? terrainWindowOrigin(position, GRID) : [-half, -half];
   }
 
   function regenerate() {
+    valley = createProceduralTerrain(settings);
+    buildWindow(windowOrigin(camera.position));
+  }
+
+  function buildWindow(nextOrigin) {
     disposeTerrain();
-    valley = createValley(settings);
-    water = createValleyWater(valley, settings.water);
-    waterMesh = createWaterView ? undefined : water.makeMesh?.();
-    if (waterMesh) scene.add(waterMesh);
+    origin = nextOrigin;
     const biome = BIOMES[settings.biome];
     const biomeColors = BIOME_KEYS.map((name, index) => [name, new THREE.Color(biome.colors[index])]);
+    const regionalPaint = REGIONAL_LANDFORMS.includes(settings.landform);
+    if (regionalPaint) {
+      for (const [name, tint] of Object.entries(REGION_COLORS)) biomeColors.push([name, new THREE.Color(tint)]);
+    }
     const heights = Float32Array.from({length: resolution ** 2}, (_, index) =>
-      water.heightAt(index % resolution * spacing - half, Math.floor(index / resolution) * spacing - half));
-    field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution],
-      heights, seed: settings.seed, rules: {...PAINT, ...biome.paint}});
+      valley.heightAt(origin[0] + index % resolution * spacing, origin[1] + Math.floor(index / resolution) * spacing));
+    const paintAt = regionalPaint ? ({x, z, height, slope}) => {
+      const weights = valley.biomeAt(x, z, height, slope);
+      const {grassland, woodland, upland, desert, ice} = weights;
+      return {layers: [grassland + desert, upland, ice, 0, woodland], sand: desert};
+    } : undefined;
+    field = createTerrainField({origin, size: [span, span], resolution: [resolution, resolution],
+      heights, seed: settings.seed, paintAt, rules: {...PAINT, ...biome.paint}});
     material = createMaterial();
-    waterView = createWaterView?.({water, field, scene, renderer, camera, stage, orbit, spacing,
-      kind: settings.water, flying: () => settings.flyover || settings.wireframe});
-    tiles = createValleyTiles({field, scene, material, sample, config: GRID, biomeColors,
-      detailBounds: waterView && water.bounds});
+    tiles = createValleyTiles({field, scene, material, sample, config: GRID, biomeColors, origin});
     placeDressing();
   }
 
@@ -156,15 +167,16 @@ export async function mountValley({
     settings.biomes = false;
     settings.wireframe = false;
   });
-  const gui = createBenchPanel(title);
+  const gui = createBenchPanel('Terrain generation');
+  gui.add(settings, 'landform', TERRAIN_LANDFORMS).name('Landform').onChange(regenerate);
+  gui.add(settings, 'infinite').name('Infinite streaming').onChange(regenerate);
   gui.add(settings, 'biome', Object.keys(BIOMES)).name('Biome preset').onChange(name => {
     const {seed, ...terrain} = BIOMES[name].terrain;
     Object.assign(settings, terrain);
     regenerate();
   });
-  gui.add(settings, 'water', waterModes).name(waterLabel).onChange(regenerate);
   gui.add(settings, 'seed').listen().onFinishChange(value => {
-    settings.seed = Number.isFinite(value) ? Math.trunc(value) : VALLEY_DEFAULTS.seed;
+    settings.seed = Number.isSafeInteger(Math.trunc(value)) ? Math.trunc(value) : VALLEY_DEFAULTS.seed;
     regenerate();
   });
   const nextSeed = seed => (seed + 1) >>> 0;
@@ -176,7 +188,6 @@ export async function mountValley({
   gui.add(settings, 'lod').name('Dynamic LOD');
   gui.add(settings, 'wireframe').name('LOD wireframe').listen();
   gui.add(settings, 'flyover').name('Flyover').onChange(enabled => {
-    waterView?.cancelGesture();
     orbit.enabled = !enabled;
     if (enabled) flyDistance = 0;
     else orbit.update();
@@ -187,26 +198,28 @@ export async function mountValley({
   let lastStatus = -Infinity;
   const routeLength = span - 2 * VIEW.edgeBuffer;
   function fly(dt) {
-    flyDistance = (flyDistance + dt * VIEW.speed) % (2 * routeLength);
-    const forward = flyDistance < routeLength;
+    flyDistance += dt * VIEW.speed;
+    if (!settings.infinite) flyDistance %= 2 * routeLength;
+    const forward = settings.infinite || flyDistance < routeLength;
     const z = -routeLength / 2 + (forward ? flyDistance : 2 * routeLength - flyDistance);
     const x = valley.routeX(z);
-    const altitude = VIEW.low + VIEW.rise * Math.sin(Math.PI * flyDistance / (2 * routeLength)) ** 2;
+    const altitude = VIEW.low + (settings.infinite ? 0 : VIEW.rise * Math.sin(Math.PI * flyDistance / (2 * routeLength)) ** 2);
     const targetZ = z + (forward ? VIEW.lookAhead : -VIEW.lookAhead);
-    camera.position.set(x, field.heightAt(x, z) + altitude, z);
-    camera.lookAt(valley.routeX(targetZ), field.heightAt(valley.routeX(targetZ), targetZ) + VIEW.low, targetZ);
+    camera.position.set(x, valley.heightAt(x, z) + altitude, z);
+    camera.lookAt(valley.routeX(targetZ), valley.heightAt(valley.routeX(targetZ), targetZ) + VIEW.low, targetZ);
   }
   startFrameLoop(renderer, (dt, now) => {
     if (settings.flyover) fly(dt);
     else orbit.update();
+    const nextOrigin = windowOrigin(camera.position);
+    if (nextOrigin.some((coordinate, axis) => coordinate !== origin[axis])) buildWindow(nextOrigin);
     stage.update(camera);
     const counts = tiles.update(camera, {...settings, surfaceMaterial: settings.biomes ? biomeMaterial : material});
     if (now - lastStatus >= STATUS_REFRESH_MS) {
       lastStatus = now;
       status.textContent = 'Tiles · ' + counts.map((count, level) => 'LOD ' + level + ': ' + count).join(' · ')
-        + (settings.biomes ? ' | ' + BIOMES[settings.biome].labels : '');
+        + (settings.biomes ? ' | ' + (settings.landform === 'Regions' ? 'Desert, grassland, woodland, rocky upland, ice' : BIOMES[settings.biome].labels) : '');
     }
-    waterView?.render(dt, settings.wireframe);
     renderer.render(scene, camera);
   });
   onLeave(() => {

@@ -23,7 +23,6 @@ export default defineConfig(({command}) => ({
   build: {target: 'esnext', outDir: 'dist', rollupOptions: {input: {
     root: resolve('index.html'), bench: resolve('bench/index.html'), ...benchPages,
     structureCatalogue: resolve('bench/destruction/parts.html'),
-    terrainValley: resolve('bench/terrain/valley.html'),
   }}},
   server: {open: '/bench/'},
 }));

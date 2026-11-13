@@ -727,4 +727,4 @@ export function createTerrainMaterial(parameters = {}, {
  return material;
 }
 
-export {createValley, VALLEY_DEFAULTS} from './valley.js';
+export {createProceduralTerrain, createValley, terrainWindowOrigin, TERRAIN_LANDFORMS, VALLEY_DEFAULTS} from './valley.js';

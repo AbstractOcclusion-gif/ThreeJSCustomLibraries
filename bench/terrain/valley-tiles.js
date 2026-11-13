@@ -7,22 +7,17 @@ const SIDES = [
   {dx: 0, dz: 1, vertex: (i, n) => n * (n + 1) + i},
 ];
 
-export function createValleyTiles({field, scene, material, sample, config, biomeColors, detailBounds}) {
+export function createValleyTiles({field, scene, material, sample, config, biomeColors, origin}) {
   const {tileCount, tileSize, cells, distances, hysteresis, lodColors} = config;
-  const half = tileCount * tileSize / 2;
   const templates = cells.map(count => new THREE.PlaneGeometry(tileSize, tileSize, count, count).rotateX(-Math.PI / 2));
   const overlays = lodColors.map(color => new THREE.MeshBasicMaterial({color, wireframe: true}));
   const tiles = [];
   for (let z = 0; z < tileCount; z++) {
     for (let x = 0; x < tileCount; x++) {
       const mesh = new THREE.Mesh(undefined, material);
-      mesh.position.set(x * tileSize - half + tileSize / 2, 0, z * tileSize - half + tileSize / 2);
+      mesh.position.set(origin[0] + (x + .5) * tileSize, 0, origin[1] + (z + .5) * tileSize);
       scene.add(mesh);
-      const {x: cx, z: cz} = mesh.position;
-      const margin = tileSize / 2 + tileSize / cells[0];
-      const keepDetail = detailBounds && cx + margin >= detailBounds.minX && cx - margin <= detailBounds.maxX
-        && cz + margin >= detailBounds.minZ && cz - margin <= detailBounds.maxZ;
-      tiles.push({x, z, mesh, keepDetail, level: 0, signature: ''});
+      tiles.push({x, z, mesh, level: 0, signature: ''});
     }
   }
 
@@ -78,7 +73,7 @@ export function createValleyTiles({field, scene, material, sample, config, biome
       for (const tile of tiles) {
         const p = tile.mesh.position;
         const distance = Math.hypot(camera.position.x - p.x, camera.position.y, camera.position.z - p.z);
-        if (!lod || tile.keepDetail) tile.level = 0;
+        if (!lod) tile.level = 0;
         else {
           while (tile.level < distances.length && distance > distances[tile.level] + hysteresis) tile.level++;
           while (tile.level > 0 && distance < distances[tile.level - 1] - hysteresis) tile.level--;
