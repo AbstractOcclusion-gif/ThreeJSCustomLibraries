@@ -14,7 +14,7 @@ When adding a tweak, put its control in the module panel and pass scene settings
 | UI Tool | `src/ui/index.js` | UI Tool demo and the library's other bench demos |
 | Stage | `bench/kit/controls.js` (`stageControls`) | Every module page on the basic stage: sun, light and wind |
 | Weather | `src/weather/three/dev-panel.js` | Weather page; the two demos through `bench/kit/weather.js` |
-| Terrain, shoreline, coast | `bench/terrain/controls.js` | Terrain page (layers, textures). The All tools demo adds shoreline and grass density by texture; the Ocean coast demo uses the coast controls. |
+| Terrain, shoreline, coast | `bench/terrain/controls.js` | Terrain page: the generation tool (world, biome, material) and the Surface effects page (layers, textures, snow, tracks). The All tools demo adds shoreline and grass density by texture; the Ocean coast demo uses the coast controls. |
 | Grass and plants | `bench/vegetation/controls.js` | Vegetation (grass, planting, contact). The All tools demo shares Grass. |
 | Leaved Trees | `bench/trees/controls.js` | Vegetation trees and bushes, and Boundaries hedges |
 | Inland water | `bench/water/controls.js` | Channel, Pond and the All tools demo. Wind, freeze, and dive-height controls follow the capabilities supplied by the scene. |
@@ -33,6 +33,46 @@ Enviro-derived sky textures, commercial FX sheets) is never in the repo: drop it
 to a free default without it. The weather module ships its own generated textures in `assets/weather/` (Perlin-Worley cloud
 volumes, cirrus, moon, stars, galaxy, weather map — `npm run assets:weather` regenerates them); pass
 `...bundledWeatherAssets()` from `three-kit/weather/bundled-assets` to `createThreeWeather` to use them.
+
+## Architecture
+
+```
+src/<module>/     the library: plain ES modules, one entry per module (package.json "exports"), no build step
+bench/<module>/   one authoring page per module on the basic stage, plus the mixed demos demo-ocean and demo-all
+bench/kit/        what the pages share: renderer, frame loop, stage and weather panels
+tests/<module>/   node --test, no browser; tests/isolation checks the import rules below
+assets/           free assets only (generated textures, CC0 terrain maps, fish models)
+scripts/          asset generators and fetchers (weather textures, terrain texture sets)
+```
+
+**Layers.** `core` is the base: the environment contract, the lighting hook, noise, data textures, validation and the fixed
+step. Every module imports `core` and only the lower modules declared for it (see [Standalone](#standalone-what-each-entry-needs));
+`stage` is the fallback sky, sun and ground a module needs to be seen alone. A bench page imports its own module, the
+modules that one is built on, the stage and core, so each page proves its module works without the rest.
+
+**How a module is written.**
+
+- **Settings are data.** A module exports frozen `*_DEFAULTS`, a `*_FIELDS` table (label, min, max, step) and a
+  `validate*()` that throws on anything outside it. Panels are built from the fields table, so a label and a range
+  exist once.
+- **Looks are shared uniforms.** `createXLook()` (`createSnowLook`, `createSandLook`, `createIceLook`, `createFlameLook`,
+  `createTerrainAppearance`, ...) returns an object of `{value}` uniforms. Pass one object to several materials and they
+  stay in step; a slider writes the value and nothing recompiles.
+- **Materials extend Three's own.** Surfaces are `MeshStandardMaterial`s extended in `onBeforeCompile`, so lights,
+  shadows, fog and tone mapping stay Three's. Unlit shaders take the [lighting hook](#lighting-hook).
+- **Every effect can be switched off**, by a boolean or by a strength of 0.
+- **No hidden numbers.** A constant is a named, commented value next to the code that uses it, or a documented setting.
+- **Fail loudly, dispose what you create.** Factories validate their inputs and throw with the name of the setting;
+  everything that allocates returns a `dispose()`.
+
+**Terrain, as an example of the layering.** Each step is usable alone and takes plain data from the one before:
+
+```
+relief recipe ──► biome ──► world ──► clipmap rings (far, camera-centred)  ──► terrain material
+ (shapes)        (+ paint    (regions,   or terrain field (near, deformable)     (palette of texture sets,
+                  rules,      stitching,                                          paint weights, climate)
+                  textures)   water)
+```
 
 ## Use in a project
 
@@ -53,13 +93,13 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | --- | --- | --- | --- |
 | core (environment contract, lighting hook, sky, hash, value noise, fixed step, presets, validation) | `three-kit/core` | — | ✓ |
 | stage (basic sky, sun, ambient, ground and environment for standalone use) | `three-kit/stage` | every module page | ✓ |
-| weather & sky (sim + Three adapter + dev panel) | `three-kit/weather`, `/weather/three`, `/weather/dev-panel` | `bench/weather/` | ✓ |
-| particles (puffs, chips, prefabs; water spray: sheets, sprites, droplets, depth binding, precipitation) | `three-kit/particles`, `/particles/water` | `bench/particles/` | ✓ |
-| fire (ignition, heat spread, fuel) | `three-kit/fire` | `bench/fire/` | ✓ |
-| water (channel and pond surfaces, waves, ripples, flow bake; ocean surface) | `three-kit/water` | `bench/water/`, `bench/pond/`, `bench/ocean/` | ✓ |
+| weather & sky (sim + Three adapter + dev panel; height fog banks, cloud shadows, sun rays through cloud, rainbow, wind streaks and debris) | `three-kit/weather`, `/weather/three`, `/weather/dev-panel` | `bench/weather/` | ✓ |
+| particles (puffs, chips, prefabs, wind streaks; water spray: sheets, sprites, droplets, impact splash, depth binding, precipitation) | `three-kit/particles`, `/particles/water` | `bench/particles/` | ✓ |
+| fire (ignition, heat spread, fuel; flames from a small 2D fluid solver) | `three-kit/fire`, `/fire/visual` | `bench/fire/` | ✓ |
+| water (channel and pond surfaces, waves, ripples, flow bake, foam layer, freezing and ice; ocean surface) | `three-kit/water` | `bench/water/`, `bench/pond/`, `bench/ocean/` | ✓ |
 | flocking (instanced fish and schooling) | `three-kit/flocking` | `bench/flocking/` | ✓ |
-| weathered surfaces (wetness, runoff streaks, snow, puddles, tracks, albedo anti-tiling) | `three-kit/surface` | `bench/terrain/` | ✓ |
-| terrain (heightfield, automatic triplanar layers, prop contact blending, detail normals, shoreline wetness) | `three-kit/terrain` | `bench/terrain/` | ✓ |
+| weathered surfaces (wetness, runoff streaks, snow, puddles, rain rings, tracks, albedo anti-tiling) | `three-kit/surface` | `bench/terrain/` | ✓ |
+| terrain (relief recipes, biomes, stitched worlds with water, camera-centred LOD rings, deformable field with 3D snow, terrain-driven texture layers, CC0 texture catalogue) | `three-kit/terrain`, `/terrain/textures` | `bench/terrain/` | ✓ |
 | vegetation (grass with per-instance tint, specimens, procedural meadow tree, generated free assets, Synty loader code) | `three-kit/vegetation` | `bench/vegetation/` | ✓ |
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
@@ -169,7 +209,8 @@ top to bottom, and use RGBA with coverage in alpha. Sheets without `animate` sti
 `skyFromWeather(view)` shares the weather adapter's dome, `proceduralSky()` is a static gradient with a sun you drive, and
 `customSky({glsl, uniforms})` takes your own `sky(dir, sunMul)`. Foam and whitecap tiles are generated (`foam-texture.js`); pass
 your own textures to override. `createRipples` / `createFlowBake` take `{origin, size, cell}` grids and `ripples.mask(isWet)`
-takes a callback.
+takes a callback. `createFoamLayer` keeps the foam that impacts and falls leave on a surface, `createWaterFreeze` and
+`createIceLook` freeze it over, and `createImpactSplash` (`three-kit/particles/water`) throws the splash of something hitting it.
 
 For level water, set `settings.planarReflection = {...POND_REFLECTION_DEFAULTS}` on the channel surface to
 capture mirrored scene geometry. `createWaterlineComposite(renderer, {caustics: surface.lighting})` can render a perspective view across the
@@ -213,7 +254,8 @@ The Flocking page (`bench/flocking/`) shows a school in a swim volume; the two d
 `system.add({position, ignitionHeat, burnSeconds, heatOutput})`. Position is a live object with `x`, `y` and `z`
 coordinates. Call `object.ignite()` to start a fire and `system.update(dt)` with elapsed seconds to advance it (`tick` is kept as an alias).
 Read `object.phase` (`unlit`, `burning`, or `burned`) and the normalized `heat` and `fuel` values to drive visuals.
-Burned objects stay burned until `system.reset()`. The bench uses the shared fire and smoke particle sheets.
+Burned objects stay burned until `system.reset()`. `createFireVisual` from `three-kit/fire/visual` draws a fire: its flames
+come from a small 2D fluid solver (`src/fire/fluid.js`) shown on crossed planes, with `createFlameLook()` for the look. The bench uses the shared fire and smoke particle sheets.
 
 ### Destruction
 
@@ -260,6 +302,42 @@ from Glider: `createCameraDirector`, `createFollowRig`, `createOrbitRig`, `creat
 `createCameraPost`, `createCameraPanel`. The panel's styles are not imported by the module (it stays plain ESM): load
 `three-kit/camera/panel.css` yourself, as with the UI tool's theme.
 
+### Terrain
+
+The [Terrain bench](bench/terrain/) is one tool: build a world from biomes, edit relief, paint rules, textures and material
+live, fly over it, roll test balls on it. Its second page, Surface effects, is the small fixed field used to tune tracks,
+snow, rain and puddles. Source: `src/terrain/`.
+
+| File | What it gives |
+| --- | --- |
+| `relief.js` | `createRelief(seed, recipe)`: a `heightAt(x, z)` sampler from a list of shapes applied in order. `RELIEF_SHAPES`: base, rolling, ridged, eroded, warp, plateau, dunes, terraces, valley, river, island. `reliefShape(name, overrides)` makes an entry. |
+| `biomes.js` | A biome is plain data: a relief recipe, the paint rules and one catalogue texture set per role. `TERRAIN_BIOMES` (twelve presets), `cloneBiome(id)`, `validateBiome(biome)`. |
+| `world.js` | `createTerrainWorld({seed, biomes, regionSize, blend, wander, map, water, waterLevel})`: biomes laid out in regions, drawn from the seed or placed in `map`, with relief and paint blended across wandering borders. `heightAt`, `paintAt`, `sampleAt`, `palette`, `waterLevel`. |
+| `terrain-rules.js` | The paint rules. They read the terrain itself (slope and hollow-or-ridge over fixed distances, `PAINT_REACH`; the shaded side; a moisture built from them; standing water) and return one weight per role (`TERRAIN_PALETTE_ROLES`: grass, rock, snow, mud, forest, scree, soil), sand and moisture. Settings: `TERRAIN_PAINT_DEFAULTS` / `TERRAIN_PAINT_FIELDS`. |
+| `clipmap.js` | `createTerrainClipmap({world, createMaterial, levels, cells, cellSize})`: the far terrain. Camera-centred rings whose cells double from ring to ring (25 cm to 16 m, 4 km across by default). `update(x, z, maxRings)` slides them and generates only the new strips; each ring is drawn in chunks the renderer can cull. |
+| `field.js` | `createTerrainField(...)`: the near, deformable ground. Digging with rims (`deform`), a 3D snow layer that packs under a load (`setSnowCover`, `compactSnow`), drifts and melting. With `paintAt` and `paletteSize` it is painted by a world like the rings. |
+| `index.js` | `createTerrainMaterial(parameters, options)`: a standard material with triplanar texture sets, relief-led junctions, per-layer normal and roughness, procedural sand, and the surface weather (wetness, snow, puddles, tracks, runoff). `palette` mode blends up to 16 sets with one weight each, pulls their colours into one family (`appearance.harmony`), tints grass from dry to lush and varies colour at large scale. Looks: `createTerrainAppearance`, `createSnowLook`, `createSandLook`. |
+| `drainage.js`, `runoff.js` | Where water gathers and runs on a field: basins, flow routing, the runoff texture the material draws as streams. |
+| `textures.js` | The CC0 texture catalogue ([assets/terrain](assets/terrain/README.md)): `TERRAIN_TEXTURE_SETS`, `DEFAULT_TERRAIN_TEXTURES`, `getTerrainTextureMap(setId, role)`. `npm run textures:fetch` downloads the maps a catalogue set is missing. |
+| `coast.js`, `valley.js` | `OceanCoastTerrain` for the ocean demo, and the earlier landform generator (`createProceduralTerrain`), kept for projects that use it. |
+
+A minimal world, drawn as rings:
+
+```js
+import {cloneBiome, createTerrainWorld, createTerrainClipmap, createTerrainMaterial} from '@abstractocclusion/three-kit/terrain';
+
+const world = createTerrainWorld({seed: 17, biomes: [cloneBiome('valley'), cloneBiome('mountains')], water: true});
+const terrain = createTerrainClipmap({world, createMaterial: field =>
+  createTerrainMaterial({}, {field, palette: world.palette, layerArray, detailNormal})});   // layerArray: one slice per palette set
+scene.add(terrain.group);
+// each frame: terrain.update(focus.x, focus.z, 1);
+```
+
+The host loads the texture sets named in `world.palette.sets` into `layerArray` (the bench does it in
+`bench/terrain/textures.js`), owns the camera and decides what the rings follow. For ground that must deform, lay a
+`createTerrainField` over part of the world and give the ring materials the same square as `cutout`; the bench does this
+for its test balls (`bench/terrain/valley-main.js`).
+
 ## Not in this repo (on purpose)
 
 Glider's authored masonry and Jolt labs, the full WebAquarium pond/ocean workshops and their emitters,
@@ -278,12 +356,5 @@ the Abstract Occlusion WebGpuWater / WebAquarium projects for the water surfaces
 Dawn cloud papers and the general "Enviro-style" layered sky for the volumetric clouds; JONSWAP spectra for the wind-wave
 bank. Dependencies: [three.js](https://threejs.org) (MIT), [lil-gui](https://lil-gui.georgealways.com) (MIT, bench only),
 [cannon-es](https://pmndrs.github.io/cannon-es/) (MIT, used by cable, destruction and some benches).
-### Procedural terrain
-
-The [Terrain bench](bench/terrain/) previews Plains, Hills, Valley, Island, Cliffs, Mountains, Desert, Ice, and Regions with seed, relief, biome, texture, and LOD controls. Infinite streaming moves the sampled window as the camera travels. Regions blends plains and mountains with desert, woodland, and ice using continuous world-space weights. Island has one coastline centered on the world origin, so its outer terrain continues as seabed.
-
-`createProceduralTerrain({landform, seed, relief, valleyWidth, woodland})` from the terrain entry point returns world-coordinate `heightAt(x, z)` and `biomeAt(x, z, height, slope)` samplers. Use `terrainWindowOrigin(position, grid)` to anchor successive windows and feed sampled heights into the existing terrain field. Pass a `paintAt({x, z, height, slope, curvature})` callback to the field to supply terrain layer weights in `TERRAIN_LAYERS` order and optional sand coverage. The host owns camera movement, chunk lifetime, and rendering.
-
-Relief and biomes are data. `createRelief(seed, recipe)` builds a `heightAt(x, z)` sampler from a list of shapes (`RELIEF_SHAPES`: base, rolling, ridged, plateau, dunes, terraces, valley, island; `reliefShape(name, overrides)` makes an entry) applied in order. A biome (`TERRAIN_BIOMES`, `cloneBiome(id)`, `validateBiome(biome)`) joins a relief recipe, the paint rules of the terrain field and one catalogue texture set per layer. The Terrain bench edits a biome live and copies it as JSON. `createTerrainWorld({seed, biomes, regionSize, blend, wander, map})` lays several biomes out in regions (drawn from the seed, or placed in `map`) and stitches them: its `heightAt(x, z)` and `paintAt(sample)` blend relief and layer paint across wandering borders, and `paintAt` plugs into the terrain field. `createTerrainClipmap({world, createMaterial, levels, cells, cellSize})` draws that world as camera-centred rings whose cells double from ring to ring (25 cm to 16 m and 4 km across by default): call `update(x, z)` with the focus each frame and only the new strips are generated. Each biome keeps its own textures across a border: `world.palette` lists the texture sets in use (at most 16) and `createTerrainMaterial(..., {palette: world.palette})` blends them with one weight per set. The paint rules read the terrain itself: slope and hollow-or-ridge over fixed distances (`PAINT_REACH`), the shaded side and a moisture built from them. They give seven palette roles (`TERRAIN_PALETTE_ROLES`: the five layers, scree under rock and bare soil on dry ground), and the moisture tints grass from dry to lush. `createTerrainWorld({water: true, waterLevel})` floods the ground below one level (lakes, sea, and the bed of a `river` relief shape): the rules then paint wet earth on the banks, gravel on the bed and lush ground just above the water.
 
 Bundled assets include generated textures, WebAquarium fish models and CC0 [terrain maps](assets/terrain/README.md).
