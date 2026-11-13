@@ -13,6 +13,8 @@ export const CLIPMAP_DEFAULTS = Object.freeze({
   // mean fewer, larger updates. Default: a thirty-second of `cells`, between 2 and 8.
 });
 const SNAP = Object.freeze({share: 32, min: 2, max: 8});
+// A ring eases into the shape of the ring outside it over the outer `band` of its half-width (see field.morph).
+const MORPH = Object.freeze({band: .28});
 const CHUNKS = 4;   // a ring is drawn as CHUNKS x CHUNKS meshes, so the parts outside the view are not drawn
 export const CLIPMAP_LIMITS = Object.freeze({levels: [1, 10], cells: [8, 512], cellSize: [.05, 8]});
 const BYTE = 255, LAYER_CHANNELS = 4, FOREST_LAYER = 4;
@@ -81,12 +83,20 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     const climate = reach ? new Uint8Array(count) : null;
     const positions = new Float32Array(count * 3), normals = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) { positions[i * 3] = (i % n) * cell; positions[i * 3 + 2] = Math.floor(i / n) * cell; }
-    const attributes = {position: new THREE.BufferAttribute(positions, 3), normal: new THREE.BufferAttribute(normals, 3)};
+    // coarse: the height each vertex has in the shape of the ring outside, which the material eases toward.
+    const coarse = new Float32Array(count);
+    const attributes = {position: new THREE.BufferAttribute(positions, 3), normal: new THREE.BufferAttribute(normals, 3), terrainCoarse: new THREE.BufferAttribute(coarse, 1)};
     const field = {
       bounds: new THREE.Vector4(0, 0, size, size),
       heightMap: createDataTexture(heights, n, n, {format: THREE.RedFormat, type: THREE.FloatType}),
       sandMap: createDataTexture(sand, n, n, {format: THREE.RedFormat, filter: 'linear'}),
     };
+    // The easing ends before the edge wherever the focus stands inside its snap step, so the edge always has the
+    // coarse shape; the outermost ring has nothing to ease into.
+    if (level < levels - 1) {
+      const end = (cells / 2 - snapCells / 2 - 1) * cell;
+      field.morph = {value: new THREE.Vector4(0, 0, end - MORPH.band * size / 2, end)};
+    }
     if (weights) field.weightMap = createDataTexture(weights, n, n, {filter: 'linear'});
     if (forest) field.forestMap = createDataTexture(forest, n, n, {format: THREE.RedFormat, filter: 'linear'});
     if (palette) {
@@ -113,7 +123,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       slopeStride: Math.max(1, Math.round(reach.slope / cell)), hollowStride: Math.max(1, Math.round(reach.hollow / cell)),
       lattice: cell < HOLLOW_LATTICE.maxCell ? new Map() : null,
     };
-    const ring = {level, cell, size, heights, weights, forest, sand, palette, climate, signals, positions, normals, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
+    const ring = {level, cell, size, heights, weights, forest, sand, palette, climate, signals, positions, normals, coarse, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
     if (tint) colour(ring);
     return ring;
   });
@@ -226,6 +236,16 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
         positions[index * 3 + 1] = (positions[(index - step) * 3 + 1] + positions[(index + step) * 3 + 1]) / 2;
       }
     }
+    // The coarse shape: the ring outside has every other vertex, and draws straight edges and one diagonal between.
+    const {coarse} = ring;
+    for (let j = 0; j <= cells; j++) for (let i = 0; i <= cells; i++) {
+      const index = j * n + i, oddI = i % 2, oddJ = j % 2;
+      coarse[index] = i === 0 || j === 0 || i === cells || j === cells ? positions[index * 3 + 1]
+        : !oddI && !oddJ ? heights[index]
+        : oddI && !oddJ ? (heights[index - 1] + heights[index + 1]) / 2
+        : !oddI ? (heights[index - n] + heights[index + n]) / 2
+        : (heights[index - n + 1] + heights[index + n - 1]) / 2;   // the diagonal of the coarse quad
+    }
   }
 
   function upload(ring) {
@@ -259,6 +279,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       if (!(maxRings >= 1)) throw new RangeError('A clipmap update moves at least one ring');
       if (!Number.isFinite(x) || !Number.isFinite(z)) throw new RangeError('Clipmap focus must be finite');
       samplesGenerated = 0;
+      for (const {field} of rings) if (field.morph) { field.morph.value.x = x; field.morph.value.y = z; }
       let moved = false, budget = rings[0].origin ? maxRings : levels;   // the first update places every ring
       for (let level = levels - 1; level >= 0 && budget > 0; level--) {
         const ring = rings[level];

@@ -428,6 +428,9 @@ export async function mountValley() {
     const edit = {color: '#' + appearance.roleTints.value[index].getHexString()};
     tints.addColor(edit, 'color').name(role).onChange(value => appearance.roleTints.value[index].set(value));
   });
+  materialFolder.add(appearance.farTiling.value, 'z', .05, 1, .01).name('Far texture size (1 = off)');
+  materialFolder.add(appearance.farTiling.value, 'x', 10, 400, 5).name('Far textures from · m');
+  materialFolder.add(appearance.farTiling.value, 'y', 20, 800, 5).name('Far textures fully at · m');
   materialFolder.add(appearance.macroVariation, 'value', 0, 1, .01).name('Large-scale colour variation');
   materialFolder.add(appearance.climateTint, 'value', 0, 1, .01).name('Dry-to-lush grass tint');
   for (const [key, label] of [['dryTint', 'Dry grass tint'], ['lushTint', 'Lush grass tint']]) {

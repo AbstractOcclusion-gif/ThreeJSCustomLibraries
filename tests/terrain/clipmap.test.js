@@ -74,6 +74,17 @@ test('a ring meets the ring outside it without a crack and tints on request', ()
    assert.equal(position.getY(j * n + i), outerPosition.getY(row * n + column), `edge vertex ${i},${j}`);
   }
  }
+ // The coarse shape the ring eases toward: its own edge, its shared vertices, and straight lines between them.
+ const coarse = inner.meshes[0].geometry.attributes.terrainCoarse, heights = inner.field.heightMap.image.data;
+ assert.ok(inner.field.morph.value.z < inner.field.morph.value.w && inner.field.morph.value.w < inner.size / 2);
+ assert.equal(tinted.rings.at(-1).field.morph, undefined);
+ for (let k = 0; k <= CONFIG.cells; k++) assert.equal(coarse.getX(k), position.getY(k));
+ assert.equal(coarse.getX(2 * n + 4), heights[2 * n + 4]);
+ assert.equal(coarse.getX(2 * n + 5), Math.fround((heights[2 * n + 4] + heights[2 * n + 6]) / 2));
+ assert.equal(coarse.getX(3 * n + 4), Math.fround((heights[2 * n + 4] + heights[4 * n + 4]) / 2));
+ assert.equal(coarse.getX(3 * n + 5), Math.fround((heights[2 * n + 6] + heights[4 * n + 4]) / 2));
+ tinted.update(5.5, 4);
+ assert.deepEqual([inner.field.morph.value.x, inner.field.morph.value.y], [5.5, 4]);
  const colors = inner.meshes[0].geometry.attributes.color;
  assert.equal(colors.getZ(7), 1);
  tinted.reshade((x, z, paint, color) => color.setRGB(0, 1, 0));
