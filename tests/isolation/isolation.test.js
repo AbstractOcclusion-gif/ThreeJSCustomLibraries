@@ -28,6 +28,7 @@ const PAGES = {
   boundaries: ['boundaries', 'trees'], cable: ['cable'], camera: ['camera'], destruction: ['destruction'],
   fire: ['fire', 'particles'], flocking: ['flocking'], ocean: ['water'], particles: ['particles'],
   pond: ['water', 'particles'], terrain: ['terrain', 'surface'], ui: ['ui'], vegetation: ['vegetation', 'trees'],
+  rocks: ['rocks'],
   water: ['water'], weather: ['weather'], sound: ['sound'],
   interaction: ['interaction', 'puzzle'],
   save: ['save'],
