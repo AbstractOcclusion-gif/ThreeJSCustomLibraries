@@ -33,6 +33,8 @@ const LAYER_COLORS = {grass: 0xb3c870, rock: 0x9d8ba0, snow: 0xe6eef2, mud: 0x6b
 const LAYER_NAMES = Object.keys(LAYER_COLORS);
 const layerColors = LAYER_NAMES.map(name => [name, new THREE.Color(LAYER_COLORS[name])]);
 const CONTROLS = {density: [0, 1, .01]};
+// Stand-in water surface of the tool: a flat tinted sheet at the water level, as wide as the terrain.
+const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
 const VIEWS = ['Textures', 'Layer colours', 'Biome colours', 'LOD wireframe'];
 // Softer junctions than the library default: they read better at the scale of a landscape.
 const TOOL_APPEARANCE = {edgeSharpness: .25};
@@ -43,7 +45,7 @@ const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48f
 const biomeColors = BIOME_SWATCHES.map((color, index) => ['biome' + index, new THREE.Color(color)]);
 export async function mountValley() {
   const settings = {seed: SEED, dressingSeed: DRESSING.seed, density: .62, view: VIEWS[0], flyover: false,
-    ...WORLD_DEFAULTS, handPlaced: false};
+    ...WORLD_DEFAULTS, handPlaced: false, water: true};
   // The world's biomes: copies of catalogue biomes, so the catalogue stays as shipped. `biome` is the one being edited.
   const worldBiomes = [cloneBiome(DEFAULT_TERRAIN_BIOME)];
   let biome = worldBiomes[0];
@@ -71,7 +73,11 @@ export async function mountValley() {
   const disposeTextures = set => { for (const texture of Object.values(set ?? {})) texture?.dispose?.(); };   // the entries that are textures
   let textures, texturesKey = '';
   const appearance = createTerrainAppearance();
-  appearance.shoreWetness.value = 0;
+  appearance.shoreWidth.value = WATER.shoreWidth;
+  const waterSheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({color: WATER.color, transparent: true, opacity: WATER.opacity, roughness: WATER.roughness, depthWrite: false}));
+  waterSheet.renderOrder = 1;
+  scene.add(waterSheet);
   for (const [key, value] of Object.entries(TOOL_APPEARANCE)) appearance[key].value = value;
   const sandLook = createSandLook();
   const overlays = LOD_COLORS.map(color => new THREE.MeshBasicMaterial({color, wireframe: true}));
@@ -127,6 +133,7 @@ export async function mountValley() {
       const scale = THREE.MathUtils.lerp(DRESSING.minScale, DRESSING.maxScale, random());
       if (chance >= settings.density || (world.routeX && Math.abs(x - world.routeX(z)) < DRESSING.routeClearance)) continue;
       const ground = sample(x, z);
+      if (world.waterLevel !== null && ground.height < world.waterLevel) continue;
       const tree = species < ground.forest && ground.slope <= DRESSING.tree.maxSlope;
       if (tree || species > 1 - ground.rock * DRESSING.rock.rate) placements[tree ? 'tree' : 'rock'].push({x, y: ground.height, z, yaw, scale});
     }
@@ -177,8 +184,8 @@ export async function mountValley() {
   // when the world's palette of texture sets changed; a newer rebuild started meanwhile wins.
   let building = 0;
   async function regenerate() {
-    const {seed, regionSize, blend, wander} = settings;
-    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced ? map : undefined, regionSize, blend, wander});
+    const {seed, regionSize, blend, wander, waterLevel, water} = settings;
+    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced ? map : undefined, regionSize, blend, wander, waterLevel, water});
     const build = ++building, key = next.palette.sets.join() + '|' + next.palette.roles.join();
     if (key !== texturesKey) {
       const loaded = await loadPalette(next.palette);
@@ -193,6 +200,11 @@ export async function mountValley() {
       createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook})});
     scene.add(clipmap.group);
     clipmap.update(focus.x, focus.z);
+    // The ground darkens where it meets the water; a dry world has no shore.
+    waterSheet.visible = world.waterLevel !== null;
+    waterSheet.scale.setScalar(clipmap.extent);
+    appearance.shoreWetness.value = waterSheet.visible ? 1 : 0;
+    if (waterSheet.visible) appearance.waterLevel.value = waterSheet.position.y = world.waterLevel;
     clearDressing();
     drawMap();
   }
@@ -286,6 +298,7 @@ export async function mountValley() {
       }}, 'remove').name('Remove edited biome');
     }
     for (const [key, {label, min, max, step}] of Object.entries(WORLD_FIELDS)) worldFolder.add(settings, key, min, max, step).name(label).onFinishChange(rebuild);
+    worldFolder.add(settings, 'water').name('Water (lakes, rivers, sea)').onChange(rebuild);
     worldFolder.add(settings, 'handPlaced').name('Hand-placed map').onChange(rebuild);
   }
   mountWorld();
@@ -327,8 +340,8 @@ export async function mountValley() {
   };
   gui.add({copy: copy(() => biome)}, 'copy').name('Copy edited biome as JSON');
   gui.add({copy: copy(() => {
-    const {seed, regionSize, blend, wander} = settings;
-    return {seed, regionSize, blend, wander, biomes: worldBiomes, ...(settings.handPlaced && {map})};
+    const {seed, regionSize, blend, wander, waterLevel, water} = settings;
+    return {seed, regionSize, blend, wander, waterLevel, water, biomes: worldBiomes, ...(settings.handPlaced && {map})};
   })}, 'copy').name('Copy world as JSON');
   const materialFolder = appearanceControls(gui, appearance, 'Material').close();
   materialFolder.add(appearance.harmony, 'value', 0, 1, .01).name('Colour harmony between layers');
@@ -377,6 +390,7 @@ export async function mountValley() {
     focus.copy(settings.flyover ? camera.position : orbit.target);
     clipmap.update(focus.x, focus.z);
     updateDressing();
+    waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
     stage.update(camera);
     for (const {mesh, material, level} of clipmap.rings) {
       mesh.material = settings.view === VIEWS[0] ? material : settings.view === VIEWS[3] ? overlays[level] : biomeMaterial;
@@ -402,6 +416,7 @@ export async function mountValley() {
     clearDressing();
     for (const {geometry, material} of Object.values(props)) { geometry.dispose(); material.dispose(); }
     for (const overlay of overlays) overlay.dispose();
+    waterSheet.geometry.dispose(); waterSheet.material.dispose();
     disposeTextures(textures);
     biomeMaterial.dispose();
     stage.dispose();

@@ -3,7 +3,7 @@ const number=(label,min,max,step)=>({label,min,max,step});
 export const TERRAIN_PAINT_DEFAULTS=Object.freeze({
  rockSlope:1,wallRock:1.15,snowLine:150,snowJitter:10,mudBelow:3.5,mudFromRunout:true,
  slopeBlend:.25,wallBlend:.18,snowBlend:12,mudBlend:1.4,patchScale:18,patchStrength:.18,curvatureInfluence:.2,forestCover:0,woodlandSize:240,forestSlope:.7,treeLine:300,treeBlend:10,sandBelow:-20,sandBlend:.6,
- hollowRange:2.5,scree:.6,bareSoil:.5,snowShade:12,sunHeading:150,
+ hollowRange:2.5,scree:.6,bareSoil:.5,snowShade:12,sunHeading:150,bankHeight:.5,bankReach:4,bedGravel:.6,
 });
 export const TERRAIN_PAINT_FIELDS={
  rockSlope:number('Rock slope threshold · rise/run',.2,3,.05),slopeBlend:number('Slope transition softness',.02,1,.01),
@@ -16,6 +16,7 @@ export const TERRAIN_PAINT_FIELDS={
  sandBelow:number('Sand below altitude · m',-20,300,.1),sandBlend:number('Sand transition · m',.05,10,.05),
  hollowRange:number('Hollow depth for full wetness · m',.2,30,.1),scree:number('Scree below rock',0,1,.01),bareSoil:number('Bare soil on dry ground',0,1,.01),
  snowShade:number('Snow line drop in shade · m',0,80,1),sunHeading:number('Sun heading · °',0,360,5),
+ bankHeight:number('Bare wet bank above water · m',0,5,.05),bankReach:number('Lush ground above water · m',0,30,.5),bedGravel:number('Gravel on the water bed',0,1,.01),
 };
 const smooth=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
 export const TERRAIN_LAYERS=Object.freeze(['grass','rock','snow','mud','forest']);
@@ -43,8 +44,9 @@ const NOISE=Object.freeze({
  woodland:{seed:71,fractal:{octaves:4,lacunarity:2.2},norm:1.07},
  moisture:{seed:59,scale:2.6,fractal:{octaves:4,lacunarity:2.1},norm:1.07},
 });
-// How much the local break-up moves each boundary: exposed slope, valley wall, mud basin, sand line (m).
-const BREAKUP=Object.freeze({slope:.2,wall:.15,basin:.8,sand:.5});
+// How much the local break-up moves each boundary: exposed slope, valley wall, mud basin, sand line (m), bank line (m).
+const BREAKUP=Object.freeze({slope:.2,wall:.15,basin:.8,sand:.5,bank:.12});
+const ROLE=Object.freeze({rock:1,mud:3,scree:5});   // places in TERRAIN_PALETTE_ROLES
 // Forest floor lies in woodlands: large areas (woodland noise x woodGain + (coverage - .5) x coverGain + .5, through
 // woodEdges) that the coverage widens. Inside one, patches (patch x patchGain + local break-up x ragged + .5, through
 // patchEdges) thin the floor down to `clearing` of its weight, so grass shows through in clearings. The floor stops
@@ -62,6 +64,8 @@ const MOISTURE=Object.freeze({hollow:.55,noise:.45,low:.3,lowRange:6});
 // soil[0] to soil[1], broken by the local noise x soilRagged. Hollows hold snow and ridges lose it: the line moves
 // by up to snowHollow m. Woodland prefers moist ground by woodMoisture.
 const CLIMATE=Object.freeze({scree:[.5,.9],ridge:.2,soil:[.42,.2],soilRagged:.12,snowHollow:8,woodMoisture:.5,shadeFull:.5});
+// Water: the bed counts as fully under water from `bedDepth` m down.
+const WATER=Object.freeze({bedDepth:.3});
 const DEGREES=Math.PI/180;
 export function createTerrainRules(seed,settings={}){
  const config={...TERRAIN_PAINT_DEFAULTS,...settings};validateTerrainPaint(config);
@@ -85,13 +89,14 @@ export function createTerrainRules(seed,settings={}){
    const {roles}=paint(sample,false);
    return config.forestCover?roles.slice(0,TERRAIN_LAYERS.length):roles.slice(0,TERRAIN_LAYERS.length-1);
   },
-  // Everything the ground shows at a sample {x, z, height, slope, hollow?, dx?, dz?, curvature?}: `roles`, one weight per
-  // TERRAIN_PALETTE_ROLES summing to 1, and `moisture` (0 dry .. 1 wet). dx and dz are the ground slopes along +X and
-  // +Z, for the shaded side; hollow and slope are measured over PAINT_REACH.
+  // Everything the ground shows at a sample {x, z, height, slope, hollow?, dx?, dz?, water?, curvature?}: `roles`, one
+  // weight per TERRAIN_PALETTE_ROLES summing to 1, and `moisture` (0 dry .. 1 wet). dx and dz are the ground slopes
+  // along +X and +Z, for the shaded side; hollow and slope are measured over PAINT_REACH; water is the depth of
+  // standing water over the sample in metres, negative for the height of dry ground above it.
   paint:sample=>paint(sample,true),
  };
  function paint(sample,extras){
-   const p=config,{x,z,height,slope,hollow=0,dx=0,dz=0,curvature=0,runout=false}=sample,M=NOISE.moisture,C=CLIMATE;
+   const p=config,{x,z,height,slope,hollow=0,dx=0,dz=0,water=-Infinity,curvature=0,runout=false}=sample,M=NOISE.moisture,C=CLIMATE;
    // A ridge is as exposed as steeper ground.
    const ridge=Math.max(0,-hollow)/p.hollowRange*C.ridge;
    const {n,large,rock}=exposure({...sample,slope:slope+ridge});
@@ -100,7 +105,9 @@ export function createTerrainRules(seed,settings={}){
    // The mud line itself moves with the wetness of the place; the low ground then adds to the moisture.
    const hollowness=smooth(-p.hollowRange,p.hollowRange,hollow);   // 0 on a ridge, .5 on even ground, 1 in a hollow
    const place=MOISTURE.hollow*hollowness+MOISTURE.noise*(wetNoise*.5+.5);
-   const wet=Math.max(0,Math.min(1,place+MOISTURE.low*low));
+   // Ground just above standing water is as wet as it gets.
+   const nearWater=extras&&p.bankReach>0?1-smooth(0,p.bankReach,-water):0;
+   const wet=Math.max(nearWater,Math.max(0,Math.min(1,place+MOISTURE.low*low)));
    // The sun stands at the sun heading: ground rising toward it faces away and keeps its snow lower down.
    const heading=p.sunHeading*DEGREES,shade=smooth(0,C.shadeFull,dx*Math.cos(heading)+dz*Math.sin(heading));
    const snow=smooth(p.snowLine-p.snowBlend,p.snowLine+p.snowBlend,height-p.snowJitter*n+p.snowShade*shade+C.snowHollow*(hollowness*2-1));
@@ -119,7 +126,16 @@ export function createTerrainRules(seed,settings={}){
     const patches=F.clearing+(1-F.clearing)*smooth(...F.patchEdges,large*F.patchGain+n*F.ragged+.5);
     forest=green*wood*patches*(1-smooth(p.forestSlope-F.slopeBlend,p.forestSlope+F.slopeBlend,slope))*(1-smooth(p.treeLine-p.treeBlend,p.treeLine+p.treeBlend,height+p.snowJitter*n));
    }
-   return{roles:[green-forest,rock,(1-rock)*snow,mud,forest,scree,soil],moisture:wet};
+   const roles=[green-forest,rock,(1-rock)*snow,mud,forest,scree,soil];
+   // Banks and beds: from the bank height down to the waterline the ground turns to bare wet earth, and under water
+   // to gravel and silt. Rock stays rock.
+   const bank=extras&&water>-Infinity?(p.bankHeight>0?smooth(-p.bankHeight,0,water+BREAKUP.bank*n):water>0?1:0)*(1-rock):0;
+   if(bank>0){
+    const gravel=p.bedGravel*smooth(0,WATER.bedDepth,water);
+    for(let role=0;role<roles.length;role++)roles[role]*=role===ROLE.rock?1:1-bank;
+    roles[ROLE.mud]+=bank*(1-gravel);roles[ROLE.scree]+=bank*gravel;
+   }
+   return{roles,moisture:wet};
  }
 }
 export const dominantTerrainLayer=weights=>TERRAIN_LAYERS[weights.indexOf(Math.max(...weights))];

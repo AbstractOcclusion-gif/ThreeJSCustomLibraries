@@ -56,6 +56,14 @@ test('relief is repeatable per seed and each shape does what its name says', () 
  assert.equal(valley.heightAt(valley.routeX(50), 50), 2);
  assert.equal(valley.heightAt(valley.routeX(50) + 200, 50), 30);
  assert.equal(createRelief(1, recipe).routeX, undefined);
+ // A river cuts down to its bed and no further, follows the valley before it, and bends on its own without one.
+ const withRiver = createRelief(1, [reliefShape('base', {height: 30}), reliefShape('valley', {width: 20, shoulder: 40, floor: 2}), reliefShape('river', {width: 4, bank: 3, bed: -1})]);
+ assert.equal(withRiver.heightAt(valley.routeX(50), 50), -1);
+ assert.equal(withRiver.heightAt(valley.routeX(50) + 9.5, 50), 2);
+ const lone = createRelief(1, [reliefShape('base', {height: 5}), reliefShape('river', {width: 4, bank: 3, bed: 1})]);
+ assert.equal(lone.heightAt(lone.routeX(80), 80), 1);
+ assert.equal(lone.heightAt(lone.routeX(80) + 40, 80), 5);
+ assert.equal(createRelief(1, [reliefShape('base', {height: -3}), reliefShape('river', {bed: 1})]).heightAt(0, 0), -3);
  const island = createRelief(1, [reliefShape('base', {height: 20}), reliefShape('island', {inner: 40, outer: 100, sink: 6})]);
  assert.equal(island.heightAt(0, 0), 14);
  assert.equal(island.heightAt(300, 0), -6);
@@ -69,8 +77,8 @@ test('every catalogue biome is valid, builds finite relief and clones to an edit
   sampleRange(createRelief(17, biome.relief));
  }
  const copy = cloneBiome('desert');
- copy.relief[0].amplitude = 9; copy.paint.rockSlope = 1; copy.textures.grass = 'snow_02';
- assert.notEqual(TERRAIN_BIOMES.desert.relief[0].amplitude, 9);
+ copy.relief[1].amplitude = 9; copy.paint.rockSlope = 1; copy.textures.grass = 'snow_02';
+ assert.notEqual(TERRAIN_BIOMES.desert.relief[1].amplitude, 9);
  validateBiome(copy);
  assert.throws(() => cloneBiome('moon'), /Unknown terrain biome/);
  assert.throws(() => validateBiome({...copy, textures: {...copy.textures, rock: 'marble'}}), /texture set for rock/);

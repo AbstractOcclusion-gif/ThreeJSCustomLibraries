@@ -140,6 +140,13 @@ test('the rules paint scree under rock, bare soil on dry ridges, mud in wet holl
  const shaded = mean({height: 145, dx: Math.cos(150 * Math.PI / 180) * .4, dz: Math.sin(150 * Math.PI / 180) * .4});
  const sunny = mean({height: 145, dx: -Math.cos(150 * Math.PI / 180) * .4, dz: -Math.sin(150 * Math.PI / 180) * .4});
  assert.ok(shaded[role('snow')] > sunny[role('snow')] + .1);
+ // Standing water: wet earth on the bank, gravel on the bed, lush ground just above, and none of it without water.
+ const dry = mean({}), bank = mean({water: -.05}), bed = mean({water: 1}), above = mean({water: -2});
+ assert.ok(bank[role('mud')] > .7 && bank[role('grass')] < .2);
+ assert.ok(bed[role('scree')] > .5 && bed[role('mud')] > .3 && bed[role('grass')] === 0);
+ assert.ok(above[MOISTURE] > dry[MOISTURE] && above[role('grass')] + above[role('forest')] > .9);
+ assert.equal(mean({water: -30})[role('mud')], dry[role('mud')]);
+ assert.ok(mean({water: 1, slope: 1.6})[role('rock')] > .99);
  // The layers alone leave scree and soil out.
  assert.equal(rules.weights({x: 3, z: 4, height: 20, slope: .75}).length, 5);
 });

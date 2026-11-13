@@ -119,3 +119,18 @@ test('a world measures the terrain signals its rules paint from', () => {
  assert.ok(bump.hollowAt(0, 0) < -5);
  assert.ok(bump.paintAt(bump.sampleAt(0, 0)).moisture < bump.paintAt(bump.sampleAt(200, 200)).moisture);
 });
+
+test('a world with water paints banks and beds below its water level and none when dry', () => {
+ const valley = cloneBiome('valley');
+ const wet = createTerrainWorld({seed: SEED, biomes: [valley], water: true, waterLevel: -.5});
+ const dry = createTerrainWorld({seed: SEED, biomes: [valley]});
+ assert.equal(wet.waterLevel, -.5);
+ assert.equal(dry.waterLevel, null);
+ assert.throws(() => createTerrainWorld({seed: SEED, biomes: [valley], waterLevel: 999}), /waterLevel/);
+ const x = wet.routeX(40), sample = wet.sampleAt(x, 40);
+ assert.ok(sample.height < -.5, 'the river bed lies under the water');
+ const scree = wet.palette.roles.indexOf('scree'), grass = wet.palette.roles.indexOf('grass');
+ assert.ok(wet.paintAt(wet.sampleAt(x, 40)).palette[scree] > .3);
+ assert.ok(dry.paintAt(dry.sampleAt(x, 40)).palette[scree] < .1);
+ assert.equal(wet.paintAt(wet.sampleAt(x, 40)).palette[grass], 0);
+});

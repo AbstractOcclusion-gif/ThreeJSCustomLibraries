@@ -1,7 +1,7 @@
 import {fbm, valueNoise} from '../core/value-noise.js';
 
 // Relief as data: a recipe is a list of shapes applied in order to a height that starts at zero. Additive shapes
-// (base, rolling, ridged, eroded, plateau, dunes) raise the ground; modifiers (terraces, valley, island) reshape what
+// (base, rolling, ridged, eroded, plateau, dunes) raise the ground; modifiers (terraces, valley, river, island) reshape what
 // the shapes before them built, and warp bends the ground plan for the shapes after it, so the place of a shape in
 // the list matters. Distances and heights are metres.
 const number = (label, min, max, step) => Object.freeze({label, min, max, step});
@@ -125,6 +125,19 @@ export const RELIEF_SHAPES = Object.freeze({
       return floor + (value - floor) * side * pass;
     }};
   }),
+  river: shape('River channel', {
+    width: number('Bed width · m', .5, 200, .5), bank: number('Bank width · m', .5, 100, .5),
+    bed: number('Bed height · m', -60, 300, .1),
+    bend: number('Bend · m', 0, 150, 1), bendScale: number('Bend length · m', 20, 800, 1),
+  }, {width: 6, bank: 5, bed: -1.8, bend: 21, bendScale: 105}, ({width, bank, bed, bend, bendScale}, noise, before) => {
+    // Runs along +Z. It follows the valley carved before it, when there is one, and its own bends otherwise.
+    // The channel only cuts: ground already under the bed height is left alone.
+    const routeX = before.find(step => step.routeX)?.routeX ?? (z => bend * noise(0, z / bendScale));
+    return {routeX, apply(value, x, z) {
+      const channel = 1 - smooth(width / 2, width / 2 + bank, Math.abs(x - routeX(z)));
+      return value > bed ? value - (value - bed) * channel : value;
+    }};
+  }),
   island: shape('Island mask', {
     inner: number('Full land radius · m', 0, 2000, 1), outer: number('Shore radius · m', 1, 4000, 1),
     sink: number('Sea bed depth · m', 0, 100, .5),
@@ -159,11 +172,13 @@ export function validateRelief(recipe) {
   return recipe;
 }
 
-// Builds the height sampler of a recipe. routeX(z) follows the first valley of the recipe (undefined without one).
+// Builds the height sampler of a recipe. routeX(z) follows the first valley or river of the recipe (undefined without one).
 export function createRelief(seed, recipe) {
   if (!Number.isSafeInteger(seed)) throw new RangeError('Relief needs an integer seed');
   validateRelief(recipe);
-  const steps = recipe.map(({shape: name, ...settings}, index) => RELIEF_SHAPES[name].build(settings, valueNoise(seed + NOISE_STRIDE * (index + 1))));
+  const steps = [];
+  // A shape is built knowing the shapes before it: a river follows the valley it runs in.
+  recipe.forEach(({shape: name, ...settings}, index) => steps.push(RELIEF_SHAPES[name].build(settings, valueNoise(seed + NOISE_STRIDE * (index + 1)), steps)));
   return {
     routeX: steps.find(step => step.routeX)?.routeX,
     heightAt(x, z) {

@@ -12,11 +12,13 @@ export const WORLD_DEFAULTS = Object.freeze({
   regionSize: 160,   // m, side of a region
   blend: .4,         // share of a region over which two neighbours blend: 0 = a hard line, 1 = always blending
   wander: .3,        // how far the borders stray from straight, as a share of the region size
+  waterLevel: -.5,   // m, surface of the standing water (lakes, rivers, sea) when the world has water
 });
 export const WORLD_FIELDS = Object.freeze({
   regionSize: number('Region size · m', 20, 4000, 5),
   blend: number('Border blend', .02, 1, .01),
   wander: number('Border wander', 0, 1, .01),
+  waterLevel: number('Water level · m', -60, 300, .05),
 });
 export const WORLD_MAX_BIOMES = 16;
 export const WORLD_MAP_AUTO = -1;       // map cell left to the seed
@@ -31,8 +33,9 @@ const smooth = (from, to, value) => {
   return t * t * (3 - 2 * t);
 };
 
-export function validateWorld({regionSize, blend, wander}) {
-  for (const [key, value] of Object.entries({regionSize, blend, wander})) {
+export function validateWorld(settings) {
+  for (const key of Object.keys(WORLD_FIELDS)) {
+    const value = settings[key];
     const {min, max} = WORLD_FIELDS[key];
     if (!Number.isFinite(value) || value < min || value > max) throw new RangeError(`Invalid world setting: ${key}`);
   }
@@ -40,7 +43,8 @@ export function validateWorld({regionSize, blend, wander}) {
 
 // map: {columns, rows, cells}: biome indices, row-major along +X then +Z, centred on the world origin; a cell holds
 // a biome index or WORLD_MAP_AUTO.
-export function createTerrainWorld({seed, biomes, map, ...overrides} = {}) {
+// water: true floods the ground below settings.waterLevel: the rules then paint banks and beds.
+export function createTerrainWorld({seed, biomes, map, water = false, ...overrides} = {}) {
   const settings = {...WORLD_DEFAULTS, ...overrides};
   validateWorld(settings);
   if (!Number.isSafeInteger(seed)) throw new RangeError('A world needs an integer seed');
@@ -127,6 +131,7 @@ export function createTerrainWorld({seed, biomes, map, ...overrides} = {}) {
   const paintScratch = new Float32Array(count), paletteWeights = new Float32Array(palette.size);
   function paintAt(sample) {
     weightsAt(sample.x, sample.z, paintScratch);
+    sample.water = water ? settings.waterLevel - sample.height : -Infinity;
     const layers = new Array(TERRAIN_LAYERS.length).fill(0);
     paletteWeights.fill(0);
     let sand = 0, moisture = 0;
@@ -145,7 +150,9 @@ export function createTerrainWorld({seed, biomes, map, ...overrides} = {}) {
   }
 
   return {
-    settings, biomes, palette, paintReach: PAINT_REACH, heightAt, hollowAt, sampleAt, weightsAt, paintAt, regionBiome,
+    settings, biomes, palette, paintReach: PAINT_REACH,
+    waterLevel: water ? settings.waterLevel : null,   // null: a dry world
+    heightAt, hollowAt, sampleAt, weightsAt, paintAt, regionBiome,
     // A valley route only makes sense in a world of one biome.
     routeX: count === 1 ? reliefs[0].routeX : undefined,
   };
