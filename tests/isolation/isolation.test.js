@@ -33,7 +33,7 @@ const PAGES = {
   save: ['save'],
 };
 const EVERY_PAGE = ['core', 'stage', 'ui'];
-const MIXED_PAGES = ['demo-ocean', 'demo-all'];   // every module on one weather: no import rule
+const MIXED_PAGES = ['demo-ocean', 'demo-all', 'demo-valley'];
 
 const posix = file => file.split(path.sep).join('/');
 function jsFiles(dir) {

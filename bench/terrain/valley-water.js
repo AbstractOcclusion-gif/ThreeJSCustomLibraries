@@ -27,7 +27,8 @@ export function createValleyWater(valley, kind) {
     const bed = level - depth * Math.max(0, 1 - d ** 2);
     return THREE.MathUtils.lerp(Math.min(land, bed), land, edge);
   }
-  function contains(x, z) { return distance(x, z) < 1 && heightAt(x, z) < level; }
+  const inFootprint = (x, z) => distance(x, z) < 1;
+  function contains(x, z) { return inFootprint(x, z) && heightAt(x, z) < level; }
   function makeMesh() {
     const geometry = coast || ribbon
       ? new THREE.PlaneGeometry(width * 2, length * 2, 1, LOOK.segments)
@@ -41,5 +42,7 @@ export function createValleyWater(valley, kind) {
     const material = new THREE.MeshStandardMaterial({color: LOOK.color, roughness: LOOK.roughness});
     return new THREE.Mesh(geometry, material);
   }
-  return {heightAt, contains, makeMesh};
+  const bounds = {minX: centerX(centerZ) - width, maxX: centerX(centerZ) + width,
+    minZ: centerZ - length, maxZ: centerZ + length};
+  return {heightAt, contains, makeMesh, inFootprint, level, bounds: ribbon ? undefined : bounds};
 }

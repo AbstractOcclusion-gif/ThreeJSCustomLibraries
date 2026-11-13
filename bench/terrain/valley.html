@@ -19,6 +19,9 @@
 </details>
 <div id="status" role="status"></div><div id="error" role="alert" hidden></div>
 </aside>
-<script type="module" src="./valley-main.js"></script>
+<script type="module">
+import {mountValley} from './valley-main.js';
+await mountValley();
+</script>
 </body>
 </html>
