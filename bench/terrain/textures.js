@@ -1,12 +1,10 @@
 import * as THREE from 'three';
 import {TERRAIN_LAYERS} from '../../src/terrain/terrain-rules.js';
-import {DEFAULT_TERRAIN_TEXTURES as sets, getTerrainTextureMap} from '../../src/terrain/textures.js';
+import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS, getTerrainTextureMap} from '../../src/terrain/textures.js';
 import {configureTexture, createDataTexture} from '../../src/core/data-texture.js';
 
 const files = import.meta.glob([
- '../../assets/terrain/*/{color,height}.jpg',
- '../../assets/terrain/rock_wall_02/normal.jpg',
- '../../assets/terrain/snow_02/{normal,roughness}.jpg',
+ '../../assets/terrain/*/{color,height,normal,roughness}.jpg',
 ], {eager: true, query: '?url', import: 'default'});
 
 // The layer images share the same resolution and color space. Upload them as one texture unit.
@@ -37,19 +35,25 @@ export function packTerrainLayers(layers) {
  return array;
 }
 
-export async function loadTerrainTextures(renderer, {snowDetail = false} = {}) {
+export function terrainTextureUrl(set, role) {
+ const {path} = getTerrainTextureMap(set, role);
+ const url = files[`../../assets/terrain/${path}`];
+ if (!url) throw Error(`Terrain bench texture is missing: ${path}`);
+ return url;
+}
+
+export async function loadTerrainTextures(renderer, {snowDetail = false, sets = DEFAULT_TERRAIN_TEXTURES} = {}) {
  const loader = new THREE.ImageLoader();
- const load = (set, role) => {
-  const {path} = getTerrainTextureMap(set, role);
-  const url = files[`../../assets/terrain/${path}`];
-  if (!url) throw Error(`Terrain bench texture is missing: ${path}`);
-  return loader.loadAsync(url);
+ const load = (set, role) => loader.loadAsync(terrainTextureUrl(set, role));
+ const loadDetail = (layer, role) => {
+  const set = sets[layer];
+  return load(TERRAIN_TEXTURE_SETS[set]?.maps[role] ? set : DEFAULT_TERRAIN_TEXTURES[layer], role);
  };
  const [images, rockNormal, snowMaps] = await Promise.all([
   Promise.all(Object.entries(sets).map(([layer, set]) =>
    Promise.all([layer, load(set, 'color'), load(set, 'height')]))),
-  load(sets.rock, 'normal'),
-  snowDetail ? Promise.all([load(sets.snow, 'normal'), load(sets.snow, 'roughness')]) : null,
+  loadDetail('rock', 'normal'),
+  snowDetail ? Promise.all([loadDetail('snow', 'normal'), loadDetail('snow', 'roughness')]) : null,
  ]);
  const canvas = document.createElement('canvas');
  const context = canvas.getContext('2d', {willReadFrequently: true});

@@ -7,6 +7,8 @@ import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} f
 import {createBenchPanel} from '../panel.js';
 import {loadTerrainTextures} from './textures.js';
 import {createValleyTiles} from './valley-tiles.js';
+import {mountTexturePicker} from './valley-textures.js';
+import {createValleyWater, VALLEY_WATER} from './valley-water.js';
 import '../bench.css';
 
 const GRID = {
@@ -22,12 +24,18 @@ const DRESSING = {
   tree: {color: 0x355a37, radius: 1.2, height: 5.2, sides: 6, maxSlope: .63},
   rock: {color: 0x81837d, radius: 1.1, depthScale: .7, rate: .65},
 };
-const BIOME_COLORS = {grassland: 0xb3c870, woodland: 0x3b8153, upland: 0x9d8ba0};
 const PAINT = {rockSlope: .64, snowLine: 40, mudBelow: -.9};
+const BIOMES = {
+  Temperate: {terrain: VALLEY_DEFAULTS, colors: [0xb3c870, 0x3b8153, 0x9d8ba0], labels: 'Grassland, woodland, rocky upland'},
+  Alpine: {terrain: {relief: 46, valleyWidth: 24, woodland: .22}, paint: {snowLine: 22}, colors: [0x99ae80, 0x335c52, 0xcadce5], labels: 'Alpine meadow, conifers, snowy upland'},
+  Dry: {terrain: {relief: 32, valleyWidth: 48, woodland: .08}, paint: {rockSlope: .38, snowLine: 80}, colors: [0xcbbb79, 0x7c8b52, 0xac8272], labels: 'Dry grassland, sparse scrub, exposed rock'},
+  Wetland: {terrain: {relief: 12, valleyWidth: 54, woodland: .65}, paint: {mudBelow: 1.4}, colors: [0xa9b775, 0x3a8066, 0x8a9281], labels: 'Wet meadow, wet woodland, rocky ground'},
+};
+const BIOME_KEYS = ['grassland', 'woodland', 'upland'];
 const CONTROLS = {relief: [8, 54, 1], valleyWidth: [18, 64, 1], woodland: [0, 1, .01], density: [0, 1, .01]};
 const span = GRID.tileSize * GRID.tileCount, half = span / 2;
 const cells = GRID.tileCount * GRID.cells[0], resolution = cells + 1, spacing = span / cells;
-const settings = {...VALLEY_DEFAULTS, dressingSeed: DRESSING.seed, density: .62, lod: true, wireframe: false, biomes: false, flyover: false};
+const settings = {...VALLEY_DEFAULTS, biome: 'Temperate', water: 'Dry', dressingSeed: DRESSING.seed, density: .62, lod: true, wireframe: false, biomes: false, flyover: false};
 
 const renderer = benchRenderer();
 const scene = new THREE.Scene();
@@ -38,11 +46,10 @@ const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.target.set(...VIEW.target);
 orbit.enableDamping = true;
 orbit.update();
-const textures = await loadTerrainTextures(renderer);
+let textures = await loadTerrainTextures(renderer);
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;
 const biomeMaterial = new THREE.MeshLambertMaterial({vertexColors: true});
-const biomeColors = Object.entries(BIOME_COLORS).map(([name, color]) => [name, new THREE.Color(color)]);
 const treeGeometry = new THREE.ConeGeometry(DRESSING.tree.radius, DRESSING.tree.height, DRESSING.tree.sides);
 treeGeometry.translate(0, DRESSING.tree.height / 2, 0);
 const rockGeometry = new THREE.IcosahedronGeometry(DRESSING.rock.radius);
@@ -54,12 +61,12 @@ const props = {
 const instance = new THREE.Object3D();
 const dressing = new THREE.Group();
 scene.add(dressing);
-let valley, field, material, tiles, flyDistance = 0;
+let valley, water, waterMesh, field, material, tiles, flyDistance = 0;
 
 function sample(x, z) {
-  const dx = (valley.heightAt(x + spacing, z) - valley.heightAt(x - spacing, z)) / (2 * spacing);
-  const dz = (valley.heightAt(x, z + spacing) - valley.heightAt(x, z - spacing)) / (2 * spacing);
-  const weights = valley.biomeAt(x, z, valley.heightAt(x, z), Math.hypot(dx, dz));
+  const dx = (water.heightAt(x + spacing, z) - water.heightAt(x - spacing, z)) / (2 * spacing);
+  const dz = (water.heightAt(x, z + spacing) - water.heightAt(x, z - spacing)) / (2 * spacing);
+  const weights = valley.biomeAt(x, z, water.heightAt(x, z), Math.hypot(dx, dz));
   return {dx, dz, weights};
 }
 
@@ -78,7 +85,7 @@ function placeDressing() {
     const x = random() * span - half, z = random() * span - half;
     const chance = random(), species = random(), yaw = random() * Math.PI * 2;
     const scale = THREE.MathUtils.lerp(DRESSING.minScale, DRESSING.maxScale, random());
-    if (chance >= settings.density || Math.abs(x - valley.routeX(z)) < DRESSING.routeClearance) continue;
+    if (chance >= settings.density || Math.abs(x - valley.routeX(z)) < DRESSING.routeClearance || water.contains(x, z)) continue;
     const {dx, dz, weights} = sample(x, z);
     const tree = species < weights.woodland && Math.hypot(dx, dz) <= DRESSING.tree.maxSlope;
     if (tree || species > 1 - weights.upland * DRESSING.rock.rate) {
@@ -104,34 +111,62 @@ function disposeTerrain() {
   tiles?.dispose();
   material?.dispose();
   field?.dispose();
+  if (waterMesh) {
+    scene.remove(waterMesh);
+    waterMesh.geometry.dispose();
+    waterMesh.material.dispose();
+  }
+}
+
+function createMaterial() {
+  return createTerrainMaterial({}, {field, layerArray: textures.layerArray, detailNormal: textures.detail, appearance});
 }
 
 function regenerate() {
   disposeTerrain();
   valley = createValley(settings);
+  water = createValleyWater(valley, settings.water);
+  waterMesh = water.makeMesh?.();
+  if (waterMesh) scene.add(waterMesh);
+  const biome = BIOMES[settings.biome];
+  const biomeColors = BIOME_KEYS.map((name, index) => [name, new THREE.Color(biome.colors[index])]);
   const heights = Float32Array.from({length: resolution ** 2}, (_, index) =>
-    valley.heightAt(index % resolution * spacing - half, Math.floor(index / resolution) * spacing - half));
+    water.heightAt(index % resolution * spacing - half, Math.floor(index / resolution) * spacing - half));
   field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution],
-    heights, seed: settings.seed, rules: PAINT});
-  material = createTerrainMaterial({}, {field, layerArray: textures.layerArray, detailNormal: textures.detail, appearance});
+    heights, seed: settings.seed, rules: {...PAINT, ...biome.paint}});
+  material = createMaterial();
   tiles = createValleyTiles({field, scene, material, sample, config: GRID, biomeColors});
   placeDressing();
 }
 
 regenerate();
+const disposePicker = mountTexturePicker(renderer, next => {
+  material.dispose();
+  for (const texture of Object.values(textures)) texture?.dispose();
+  textures = next;
+  material = createMaterial();
+  settings.biomes = false;
+  settings.wireframe = false;
+});
 const gui = createBenchPanel('Procedural Valley');
+gui.add(settings, 'biome', Object.keys(BIOMES)).name('Biome preset').onChange(name => {
+  const {seed, ...terrain} = BIOMES[name].terrain;
+  Object.assign(settings, terrain);
+  regenerate();
+});
+gui.add(settings, 'water', Object.keys(VALLEY_WATER)).name('Water placeholder').onChange(regenerate);
 gui.add(settings, 'seed').listen().onFinishChange(value => {
   settings.seed = Number.isFinite(value) ? Math.trunc(value) : VALLEY_DEFAULTS.seed;
   regenerate();
 });
 const nextSeed = seed => (seed + 1) >>> 0;
 gui.add({reroll() { settings.seed = nextSeed(settings.seed); regenerate(); }}, 'reroll').name('Reroll terrain');
-for (const name of ['relief', 'valleyWidth', 'woodland']) gui.add(settings, name, ...CONTROLS[name]).onFinishChange(regenerate);
+for (const name of ['relief', 'valleyWidth', 'woodland']) gui.add(settings, name, ...CONTROLS[name]).listen().onFinishChange(regenerate);
 gui.add(settings, 'density', ...CONTROLS.density).name('Dressing density').onFinishChange(placeDressing);
 gui.add({reroll() { settings.dressingSeed = nextSeed(settings.dressingSeed); placeDressing(); }}, 'reroll').name('Reroll dressing');
-gui.add(settings, 'biomes').name('Biome colors');
+gui.add(settings, 'biomes').name('Biome colors').listen();
 gui.add(settings, 'lod').name('Dynamic LOD');
-gui.add(settings, 'wireframe').name('LOD wireframe');
+gui.add(settings, 'wireframe').name('LOD wireframe').listen();
 gui.add(settings, 'flyover').name('Flyover').onChange(enabled => {
   orbit.enabled = !enabled;
   if (enabled) flyDistance = 0;
@@ -160,7 +195,7 @@ startFrameLoop(renderer, (dt, now) => {
   if (now - lastStatus >= STATUS_REFRESH_MS) {
     lastStatus = now;
     status.textContent = 'Tiles · ' + counts.map((count, level) => 'LOD ' + level + ': ' + count).join(' · ')
-      + (settings.biomes ? ' | Grassland, woodland, rocky upland' : '');
+      + (settings.biomes ? ' | ' + BIOMES[settings.biome].labels : '');
   }
   renderer.render(scene, camera);
 });
@@ -169,6 +204,7 @@ onLeave(() => {
   unbind();
   orbit.dispose();
   gui.destroy();
+  disposePicker();
   disposeTerrain();
   clearDressing();
   for (const {geometry, material} of Object.values(props)) { geometry.dispose(); material.dispose(); }
