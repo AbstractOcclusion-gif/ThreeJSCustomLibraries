@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {createTrackMask} from '../../src/surface/index.js';
+import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createTerrainImpacts} from './impacts.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchPanel} from '../panel.js';
@@ -54,7 +54,7 @@ const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48f
 const biomeColors = BIOME_SWATCHES.map((color, index) => ['biome' + index, new THREE.Color(color)]);
 export async function mountValley() {
   const settings = {seed: SEED, dressingSeed: DRESSING.seed, density: .62, view: VIEWS[0], flyover: false,
-    ...WORLD_DEFAULTS, handPlaced: false, water: true, ballRadius: PLAY.ball.radius};
+    ...WORLD_DEFAULTS, handPlaced: false, water: true, ballRadius: PLAY.ball.radius, snow: false, wetness: 0};
   // The world's biomes: copies of catalogue biomes, so the catalogue stays as shipped. `biome` is the one being edited.
   const worldBiomes = [cloneBiome(DEFAULT_TERRAIN_BIOME)];
   let biome = worldBiomes[0];
@@ -104,6 +104,15 @@ export async function mountValley() {
   scene.add(dressing);
   let world, clipmap, play;
   const cutout = {value: new THREE.Vector4()};
+  // Wetness and snow of the ground, shared by the rings and the play area.
+  const weather = createSurfaceWeather();
+  // Snow lies as a real layer on the play area, where the balls pack it down. The rings only show it, so they are
+  // lifted by the mean depth of that layer and the two surfaces meet.
+  function applySnow() {
+    weather.set({wetness: settings.wetness, snow: settings.snow ? 1 : 0});
+    if (clipmap) clipmap.group.position.y = settings.snow ? SNOW_DEFAULTS.driftDepth : 0;
+    if (play && play.field.snowCover.value !== settings.snow) play.impacts.setSurface(settings.snow ? 'snow' : 'mud');
+  }
   const ballMaterial = new THREE.MeshStandardMaterial({color: PLAY.ball.color, roughness: PLAY.ball.roughness});
   const focus = new THREE.Vector3();
   const layerTint = Object.fromEntries(layerColors), tintScratch = new THREE.Color();
@@ -211,13 +220,14 @@ export async function mountValley() {
     const tracks = createTrackMask({origin, size: [size, size], resolution: PLAY.trackResolution, directional: true});
     const material = createTerrainMaterial({polygonOffset: true, polygonOffsetFactor: PLAY.offset, polygonOffsetUnits: PLAY.offset}, {
       field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray,
-      detailNormal: textures.detail, appearance, sandLook, tracks, trackContrast: PLAY.trackContrast});
+      detailNormal: textures.detail, appearance, sandLook, weather, tracks, trackContrast: PLAY.trackContrast});
     const mesh = new THREE.Mesh(field.geometry, material);
     mesh.receiveShadow = true;
     scene.add(mesh);
     cutout.value.set(origin[0] + margin, origin[1] + margin, size - 2 * margin, size - 2 * margin);
     const impacts = createTerrainImpacts({scene, field, tracks, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow});
     play = {field, tracks, material, mesh, impacts, origin};
+    applySnow();
   }
 
   // Rolls a ball from just ahead of the focus, away from the camera.
@@ -228,7 +238,7 @@ export async function mountValley() {
     const x = focus.x + heading.x * PLAY.ahead, z = focus.z + heading.z * PLAY.ahead;
     const inside = play && [x - play.origin[0], z - play.origin[1]].every(offset => offset > PLAY.edge && offset < PLAY.size - PLAY.edge);
     if (!inside) createPlay(x, z);
-    play.impacts.launch('sphere', 'mud', undefined, {position: [x, z], velocity: [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale: settings.ballRadius / PLAY.ball.baseRadius});
+    play.impacts.launch('sphere', settings.snow ? 'snow' : 'mud', undefined, {position: [x, z], velocity: [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale: settings.ballRadius / PLAY.ball.baseRadius});
   }
 
   function disposeTerrain() {
@@ -254,8 +264,9 @@ export async function mountValley() {
     world = next;
     disposeTerrain();
     clipmap = createTerrainClipmap({world, ...CLIP, tint, createMaterial: field =>
-      createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook, cutout})});
+      createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook, weather, cutout})});
     scene.add(clipmap.group);
+    applySnow();
     clipmap.update(focus.x, focus.z);
     // The ground darkens where it meets the water; a dry world has no shore.
     waterSheet.visible = world.waterLevel !== null;
@@ -415,6 +426,9 @@ export async function mountValley() {
     materialFolder.addColor(edit, 'color').name(label).onChange(value => appearance[key].value.set(value).multiplyScalar(2));
   }
   sandLookControls(materialFolder, sandLook);
+  const groundFolder = gui.addFolder('Ground state');
+  groundFolder.add(settings, 'wetness', 0, 1, .01).name('Ground wetness').onChange(applySnow);
+  groundFolder.add(settings, 'snow').name('Snow cover (3D where the balls roll)').onChange(applySnow);
   const playFolder = gui.addFolder('Test balls');
   playFolder.add(settings, 'ballRadius', PLAY.ball.minRadius, PLAY.ball.maxRadius, .1).name('Ball radius · m');
   playFolder.add({roll: () => { try { rollBall(); report(); } catch (error) { report(error); } }}, 'roll').name('Roll a ball from the focus');
@@ -452,6 +466,7 @@ export async function mountValley() {
     clipmap.update(focus.x, focus.z);
     updateDressing();
     play?.impacts.update(dt);
+    weather.update(dt, null);
     waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
     stage.update(camera);
     for (const {mesh, material, level} of clipmap.rings) {

@@ -372,7 +372,8 @@ const TERRAIN_FRAGMENT = /* glsl */`
   vec4 four = textureLod(terrainPaletteWeights, vec3(terrainWeightUV, float(group)), 0.0);
   paletteWeight[group * 4] = four.x; paletteWeight[group * 4 + 1] = four.y; paletteWeight[group * 4 + 2] = four.z; paletteWeight[group * 4 + 3] = four.w;
  }
- bool snowLies = terrainSnowCover && !terrainProp;
+ // Snow shows the snow set wherever it lies: as a layer of the field, or as the snow of the surface weather.
+ bool snowLies = (terrainSnowCover || surfaceWeather.y > 0.0) && !terrainProp;
  float strongest = .0001;
  vec3 climateTint = vec3(1.0);
  #ifdef TERRAIN_CLIMATE
