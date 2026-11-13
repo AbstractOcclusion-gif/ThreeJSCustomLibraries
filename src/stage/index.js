@@ -7,7 +7,7 @@ import {createLighting, syncLighting, LIGHTING_DEFAULTS, CLEAR_NOON_SUN} from '.
 import {createSkyDome, createSkyUniforms} from '../core/sky.js';
 
 export const STAGE_DEFAULTS = Object.freeze({
-  sunIntensity: 2.4, ambientIntensity: 1.3, sunElevation: 50, sunAzimuth: 35,   // degrees; azimuth 0 = +X, 90 = +Z
+  sunIntensity: LIGHTING_DEFAULTS.sunIntensity, ambientIntensity: LIGHTING_DEFAULTS.ambientIntensity, sunElevation: 50, sunAzimuth: 35,   // degrees; azimuth 0 = +X, 90 = +Z
   groundSize: 80, groundColor: 0x617a4b, skyRadius: 100, shadowMapSize: 1024, shadowExtent: 30,
 });
 const SUN_DISTANCE = 100;          // metres from the light target, so the shadow camera sees the whole stage

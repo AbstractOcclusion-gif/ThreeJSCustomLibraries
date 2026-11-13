@@ -58,6 +58,7 @@ export function createLeavedMaterial({lighting = createLighting(), leafTexture, 
         }
         vec3 color = shade(albedo, n, mix(0.35, 1.0, sunVisibility), 0.6 + 0.4 * clumps, 0.45);
         gl_FragColor = vec4(applyFog(color, distance(vWorld, cameraPosition)), 1.0);
+        #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
   });

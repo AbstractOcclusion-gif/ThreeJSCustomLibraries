@@ -13,8 +13,9 @@ import {LIGHTING_DEFAULTS, DEFAULT_SUN_DIRECTION} from './lighting.js';
 export function createEnvironment() {
   return {
     wind: {x: 0, z: 0, speed: 0, gust: 0},
-    sun: {direction: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize(), color: new THREE.Color(LIGHTING_DEFAULTS.sunColor)},
-    ambient: {sky: new THREE.Color(LIGHTING_DEFAULTS.hemiSky), ground: new THREE.Color(LIGHTING_DEFAULTS.hemiGround)},
+    sun: {direction: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize(), color: new THREE.Color(LIGHTING_DEFAULTS.sunColor).multiplyScalar(LIGHTING_DEFAULTS.sunIntensity)},
+    ambient: {sky: new THREE.Color(LIGHTING_DEFAULTS.hemiSky).multiplyScalar(LIGHTING_DEFAULTS.ambientIntensity),
+      ground: new THREE.Color(LIGHTING_DEFAULTS.hemiGround).multiplyScalar(LIGHTING_DEFAULTS.ambientIntensity)},
     light: new THREE.Color(1, 1, 1),
     daylight: 1, rain: 0, snow: 0,
   };

@@ -3,10 +3,14 @@
 //   vec3 shade(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap)
 //   vec3 applyFog(vec3 color, float viewDistance)
 // This file is the default implementation: sun + hemisphere + linear distance fog. A project may pass its own.
+// Light values are in Three's units (colour x intensity of a DirectionalLight / HemisphereLight) and shade() is the
+// diffuse term of Three's lit materials, so a hook surface and a MeshStandardMaterial of the same colour match under the
+// same lights. wrap > 0 softens the terminator (foliage); 0 is plain Lambert.
 import * as THREE from 'three';
 
 export const LIGHTING_DEFAULTS = Object.freeze({
   sunColor: 0xfff1dc, hemiSky: 0xb8cfe6, hemiGround: 0x4a4636, fogColor: 0xc9d6d4, fogNear: 450, fogFar: 1600,
+  sunIntensity: 2.4, ambientIntensity: 1.3,   // clear noon, as the basic stage's DirectionalLight and HemisphereLight
 });
 
 // Shared by every default (lighting hook, environment, sky, stage, spray): the direction toward the sun and the sky
@@ -17,10 +21,11 @@ export const CLEAR_NOON_SUN = Object.freeze([1, 0.96, 0.9]);
 export const LIGHT_GLSL = /* glsl */`
 uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uHemiSky; uniform vec3 uHemiGround;
 uniform vec3 uFogColor; uniform vec2 uFogRange;
+const float LIGHT_RECIPROCAL_PI = 0.3183098861837907;   // Lambert: a white surface returns irradiance / pi, as Three's BRDF
 vec3 shade(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap) {
   float ndl = max((dot(n, uSunDir) + wrap) / (1.0 + wrap), 0.0);
   vec3 hemi = mix(uHemiGround, uHemiSky, n.y * 0.5 + 0.5);
-  return albedo * (hemi * 0.55 * ao + uSunColor * ndl * sunVisibility * 1.1);
+  return albedo * LIGHT_RECIPROCAL_PI * (hemi * ao + uSunColor * ndl * sunVisibility);
 }
 vec3 applyFog(vec3 color, float viewDistance) {
   return mix(color, uFogColor, smoothstep(uFogRange.x, uFogRange.y, viewDistance));
@@ -40,9 +45,9 @@ export function createLightingUniforms(options = {}) {
   const o = {...LIGHTING_DEFAULTS, ...options};
   return {
     uSunDir: {value: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize()},
-    uSunColor: {value: new THREE.Color(o.sunColor)},
-    uHemiSky: {value: new THREE.Color(o.hemiSky)},
-    uHemiGround: {value: new THREE.Color(o.hemiGround)},
+    uSunColor: {value: new THREE.Color(o.sunColor).multiplyScalar(o.sunIntensity)},
+    uHemiSky: {value: new THREE.Color(o.hemiSky).multiplyScalar(o.ambientIntensity)},
+    uHemiGround: {value: new THREE.Color(o.hemiGround).multiplyScalar(o.ambientIntensity)},
     uFogColor: {value: new THREE.Color(o.fogColor)},
     uFogRange: {value: new THREE.Vector2(o.fogNear, o.fogFar)},
   };

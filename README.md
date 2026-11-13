@@ -183,6 +183,14 @@ Custom ShaderMaterials in the lib take `lighting: {glsl, uniforms}` (see `src/co
 `syncLighting(uniforms, {sun, hemi, fog})` drives it from ordinary Three lights, e.g. the ones the weather adapter animates.
 Water materials take a `sky: {glsl, uniforms, defines}` hook the same way (`proceduralSky()` from `src/water/sky-binding.js` is the default).
 
+**Two lighting paths, one result.** Standard materials (terrain, surfaces) are lit by Three: scene lights, shadows, fog,
+tone mapping and the scene's environment map. A custom ShaderMaterial cannot use those, so it takes the hook, which also
+carries a clear-noon sun and sky of its own: that is what lets a module run alone, with no stage and no lights. The hook
+speaks Three's units (colour x intensity) and its `shade()` is Three's diffuse term, so the same colour under the same
+lights looks the same on both paths. What the hook does not receive is shadow maps, the environment map (sky reflections,
+image-based ambient) and any light other than the sun and the hemisphere: a host that adds those lights only its standard
+materials with them.
+
 ## Bench
 
 ```sh
