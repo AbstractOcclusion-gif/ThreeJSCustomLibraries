@@ -41,6 +41,19 @@ const trees = new LeavedTrees({scene, lighting, sampleGround: heightAt, leafText
 const bushes = new LeavedTrees({scene, profile: 'bush', lighting, sampleGround: heightAt, leafTexture: free.atlas, leafRect: free.atlasRects.leaf});
 const treeTint = new THREE.Color();
 const shade = new THREE.Color('#2f6b1f'), highlight = new THREE.Color('#779640');
+const comparison = [
+  {profile: 'oak', x: -10, h: 5, r: 2.1},
+  {profile: 'birch', x: 0, h: 6, r: 1.35},
+  {profile: 'hawthorn', x: 10, h: 2.4, r: 1.5},
+];
+const variantRows = [4, 0, -4];
+const specimens = comparison.map(({profile, x, h, r}) => {
+  const plants = new LeavedTrees({scene, profile, lighting, sampleGround: heightAt, leafTexture: free.atlas, leafRect: free.atlasRects.leaf});
+  plants.place(variantRows.map((z, variant) => ({x, z, h, r, variant, yaw: 0, tint: highlight.toArray()})));
+  plants.setEnvironment(stage.environment);
+  return plants;
+});
+const view = {layout: 'Species comparison'};
 const meadowNoise = valueNoise(23);
 function placements() {
   const random = seededRandom(7), out = [];
@@ -106,6 +119,11 @@ const balls = createRollingBodies({scene, onContact(from, to, shape) {
   grass.addSweep({fromX: from.x, fromZ: from.z, toX: to.x, toZ: to.z, radius: footprint});
 }});
 function launchBalls(count, box = false) {
+  if (view.layout !== 'Meadow') {
+    view.layout = 'Meadow';
+    applyView();
+    viewControl.updateDisplay();
+  }
   balls.setTrunks(trees);
   const target = trees.items.reduce((nearest, item) =>
     !nearest || Math.hypot(item.x, item.z) < Math.hypot(nearest.x, nearest.z) ? item : nearest, null);
@@ -119,6 +137,17 @@ function launchBalls(count, box = false) {
 const rollBall = () => launchBalls(1);
 
 const gui = createBenchPanel('Vegetation');
+function applyView() {
+  const compare = view.layout === 'Species comparison';
+  trees.group.visible = bushes.group.visible = !compare;
+  for (const plants of specimens) plants.group.visible = compare;
+  $('species-order').hidden = !compare;
+  camera.position.set(...(compare ? [0, 10, 30] : [13, 5.5, 16]));
+  controls.target.set(0, compare ? 2.6 : 1, 0);
+  controls.update();
+}
+const viewControl = gui.add(view, 'layout', ['Species comparison', 'Meadow']).name('View').onChange(applyView);
+applyView();
 const stageUI = stageControls(gui, stage);
 Object.assign(stageUI.state, {windSpeed: START_WIND, gust: P.plants.gust}); stageUI.apply();
 stageUI.folder.controllersRecursive().forEach(c => c.updateDisplay());
@@ -147,6 +176,7 @@ startFrameLoop(renderer, (dt, now) => {
   const environment = stage.environment; environment.wind.gust = P.plants.gust;
   trees.setEnvironment(environment); bushes.setEnvironment(environment);
   trees.update(dt); bushes.update(dt);
+  for (const plants of specimens) if (plants.group.visible) plants.update(dt);
   balls.update(dt);
   grass.update(dt, {camera, environment, transmission: P.grass.transmission * environment.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density, recoverySeconds: P.interact.recoverySeconds});
   renderer.render(scene, camera);
@@ -156,6 +186,7 @@ document.body.dataset.ready = 'true';
 onLeave(() => {
   renderer.setAnimationLoop(null); unbindResize();
   grass?.dispose(); trees.dispose(); bushes.dispose(); free.grassGeometries.forEach(geometry => geometry.dispose()); free.dispose();
+  for (const plants of specimens) plants.dispose();
   stage.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
 });
 window.vegetationBench = {get grass() { return grass; }, trees, bushes, rollBall, bodies: balls, stage, scene, camera, renderer, pack};

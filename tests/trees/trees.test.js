@@ -11,7 +11,11 @@ test('profiles resolve by name or partial object and presets/trees mirror the bu
  assert.equal(bush.trunk.enabled, false);
  assert.equal(bush.cards.scale, .4);
  assert.deepEqual(bush.lobes.count, [3, 5]);
- assert.throws(() => resolveProfile('oak'), /Unknown/);
+ for (const name of ['oak', 'birch', 'hawthorn']) {
+  assert.equal(resolveProfile(name).name, name);
+  assert.ok(resolveProfile(name).branches);
+ }
+ assert.throws(() => resolveProfile('unknown-species'), /Unknown/);
  for (const name of ['tree', 'bush']) {
   const {schema, version, ...profile} = JSON.parse(fs.readFileSync(new URL(`../../presets/trees/${name}.json`, import.meta.url), 'utf8'));
   assert.equal(schema, 'three-kit.tree-profile');

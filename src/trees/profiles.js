@@ -18,8 +18,6 @@ export const BUSH_PROFILE = Object.freeze({
   lobes: {...TREE_PROFILE.lobes, count: [3, 5], spread: 1.15, dropScale: 1.4, baseY: .45, dropShare: .3},
   cards: {...TREE_PROFILE.cards, scale: .6},
 });
-export const PROFILES = Object.freeze({tree: TREE_PROFILE, bush: BUSH_PROFILE});
-
 const isObject = v => v && typeof v === 'object' && !Array.isArray(v);
 // Deep-merge a partial profile over a base (arrays replace). Unknown keys are kept so a bench can carry extras.
 export function mergeProfile(base, partial = {}) {
@@ -27,6 +25,30 @@ export function mergeProfile(base, partial = {}) {
   for (const [k, v] of Object.entries(partial)) out[k] = isObject(v) && isObject(base[k]) ? mergeProfile(base[k], v) : structuredClone(v);
   return out;
 }
+export const SPECIES = Object.freeze({
+  oak: mergeProfile(TREE_PROFILE, {
+    name: 'oak', trunk: {radiusBottom: .15, radiusTop: .065, topIntoCrown: .65},
+    crown: {depth: .56, mainRadius: .65, mainSquash: .92},
+    lobes: {count: [5, 7], radius: [.34, .53], offset: [.48, .92], drop: [-.24, .36]},
+    core: {radiusShare: .54}, cards: {size: [.21, .36], perUnitArea: 40},
+    branches: {origin: [.32, .62], radius: .081, tipRadius: .018, bend: .1},
+  }),
+  birch: mergeProfile(TREE_PROFILE, {
+    name: 'birch', trunk: {radiusBottom: .075, radiusTop: .019, color: '#d6c9b3', topIntoCrown: .91},
+    crown: {depth: .68, mainRadius: .43, mainSquash: .8, mainCentreY: .72},
+    lobes: {count: [8, 11], radius: [.19, .35], offset: [.31, .82], drop: [-.46, .42], baseY: .62},
+    core: {radiusShare: .35}, cards: {size: [.16, .29], perUnitArea: 56, yCompensation: .73},
+    branches: {origin: [.23, .61], radius: .045, tipRadius: .008, bend: .21},
+  }),
+  hawthorn: mergeProfile(BUSH_PROFILE, {
+    name: 'hawthorn', crown: {mainRadius: .49, mainCentreY: .67, fixedSquash: .59},
+    lobes: {count: [7, 9], radius: [.26, .45], offset: [.42, .86], drop: [-.24, .33], baseY: .52},
+    core: {radiusShare: .49}, cards: {size: [.26, .44], perUnitArea: 64},
+    branches: {origin: [0, .14], radius: .049, tipRadius: .012, bend: .04},
+  }),
+});
+export const PROFILES = Object.freeze({tree: TREE_PROFILE, bush: BUSH_PROFILE, ...SPECIES});
+
 export function resolveProfile(profile = 'tree') {
   if (typeof profile === 'string') { if (!PROFILES[profile]) throw Error(`Unknown tree profile '${profile}'`); return structuredClone(PROFILES[profile]); }
   return mergeProfile(PROFILES[profile.base ?? (profile.name === 'bush' ? 'bush' : 'tree')], profile);

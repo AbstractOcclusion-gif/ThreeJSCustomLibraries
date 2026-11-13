@@ -41,12 +41,14 @@ export class LeavedTrees {
     if (this.items.length) this.place(this.items, this.scaleMultiplier);
   }
 
-  /** items: {x, z, h, r, yaw?, tint?: [r, g, b] linear 0..1 | tint8?: [r, g, b] sRGB 0..255}; scaleMultiplier enlarges all. */
+  /** Items accept an optional zero-based variant; by default placement selects it by position. */
   place(items, scaleMultiplier = 1) {
     this.clear(); this.items = items; this.scaleMultiplier = scaleMultiplier;
     const cells = new Map(), V = this.profile.variants, C = this.cellSize;
     for (const item of items) {
-      const variant = Math.floor(hash2(item.x, item.z, 9) * V) % V, key = `${Math.floor(item.x / C)},${Math.floor(item.z / C)},${variant}`;
+      const variant = Number.isInteger(item.variant) && item.variant >= 0 && item.variant < V
+        ? item.variant : Math.floor(hash2(item.x, item.z, 9) * V) % V;
+      const key = `${Math.floor(item.x / C)},${Math.floor(item.z / C)},${variant}`;
       if (!cells.has(key)) cells.set(key, {variant, list: []});
       cells.get(key).list.push(item);
     }

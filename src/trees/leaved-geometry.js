@@ -31,7 +31,7 @@ function appendCore(out, P, noise, centre, radius, squash, seed, band) {
     if (y < 0) y *= P.crown.bottomFlatten;
     p.set(centre.x + x * radius * P.core.radiusShare * k, centre.y + y * radius * squash * P.core.radiusShare * k, centre.z + z * radius * P.core.radiusShare * k);
     const s = THREE.MathUtils.lerp(P.shade.bottom, P.shade.top, band(p.y)) * P.core.shade;
-    push(out, p, n, [0, 0], shade.setScalar(s), band(p.y) * .5, 0);
+    push(out, p, n, [0, 0], shade.setScalar(s), P.branches ? band(p.y) : band(p.y) * .5, 0);
   }
   const corners = sphere.index ? Array.from(sphere.index.array) : Array.from({length: source.count}, (_, i) => i);
   for (const i of corners) out.index.push(base + i);
@@ -57,7 +57,8 @@ function appendCards(out, P, noise, centre, radius, squash, seed, tintJitter, ba
     const size = THREE.MathUtils.lerp(C.size[0], C.size[1], hash2(k, seed, 3)) * C.scale;
     const u0 = ru + Math.floor(hash2(k, seed, 4) * C.subcells) * cellW, v0 = rv + Math.floor(hash2(k, seed, 5) * C.subcells) * cellH;
     shade.setScalar(THREE.MathUtils.lerp(P.shade.bottom, P.shade.top, band(p.y)) * tintJitter * (1 + C.tintJitter * (hash2(k, seed, 6) * 2 - 1)));
-    const sway = LEAF_SWAY.base + LEAF_SWAY.gain * band(p.y), base = out.positions.length / 3;
+    const sway = P.branches ? band(p.y) : LEAF_SWAY.base + LEAF_SWAY.gain * band(p.y);
+    const base = out.positions.length / 3;
     for (const [cx, cy, u, v] of [[-.5, -.5, u0, v0], [.5, -.5, u0 + cellW, v0], [.5, .5, u0 + cellW, v0 + cellH], [-.5, .5, u0, v0 + cellH]]) {
       corner.copy(tangent).multiplyScalar(cx * size).addScaledVector(bitangent, cy * size).applyQuaternion(tilt).applyQuaternion(spin);
       corner.y *= C.yCompensation; corner.add(p);
@@ -75,6 +76,41 @@ function appendTrunk(out, T, topY) {
     push(out, p.set(cx * T.radiusTop, topY, cz * T.radiusTop), n, [0, 0], color, 0, 0);
   }
   for (let s = 0; s < T.sides; s++) { const a0 = base + s * 2, a1 = base + ((s + 1) % T.sides) * 2; out.index.push(a0, a1, a0 + 1, a1, a1 + 1, a0 + 1); }
+}
+
+function appendBranch(out, profile, lobe, band) {
+  const {branches, trunk} = profile;
+  const root = new THREE.Vector3(0, THREE.MathUtils.lerp(...branches.origin, hash2(lobe.seed, 0, 9)), 0);
+  const tip = lobe.centre;
+  const elbow = root.clone().lerp(tip, .62);
+  elbow.y += branches.bend;
+  const color = new THREE.Color(trunk.color).convertSRGBToLinear();
+  const sides = trunk.sides;
+  const base = out.positions.length / 3;
+  const points = [root, elbow, tip];
+  const radii = [branches.radius, Math.sqrt(branches.radius * branches.tipRadius), branches.tipRadius];
+  const axis = new THREE.Vector3();
+  const across = new THREE.Vector3();
+  const around = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  const normal = new THREE.Vector3();
+  const position = new THREE.Vector3();
+  for (const [ring, point] of points.entries()) {
+    axis.subVectors(points[Math.min(ring + 1, points.length - 1)], points[Math.max(ring - 1, 0)]).normalize();
+    across.crossVectors(up, axis).normalize();
+    if (across.lengthSq() === 0) across.set(1, 0, 0);
+    around.crossVectors(axis, across);
+    for (let side = 0; side < sides; side++) {
+      const angle = side / sides * Math.PI * 2;
+      normal.copy(across).multiplyScalar(Math.cos(angle)).addScaledVector(around, Math.sin(angle));
+      position.copy(point).addScaledVector(normal, radii[ring]);
+      push(out, position, normal, [0, 0], color, ring === 0 ? 0 : band(point.y), 0);
+      if (ring === 0) continue;
+      const a = base + (ring - 1) * sides + side;
+      const b = base + (ring - 1) * sides + (side + 1) % sides;
+      out.index.push(a, b, a + sides, b, b + sides, a + sides);
+    }
+  }
 }
 
 // variant: integer silhouette index; leafRect: [u, v, w, h] of the leaf-cluster region in the leaf texture.
@@ -97,6 +133,7 @@ export function leavedTreeGeometry(profile, variant, leafRect = [0, 0, 1, 1]) {
   }
   for (const lobe of lobes) appendCore(out, P, noise, lobe.centre, lobe.radius, squash, lobe.seed, band);
   for (const lobe of lobes) appendCards(out, P, noise, lobe.centre, lobe.radius, squash, lobe.seed, lobe.tint, band, leafRect);
+  if (P.branches) for (const lobe of lobes.slice(P.trunk.enabled ? 1 : 0)) appendBranch(out, P, lobe, band);
   if (P.trunk.enabled) appendTrunk(out, P.trunk, crownBottomY + depth * P.trunk.topIntoCrown);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(out.positions, 3));
