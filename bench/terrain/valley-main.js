@@ -13,9 +13,10 @@ import {appearanceControls, sandLookControls, textureSetControls} from './contro
 import '../bench.css';
 
 // Terrain rings around the focus (createTerrainClipmap) and the wireframe colour of each ring, inner to outer.
-// A lighter terrain for a weak GPU: ?cells=128&levels=6 in the address overrides the defaults.
+// A lighter terrain for a weak GPU: ?cells=128&levels=6 in the address overrides the defaults. ?normalDetail=4 bakes
+// the lighting of the far relief finer still (1 turns the baking off).
 const query = new URLSearchParams(location.search);
-const CLIP = {...CLIPMAP_DEFAULTS, ...Object.fromEntries(['cells', 'levels'].filter(key => query.has(key)).map(key => [key, Number(query.get(key))]))};
+const CLIP = {...CLIPMAP_DEFAULTS, ...Object.fromEntries(['cells', 'levels', 'normalDetail'].filter(key => query.has(key)).map(key => [key, Number(query.get(key))]))};
 const LOD_COLORS = [0xffffff, 0x83e4bc, 0xffce78, 0xa7b2ff, 0xff9d9d, 0x9de0ff, 0xd5a7ff, 0xc8ff9d, 0xffd79d, 0x9dffd0];
 const VIEW = {
   fov: 48, near: .5, far: 6000, position: [110, 105, 145], target: [0, 8, 0],
@@ -428,6 +429,7 @@ export async function mountValley() {
     const edit = {color: '#' + appearance.roleTints.value[index].getHexString()};
     tints.addColor(edit, 'color').name(role).onChange(value => appearance.roleTints.value[index].set(value));
   });
+  materialFolder.add(appearance.bakedNormals, 'value', 0, 1, .01).name('Baked far relief lighting');
   materialFolder.add(appearance.farTiling.value, 'z', .05, 1, .01).name('Far texture size (1 = off)');
   materialFolder.add(appearance.farTiling.value, 'x', 10, 400, 5).name('Far textures from · m');
   materialFolder.add(appearance.farTiling.value, 'y', 20, 800, 5).name('Far textures fully at · m');
@@ -496,6 +498,7 @@ export async function mountValley() {
         + (worldBiomes.length > 1 ? '\nWorld · ' + worldBiomes.map((entry, index) => biomeName(index)).join(', ') : '')
         + `\nTexture sets in view · ${world.palette.sets.length} of ${WORLD_PALETTE_MAX}`
         + `\nTerrain upkeep per frame · ${timing.read()}`
+        + (clipmap.bakePending ? `\nFar relief lighting · baking, ${clipmap.bakePending} points to go` : '')
         + (missingSets.length ? '\nTexture sets not bundled, default used · ' + missingSets.join(', ') + ' · run npm run textures:fetch' : '');
     }
     renderer.render(scene, camera);

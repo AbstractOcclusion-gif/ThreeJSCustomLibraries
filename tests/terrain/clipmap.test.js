@@ -118,3 +118,37 @@ test('a clipmap moves its rings in steps, a few per update when asked, and bound
  }
  clipmap.dispose(); fresh.dispose();
 });
+
+test('far rings bake their normals in the background, finer than their mesh, and keep them through a move', () => {
+ const config = {levels: 3, cells: 16, cellSize: .5, normalSamples: 400};
+ const baked = createTerrainClipmap({world: world(), createMaterial: () => new THREE.MeshBasicMaterial(), ...config});
+ assert.throws(() => build({normalDetail: 0}), /normal bake/);
+ baked.update(0, 0);
+ // Only the ring with 2 m cells is far enough; its map has twice the cells of its mesh.
+ assert.equal(baked.rings[0].field.normalMap, undefined);
+ assert.equal(baked.rings[1].field.normalMap, undefined);
+ const map = baked.rings[2].field.normalMap, side = 16 * 2 + 1, data = map.image.data;
+ assert.equal(map.image.width, side);
+ assert.ok(baked.bakePending > 0, 'the first update leaves most of it to later ones');
+ const settle = clipmap => { for (let guard = 0; clipmap.bakePending > 0; guard++) { assert.ok(guard < 200); clipmap.update(...clipmap.at); } };
+ baked.at = [0, 0]; settle(baked);
+ for (let texel = 0; texel < side * side; texel++) assert.equal(data[texel * 4 + 3], 255);
+ // A texel holds the normal of the relief there, measured over the spacing of the map.
+ const source = world(), [originX, originZ] = baked.originOf(2), i = 9, j = 14, x = originX + i, z = originZ + j;
+ const dx = (source.heightAt(x + 1, z, 1) - source.heightAt(x - 1, z, 1)) / 2, dz = (source.heightAt(x, z + 1, 1) - source.heightAt(x, z - 1, 1)) / 2;
+ const length = Math.hypot(dx, 1, dz), texel = (j * side + i) * 4;
+ assert.equal(data[texel], Math.round((-dx / length * .5 + .5) * 255));
+ assert.equal(data[texel + 1], Math.round((-dz / length * .5 + .5) * 255));
+ // After a move the kept texels stay, the new strip starts blank, and once baked the map equals a fresh one.
+ baked.update(40, -24);
+ assert.ok(baked.bakePending > 0);
+ baked.at = [40, -24]; settle(baked);
+ const fresh = createTerrainClipmap({world: world(), createMaterial: () => new THREE.MeshBasicMaterial(), ...config});
+ fresh.update(40, -24); fresh.at = [40, -24]; settle(fresh);
+ assert.deepEqual(data, fresh.rings[2].field.normalMap.image.data);
+ const off = createTerrainClipmap({world: world(), createMaterial: () => new THREE.MeshBasicMaterial(), ...config, normalDetail: 1});
+ off.update(0, 0);
+ assert.equal(off.rings[2].field.normalMap, undefined);
+ assert.equal(off.bakePending, 0);
+ baked.dispose(); fresh.dispose(); off.dispose();
+});

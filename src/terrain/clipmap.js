@@ -9,6 +9,10 @@ export const CLIPMAP_DEFAULTS = Object.freeze({
   levels: 7,       // rings
   cells: 256,      // cells per side of a ring: a multiple of 4
   cellSize: .25,   // m, cell of the innermost ring
+  // Far rings are lit from a normal map baked from the relief at `normalDetail` times their mesh resolution, so the
+  // shape of the ground still reads where its cells are large. It applies to rings with cells of `normalFromCell` m
+  // or more and is baked in the background, `normalSamples` relief samples per update. normalDetail 1 turns it off.
+  normalDetail: 2, normalFromCell: 2, normalSamples: 5000,
   // snapCells: a ring moves by this many of its cells at a time (even, at most a quarter of `cells`): larger steps
   // mean fewer, larger updates. Default: a thirty-second of `cells`, between 2 and 8.
 });
@@ -31,7 +35,8 @@ const defaultSnap = cells => Math.min(SNAP.max, Math.max(SNAP.min, Math.floor(ce
 // hollow measured over those distances, whatever the cell of the ring, and each ring carries climateMap (moisture).
 // createMaterial(field, level) returns the material of a ring; tint(x, z, paint, color) writes an optional vertex colour.
 export function createTerrainClipmap({world, createMaterial, tint, ...overrides} = {}) {
-  const {levels, cells, cellSize, snapCells = defaultSnap(overrides.cells ?? CLIPMAP_DEFAULTS.cells)} = {...CLIPMAP_DEFAULTS, ...overrides};
+  const {levels, cells, cellSize, normalDetail, normalFromCell, normalSamples, snapCells = defaultSnap(overrides.cells ?? CLIPMAP_DEFAULTS.cells)} = {...CLIPMAP_DEFAULTS, ...overrides};
+  if (!Number.isInteger(normalDetail) || normalDetail < 1 || normalDetail > 4 || !(normalFromCell > 0) || !(normalSamples >= 1)) throw new RangeError('Invalid clipmap normal bake settings');
   const within = (value, [min, max]) => Number.isFinite(value) && value >= min && value <= max;
   if (!Number.isInteger(levels) || !within(levels, CLIPMAP_LIMITS.levels)) throw new RangeError('Invalid clipmap levels');
   if (!Number.isInteger(cells) || cells % 4 || !within(cells, CLIPMAP_LIMITS.cells)) throw new RangeError('Clipmap cells must be a multiple of 4 in range');
@@ -105,6 +110,14 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       field.paletteMap.needsUpdate = true;
     }
     if (climate) field.climateMap = createDataTexture(climate, n, n, {format: THREE.RedFormat, filter: 'linear'});
+    // The baked normals of a far ring: world normal x and z in rg, and in a how far the texel is baked (0: not yet,
+    // the material then keeps the normal of the mesh). `jobs`: the rectangles of texels still to bake.
+    let bake = null;
+    if (normalDetail > 1 && cell >= normalFromCell) {
+      const side = cells * normalDetail + 1, data = new Uint8Array(side * side * 4);
+      bake = {side, data, spacing: cell / normalDetail, jobs: []};
+      field.normalMap = createDataTexture(data, side, side, {filter: 'linear'});
+    }
     const material = createMaterial(field, level);
     // The chunks share the vertices of the ring; each has its own index and bounds.
     const ringGroup = new THREE.Group();
@@ -123,18 +136,19 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       slopeStride: Math.max(1, Math.round(reach.slope / cell)), hollowStride: Math.max(1, Math.round(reach.hollow / cell)),
       lattice: cell < HOLLOW_LATTICE.maxCell ? new Map() : null,
     };
-    const ring = {level, cell, size, heights, weights, forest, sand, palette, climate, signals, positions, normals, coarse, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
+    const ring = {level, cell, size, heights, weights, forest, sand, palette, climate, signals, bake, positions, normals, coarse, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
     if (tint) colour(ring);
     return ring;
   });
 
   // Moves what a ring keeps when its origin shifts by (dx, dz) cells: the new [i, j] is the old [i + dx, j + dz].
-  function slide(array, stride, dx, dz) {
-    const row = n * stride;
+  // `side`: samples per side of the array (the vertices of a ring by default).
+  function slide(array, stride, dx, dz, side = n) {
+    const row = side * stride;
     if (dz > 0) array.copyWithin(0, dz * row);
-    else if (dz < 0) array.copyWithin(-dz * row, 0, (n + dz) * row);
+    else if (dz < 0) array.copyWithin(-dz * row, 0, (side + dz) * row);
     if (!dx) return;
-    for (let j = 0; j < n; j++) {
+    for (let j = 0; j < side; j++) {
       const start = j * row, end = start + row;
       if (dx > 0) array.copyWithin(start, start + dx * stride, end);
       else array.copyWithin(start - dx * stride, start, end + dx * stride);
@@ -252,7 +266,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     const {field, origin, cell, low, high} = ring;
     field.bounds.set(origin[0], origin[1], ring.size, ring.size);
     ring.group.position.set(origin[0], 0, origin[1]);
-    for (const texture of Object.values(field)) if (texture.isTexture) texture.needsUpdate = true;
+    for (const [name, texture] of Object.entries(field)) if (texture.isTexture && name !== 'normalMap') texture.needsUpdate = true;
     for (const attribute of Object.values(ring.attributes)) attribute.needsUpdate = true;
     // Bounds of each chunk, for the renderer to skip the ones out of view: its square, over the heights of the ring.
     const span = chunkCells * cell, radius = Math.hypot(span, span, high - low) / 2;
@@ -260,6 +274,68 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       geometry.boundingSphere.center.set((chunkX + .5) * span, (low + high) / 2, (chunkZ + .5) * span);
       geometry.boundingSphere.radius = radius;
     }
+  }
+
+  // Queues every texel of a ring's normal map, or after a move of (dx, dz) cells keeps what stays and queues the rest.
+  function queueBake(ring, dx, dz, all) {
+    const {bake} = ring;
+    if (!bake) return;
+    const {side, data} = bake, last = side - 1, fx = dx * normalDetail, fz = dz * normalDetail;
+    if (all) { data.fill(0); bake.jobs = [[0, last, 0, last]]; ring.field.normalMap.needsUpdate = true; return; }
+    slide(data, 4, fx, fz, side);
+    // Pending rectangles move with the texels they name; the strips that came into view are blank and queued.
+    bake.jobs = bake.jobs.map(([i0, i1, j0, j1]) => [Math.max(0, i0 - fx), Math.min(last, i1 - fx), Math.max(0, j0 - fz), Math.min(last, j1 - fz)])
+      .filter(([i0, i1, j0, j1]) => i0 <= i1 && j0 <= j1);
+    const strips = [];
+    if (fx > 0) strips.push([side - fx, last, 0, last]); else if (fx < 0) strips.push([0, -fx - 1, 0, last]);
+    if (fz > 0) strips.push([0, last, side - fz, last]); else if (fz < 0) strips.push([0, last, 0, -fz - 1]);
+    for (const [i0, i1, j0, j1] of strips) {
+      for (let j = j0; j <= j1; j++) data.fill(0, (j * side + i0) * 4, (j * side + i1 + 1) * 4);
+      bake.jobs.unshift([i0, i1, j0, j1]);   // the newest ground first
+    }
+    ring.field.normalMap.needsUpdate = true;
+  }
+
+  // Bakes queued normals, nearest ring first, for at most `budget` relief samples. Returns the samples spent.
+  const rowAbove = [], rowHere = [], rowBelow = [];
+  function bakeNormals(budget) {
+    let spent = 0;
+    for (const ring of rings) {
+      const {bake, origin} = ring;
+      if (!bake || !origin) continue;
+      const {side, data, spacing, jobs} = bake;
+      const heightRow = (target, j, i0, i1) => {
+        for (let i = i0 - 1; i <= i1 + 1; i++) target[i - i0 + 1] = world.heightAt(origin[0] + i * spacing, origin[1] + j * spacing, spacing);
+        spent += i1 - i0 + 3;
+      };
+      let wrote = false;
+      while (jobs.length && spent < budget) {
+        const job = jobs[0], [i0, i1] = job;
+        let above = rowAbove, here = rowHere, below = rowBelow;
+        heightRow(above, job[2] - 1, i0, i1);
+        heightRow(here, job[2], i0, i1);
+        while (job[2] <= job[3]) {
+          const j = job[2];
+          heightRow(below, j + 1, i0, i1);
+          for (let i = i0; i <= i1; i++) {
+            const k = i - i0 + 1;
+            const dx = (here[k + 1] - here[k - 1]) / (2 * spacing), dz = (below[k] - above[k]) / (2 * spacing);
+            const length = Math.hypot(dx, 1, dz), texel = (j * side + i) * 4;
+            data[texel] = Math.round((-dx / length * .5 + .5) * BYTE);
+            data[texel + 1] = Math.round((-dz / length * .5 + .5) * BYTE);
+            data[texel + 3] = BYTE;
+          }
+          wrote = true;
+          job[2]++;
+          [above, here, below] = [here, below, above];
+          if (spent >= budget) break;
+        }
+        if (job[2] > job[3]) jobs.shift();
+      }
+      if (wrote) ring.field.normalMap.needsUpdate = true;
+      if (spent >= budget) break;
+    }
+    return spent;
   }
 
   let samplesGenerated = 0;
@@ -271,6 +347,8 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     get extent() { return rings.at(-1).size; },
     // Samples generated by the last update: a measure of its cost.
     get samplesGenerated() { return samplesGenerated; },
+    // Texels of the far normal maps still to bake: 0 once the far relief is fully lit.
+    get bakePending() { return rings.reduce((total, {bake}) => total + (bake ? bake.jobs.reduce((sum, [i0, i1, j0, j1]) => sum + (i1 - i0 + 1) * (j1 - j0 + 1), 0) : 0), 0); },
     originOf: level => rings[level].origin,
     heightAt: (x, z) => world.heightAt(x, z),
     // Centres the rings on a point. Returns true when a ring moved. maxRings spreads the work: at most that many
@@ -300,12 +378,14 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
           }
         }
         fill(ring, dx, dz, all);
+        queueBake(ring, dx, dz, all);
         samplesGenerated += all ? count : count - (n - Math.abs(dx)) * (n - Math.abs(dz));
         lift(ring);
         upload(ring);
         moved = true;
         budget--;
       }
+      bakeNormals(normalSamples);
       if (moved) {
         rings.forEach((ring, level) => {
           const inner = rings[level - 1];

@@ -68,6 +68,7 @@ export function createTerrainAppearance() {
   // slopes. x, y: the distances (m) between which the near size gives way to the far one; z: the far size as a share
   // of the near tiling (1 = off).
   farTiling: {value: new THREE.Vector3(60, 220, .23)},
+  bakedNormals: {value: 1},    // share of the baked normals of the far rings (0 = the normals of the mesh)
   waterLevel: {value: 0}, shoreWidth: {value: .8}, shoreWetness: {value: 1},
  };
 }
@@ -111,6 +112,10 @@ uniform float terrainRockScale;
 uniform float terrainWaterLevel, terrainShoreWidth, terrainShoreWetness, terrainContactBand;
 uniform bool terrainProp;
 uniform bool terrainSnowCover;
+#ifdef TERRAIN_NORMAL_MAP
+uniform sampler2D terrainNormalMap;   // rg = world normal x and z, a = how far the texel is baked
+uniform float terrainBakedNormals;
+#endif
 uniform vec4 terrainCutout;   // world XZ origin and size of a square this material leaves to another mesh; no size: none
 #ifdef TERRAIN_PALETTE
 // Palette mode: TERRAIN_PALETTE_SIZE texture sets, each with its own weight (four per slice of the weight array)
@@ -350,6 +355,19 @@ const TERRAIN_FRAGMENT = /* glsl */`
  vec2 terrainSize = vec2(textureSize(terrainHeights, 0));
  vec2 terrainGrid = clamp(terrainUV, 0.0, 1.0) * (terrainSize - 1.0);
  vec3 terrainNormal = inverseTransformDirection(surfaceGeometricNormal, viewMatrix);
+ #ifdef TERRAIN_NORMAL_MAP
+ {
+  // The normal baked from the relief, finer than the mesh; where it is not baked yet (a = 0) the mesh's own stays.
+  vec2 mapSize = vec2(textureSize(terrainNormalMap, 0));
+  vec4 baked = texture2D(terrainNormalMap, (clamp(terrainUV, 0.0, 1.0) * (mapSize - 1.0) + .5) / mapSize);
+  float share = baked.a * terrainBakedNormals;
+  if (share > 0.0) {
+   vec2 tilt = baked.rg * 2.0 - 1.0;
+   terrainNormal = normalize(mix(terrainNormal, vec3(tilt.x, sqrt(max(1.0 - dot(tilt, tilt), 0.0)), tilt.y), share));
+   normal = transformDirection(terrainNormal, viewMatrix);
+  }
+ }
+ #endif
  vec3 terrainGround = vSurfaceWorld;
  float terrainContact = 1.0;
  float terrainGroundRelief = .5;
@@ -624,6 +642,7 @@ export function createTerrainMaterial(parameters = {}, {
   // cutout: a shared {value: Vector4(x, z, sizeX, sizeZ)}: the square of ground another mesh draws in this one's place.
   terrainCutout: cutout ?? {value: new THREE.Vector4()},
   ...(field.morph && {terrainMorph: field.morph}),
+  ...(field.normalMap && {terrainNormalMap: {value: field.normalMap}, terrainBakedNormals: appearance.bakedNormals ?? {value: 1}}),
   terrainLayerArray: {value: layerArray ?? null},
   ...(palette && {terrainPaletteWeights: {value: field.paletteMap}, terrainPaletteRole: {value: paletteRoles}, terrainPaletteSnow: {value: palette.roles.indexOf('snow')},
    terrainHarmony: appearance.harmony, terrainRoleTint: appearance.roleTints, terrainEdgeFade: appearance.edgeFade, terrainDetailFade: appearance.detailFade, terrainFarTiling: appearance.farTiling,
@@ -677,6 +696,8 @@ export function createTerrainMaterial(parameters = {}, {
  // field.morph (a clipmap ring): toward the edge of the ring the ground eases into the coarser shape of the ring
  // outside it (the `terrainCoarse` height of each vertex), so detail grows in as the ring approaches and never pops.
  if (field.morph) material.defines = {...material.defines, TERRAIN_MORPH: 1};
+ // field.normalMap (a far clipmap ring): the ground is lit from normals baked finer than its mesh.
+ if (field.normalMap) material.defines = {...material.defines, TERRAIN_NORMAL_MAP: 1};
  material.onBeforeCompile = shader => {
   compileSurface(shader);
   Object.assign(shader.uniforms, uniforms);
