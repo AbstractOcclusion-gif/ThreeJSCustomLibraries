@@ -25,7 +25,7 @@ export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
 export function appearanceControls(gui, appearance, title = 'Triplanar textures') {
   const textures = gui.addFolder(title);
   for (const [key, label, min, max, step] of [
-    ['rockScale', 'Rock tiling', .15, 1.2, .01],
+    ['rockScale', 'Rock tiling', .05, 1.2, .01],
     ['tiling', 'Tiling', .1, 2, .05],
     ['sharpness', 'Blend sharpness', 1, 8, .25],
     ['antiTiling', 'Break up repetition', 0, 1, .05],

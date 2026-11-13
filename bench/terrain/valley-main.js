@@ -47,8 +47,9 @@ const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, trackResolution: 512, t
 // Rings moved per frame: one keeps the cost of a frame even; the others catch up on the next frames.
 const RINGS_PER_FRAME = 1;
 const VIEWS = ['Textures', 'Layer colours', 'Biome colours', 'LOD wireframe'];
-// Softer junctions than the library default: they read better at the scale of a landscape.
-const TOOL_APPEARANCE = {edgeSharpness: .25};
+// Tuned for a landscape rather than a close-up: softer junctions than the library default, and rock drawn large
+// (one repeat every 12 m or so with the default tiling) so a cliff reads as one rock face and not as a pattern.
+const TOOL_APPEARANCE = {edgeSharpness: .25, rockScale: .18};
 // Hand-placed biome map: regions per side, and one debug colour per world biome (also the 'Biome colours' view).
 const MAP = {columns: 8, rows: 8, autoAlpha: .35, focusColor: '#ffffff', focusRadius: 4, font: '11px sans-serif', ink: '#10201f'};
 const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48fd1, 0xe0d36a, 0x8c9a6b,
