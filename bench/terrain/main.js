@@ -65,7 +65,7 @@ const surfaceLook = createSurfaceLook();
 const drainage = createTerrainDrainage(field, {maxPuddleDepth: puddle.maxDepth});
 let drainageDirty = false, meltDrainageDirty = false, meltFlowDirty = false, meltBakeElapsed = 0;
 let rollingBakeElapsed = 0;
-const {layerArray, detail, rock, snowMaterial} = await loadTerrainTextures(renderer, {snowDetail: true});
+const {layerArray, layerDetailArray, detail, rock, snowMaterial} = await loadTerrainTextures(renderer, {snowDetail: true, layerDetail: true});
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;   // each puddle has its own local fill level
 const surfaceWeather = createSurfaceWeather();
@@ -76,7 +76,7 @@ const rills = {value: 1};
 const puddleFill = {value: 0};
 const snowLook = createSnowLook();
 const sandLook = createSandLook();
-const terrainMaterialOptions = {field, layerArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial, snowLook, sandLook, rainAmount, look: surfaceLook};
+const terrainMaterialOptions = {field, layerArray, layerDetailArray, detailNormal: detail, appearance, weather: surfaceWeather, snowMaterial, snowLook, sandLook, rainAmount, look: surfaceLook};
 const groundMaterial = createTerrainMaterial({}, {
   ...terrainMaterialOptions, tracks, trackContrast: TRACK.contrast,
   drainage: {texture: drainage.texture, fill: puddleFill},
@@ -336,6 +336,6 @@ onLeave(() => {
   impacts.dispose();
   runoff.dispose();
   drainage.dispose();
-  tracks.dispose(); field.dispose(); groundMaterial.dispose(); layerArray.dispose(); detail.dispose(); rock.dispose();
+  tracks.dispose(); field.dispose(); groundMaterial.dispose(); layerArray.dispose(); layerDetailArray.dispose(); detail.dispose(); rock.dispose();
   stage.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
 });

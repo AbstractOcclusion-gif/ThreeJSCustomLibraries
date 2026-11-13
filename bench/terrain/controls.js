@@ -28,6 +28,7 @@ export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
     ['heightBlend', 'Texture height blend', 0, 1, .05],
     ['edgeSharpness', 'Junction sharpness', 0, 1, .01],
     ['edgeBreakup', 'Junction break-up', 0, 1, .01],
+    ['layerDetail', 'Per-layer normal and roughness', 0, 1, .01],
   ]) {
     textures.add(appearance[key], 'value', min, max, step).name(label);
   }

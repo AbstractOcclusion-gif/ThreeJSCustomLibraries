@@ -46,6 +46,20 @@ test('digging bare soil pushes a share of it up into a rim and validates the sha
  field.dispose();
 });
 
+test('terrain material takes per-layer detail only with one slice per packed layer', async () => {
+ const {createTerrainMaterial, TERRAIN_LAYERS, TERRAIN_LAYER_ROUGHNESS} = await import('../../src/terrain/index.js');
+ assert.deepEqual(Object.keys(TERRAIN_LAYER_ROUGHNESS), TERRAIN_LAYERS);
+ const nx = 5, nz = 5, field = createTerrainField({origin: [0, 0], size: [4, 4], resolution: [nx, nz], heights: new Float32Array(nx * nz), seed: 3});
+ const array = depth => new THREE.DataArrayTexture(new Uint8Array(4 * depth), 1, 1, depth);
+ const layerArray = array(TERRAIN_LAYERS.length), detailNormal = new THREE.DataTexture(new Uint8Array(4), 1, 1);
+ const plain = createTerrainMaterial({}, {field, layerArray, detailNormal});
+ assert.equal(plain.defines.TERRAIN_LAYER_DETAIL, undefined);
+ const detailed = createTerrainMaterial({}, {field, layerArray, layerDetailArray: array(TERRAIN_LAYERS.length), detailNormal});
+ assert.equal(detailed.defines.TERRAIN_LAYER_DETAIL, 1);
+ assert.throws(() => createTerrainMaterial({}, {field, layerArray, layerDetailArray: array(2), detailNormal}), /one slice per layer/);
+ plain.dispose(); detailed.dispose(); field.dispose();
+});
+
 test('ocean coast terrain builds on the lighting hook and shares its uniforms', () => {
  const scene = new THREE.Scene(), lighting = createLighting();
  const coast = new OceanCoastTerrain({scene, settings: {centerZ: -220}, lighting});

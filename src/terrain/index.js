@@ -36,12 +36,16 @@ export function createSandLook() {
  };
 }
 
+// Roughness of each layer where it has no roughness map (TERRAIN_LAYERS order).
+export const TERRAIN_LAYER_ROUGHNESS = Object.freeze({grass: .95, rock: .85, snow: .82, mud: .75, forest: .92});
+
 export function createTerrainAppearance() {
  return {
   tiling: {value: .45}, rockScale: {value: .55}, sharpness: {value: 3.5}, antiTiling: {value: .85},
   detailStrength: {value: .6}, heightBlend: {value: .24},
   edgeSharpness: {value: .6},  // junctions between layers: 0 = even fade, 1 = the layer standing higher wins outright
   edgeBreakup: {value: .6},    // fine wander of the junctions that hides the steps of the weight grid (0 = off)
+  layerDetail: {value: 1},     // share of each layer's own normal and roughness (needs layerDetailArray): 0 = shared rock detail
   waterLevel: {value: 0}, shoreWidth: {value: .8}, shoreWetness: {value: 1},
  };
 }
@@ -67,6 +71,12 @@ uniform sampler2D terrainForestWeight;
 #endif
 ${TERRAIN_LAYERS.map((name, index) => `const int TERRAIN_${name.toUpperCase()} = ${index};`).join('\n')}
 const int TERRAIN_DETAIL = ${TERRAIN_LAYERS.length};
+#ifdef TERRAIN_LAYER_DETAIL
+// rg = tangent normal xy (OpenGL), b = roughness, one slice per layer. Sampled as layer TERRAIN_LAYER_SURFACE + index.
+uniform highp sampler2DArray terrainLayerDetailArray;
+uniform float terrainLayerDetail;
+const int TERRAIN_LAYER_SURFACE = 16;
+#endif
 #ifdef TERRAIN_SNOW_DETAIL
 const int TERRAIN_SNOW_NORMAL = TERRAIN_DETAIL + 1;
 const int TERRAIN_SNOW_ROUGHNESS = TERRAIN_DETAIL + 2;
@@ -213,6 +223,9 @@ float terrainHeightAt(vec2 grid, out vec3 groundNormal) {
 
 vec4 terrainSample(int layer, vec2 uv, vec2 dx, vec2 dy) {
  if (layer == TERRAIN_DETAIL) return textureGrad(terrainDetail, uv, dx, dy);
+ #ifdef TERRAIN_LAYER_DETAIL
+ if (layer >= TERRAIN_LAYER_SURFACE) return textureGrad(terrainLayerDetailArray, vec3(uv, float(layer - TERRAIN_LAYER_SURFACE)), dx, dy);
+ #endif
  #ifdef TERRAIN_SNOW_DETAIL
  if (layer == TERRAIN_SNOW_NORMAL) return textureGrad(terrainSnowNormal, uv, dx, dy);
  if (layer == TERRAIN_SNOW_ROUGHNESS) return textureGrad(terrainSnowRoughness, uv, dx, dy);
@@ -251,20 +264,34 @@ vec4 terrainTriplanar(int layer, vec3 p, vec3 dx, vec3 dy, vec3 signN, vec3 axes
  return color;
 }
 
-vec3 terrainNormalDetail(vec3 p, vec3 dx, vec3 dy, vec3 signN, vec3 axes) {
- vec3 detail = vec3(0.0);
+// Tangent normal (xyz) and roughness (w) of a detail sample: the shared detail is an RGB normal map without
+// roughness (w = 0), a layer surface sample packs normal xy and roughness.
+vec4 terrainDetailTexel(int layer, vec4 texel) {
+ #ifdef TERRAIN_LAYER_DETAIL
+ if (layer >= TERRAIN_LAYER_SURFACE) {
+  vec2 tilt = texel.xy * 2.0 - 1.0;
+  return vec4(tilt, sqrt(max(1.0 - dot(tilt, tilt), 0.0)), texel.b);
+ }
+ #endif
+ return vec4(normalize(texel.xyz * 2.0 - 1.0), 0.0);
+}
+
+// Triplanar detail of the shared normal map (TERRAIN_DETAIL) or of one layer (TERRAIN_LAYER_SURFACE + index):
+// xyz = offset to add to the world normal, w = roughness.
+vec4 terrainNormalDetail(int layer, vec3 p, vec3 dx, vec3 dy, vec3 signN, vec3 axes) {
+ vec4 detail = vec4(0.0);
  if (axes.x > 0.0) {
-  vec3 n = normalize(terrainProjection(TERRAIN_DETAIL, p.zy, dx.zy, dy.zy, -signN.x).xyz * 2.0 - 1.0);
-  detail += vec3((n.z - 1.0) * signN.x, n.y, -n.x * signN.x) * axes.x;
+  vec4 n = terrainDetailTexel(layer, terrainProjection(layer, p.zy, dx.zy, dy.zy, -signN.x));
+  detail += vec4((n.z - 1.0) * signN.x, n.y, -n.x * signN.x, n.w) * axes.x;
  }
  if (axes.y > 0.0) {
   vec2 orientation = vec2(1.0, -signN.y);
-  vec3 n = normalize(terrainTexture(TERRAIN_DETAIL, p.xz * orientation, dx.xz * orientation, dy.xz * orientation).xyz * 2.0 - 1.0);
-  detail += vec3(n.x, (n.z - 1.0) * signN.y, -n.y * signN.y) * axes.y;
+  vec4 n = terrainDetailTexel(layer, terrainTexture(layer, p.xz * orientation, dx.xz * orientation, dy.xz * orientation));
+  detail += vec4(n.x, (n.z - 1.0) * signN.y, -n.y * signN.y, n.w) * axes.y;
  }
  if (axes.z > 0.0) {
-  vec3 n = normalize(terrainProjection(TERRAIN_DETAIL, p.xy, dx.xy, dy.xy, signN.z).xyz * 2.0 - 1.0);
-  detail += vec3(n.x * signN.z, n.y, (n.z - 1.0) * signN.z) * axes.z;
+  vec4 n = terrainDetailTexel(layer, terrainProjection(layer, p.xy, dx.xy, dy.xy, signN.z));
+  detail += vec4(n.x * signN.z, n.y, (n.z - 1.0) * signN.z, n.w) * axes.z;
  }
  return detail;
 }
@@ -304,7 +331,8 @@ const TERRAIN_FRAGMENT = /* glsl */`
   snow = terrainTriplanar(TERRAIN_SNOW, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
   terrainSnowAlbedo = snow.rgb;
  }
- if (terrainWeights.w > 0.0) mud = terrainTriplanar(TERRAIN_MUD, terrainP * 1.4, terrainDx * 1.4, terrainDy * 1.4, terrainSign, terrainAxes);
+ const float mudScale = 1.4;   // mud texture repeats per repeat of the other layers
+ if (terrainWeights.w > 0.0) mud = terrainTriplanar(TERRAIN_MUD, terrainP * mudScale, terrainDx * mudScale, terrainDy * mudScale, terrainSign, terrainAxes);
  vec4 microHeight = vec4(grass.a, rock.a, snow.a, mud.a);
  terrainWeights *= exp2((microHeight - .5) * terrainHeightBlend * 8.0);
  vec4 forest = vec4(0.0);
@@ -330,7 +358,30 @@ const TERRAIN_FRAGMENT = /* glsl */`
  }
  vec3 terrainColor = grass.rgb * terrainWeights.x + rock.rgb * terrainWeights.y + snow.rgb * terrainWeights.z + mud.rgb * terrainWeights.w + forest.rgb * forestWeight;
  diffuseColor.rgb = mix(diffuseColor.rgb, terrainColor, terrainContact);
- roughnessFactor = mix(roughnessFactor, dot(terrainWeights, vec4(.95, .85, .82, .75)) + .92 * forestWeight, terrainContact);
+ float layerRoughness = dot(terrainWeights, vec4(${['grass', 'rock', 'snow', 'mud'].map(name => TERRAIN_LAYER_ROUGHNESS[name]).join(', ')})) + ${TERRAIN_LAYER_ROUGHNESS.forest} * forestWeight;
+ vec3 layerNormalDetail = vec3(0.0);
+ float layerDetailShare = 0.0;
+ #ifdef TERRAIN_LAYER_DETAIL
+ layerDetailShare = terrainLayerDetail;
+ if (layerDetailShare > 0.0) {
+  // Each layer brings its own normal and roughness, blended with the weights of its colour. A layer under
+  // minShare is not sampled: it would not show.
+  const float minShare = .02;
+  vec4 surface = vec4(0.0);
+  float sampled = 0.0;
+  if (terrainWeights.x > minShare) { surface += terrainNormalDetail(TERRAIN_LAYER_SURFACE + TERRAIN_GRASS, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes) * terrainWeights.x; sampled += terrainWeights.x; }
+  if (terrainWeights.y > minShare) { surface += terrainNormalDetail(TERRAIN_LAYER_SURFACE + TERRAIN_ROCK, terrainP * terrainRockScale, terrainDx * terrainRockScale, terrainDy * terrainRockScale, terrainSign, terrainAxes) * terrainWeights.y; sampled += terrainWeights.y; }
+  if (terrainWeights.z > minShare) { surface += terrainNormalDetail(TERRAIN_LAYER_SURFACE + TERRAIN_SNOW, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes) * terrainWeights.z; sampled += terrainWeights.z; }
+  if (terrainWeights.w > minShare) { surface += terrainNormalDetail(TERRAIN_LAYER_SURFACE + TERRAIN_MUD, terrainP * mudScale, terrainDx * mudScale, terrainDy * mudScale, terrainSign, terrainAxes) * terrainWeights.w; sampled += terrainWeights.w; }
+  #ifdef TERRAIN_FOREST_FLOOR
+  if (forestWeight > minShare) { surface += terrainNormalDetail(TERRAIN_LAYER_SURFACE + TERRAIN_FOREST, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes) * forestWeight; sampled += forestWeight; }
+  #endif
+  surface /= max(sampled, .0001);
+  layerNormalDetail = surface.xyz;
+  layerRoughness = mix(layerRoughness, surface.w, layerDetailShare);
+ }
+ #endif
+ roughnessFactor = mix(roughnessFactor, layerRoughness, terrainContact);
  metalnessFactor *= 1.0 - terrainContact;
  vec3 sandNormal = terrainNormal;
  #ifdef TERRAIN_SAND
@@ -368,8 +419,10 @@ const TERRAIN_FRAGMENT = /* glsl */`
  }
  #endif
  if (terrainDetailStrength > 0.0) {
-  vec3 detail = terrainNormalDetail(terrainP * 3.4, terrainDx * 3.4, terrainDy * 3.4, terrainSign, terrainAxes);
-  // The shared rock detail does not belong on sand.
+  const float sharedDetailScale = 3.4;   // repeats of the shared detail normal per layer repeat
+  vec3 detail = layerDetailShare < 1.0 ? terrainNormalDetail(TERRAIN_DETAIL, terrainP * sharedDetailScale, terrainDx * sharedDetailScale, terrainDy * sharedDetailScale, terrainSign, terrainAxes).xyz : vec3(0.0);
+  detail = mix(detail, layerNormalDetail, layerDetailShare);
+  // Neither the shared rock detail nor the layer under the sand belongs on sand.
   vec3 detailedNormal = normalize(terrainNormal + detail * terrainDetailStrength * (1.0 - sandCover));
   normal = normalize(mix(normal, transformDirection(detailedNormal, viewMatrix), terrainContact));
  }
@@ -384,12 +437,17 @@ const TERRAIN_FRAGMENT = /* glsl */`
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, ...surface
+ field, layers, layerArray, layerDetailArray, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, ...surface
 } = {}) {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
   TERRAIN_LAYERS.slice(0, 4).every(name => layers?.[name]?.isTexture);
  if (!appearance.edgeSharpness || !appearance.edgeBreakup) throw Error('Terrain appearance needs edgeSharpness and edgeBreakup: build it with createTerrainAppearance()');
+ if (layerDetailArray !== undefined) {
+  if (!layerArray) throw Error('Terrain layer detail needs the packed layer array');
+  if (!layerDetailArray?.isDataArrayTexture || layerDetailArray.image.depth !== layerArray.image.depth) throw Error('Terrain layer detail needs one slice per layer of the layer array');
+  if (!appearance.layerDetail) throw Error('Terrain appearance needs layerDetail: build it with createTerrainAppearance()');
+ }
  if (!field?.heightMap || !field?.weightMap || !hasLayers || !detailNormal?.isTexture) {
   throw Error('Terrain material needs a field, layer textures and a detail normal');
  }
@@ -404,6 +462,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (field.forestMap) material.defines = {...material.defines, TERRAIN_FOREST_FLOOR: 1};
  if (field.sandMap) material.defines = {...material.defines, TERRAIN_SAND: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
+ if (layerDetailArray) material.defines = {...material.defines, TERRAIN_LAYER_DETAIL: 1};
  const compileSurface = material.onBeforeCompile;
  const uniforms = {
   ...(drainage && puddleSky),
@@ -415,6 +474,7 @@ export function createTerrainMaterial(parameters = {}, {
   terrainPuddleFill: drainage?.fill ?? {value: 0},
   terrainHeights: {value: field.heightMap}, terrainLayers: {value: field.weightMap}, terrainBounds: {value: field.bounds},
   terrainLayerArray: {value: layerArray ?? null},
+  terrainLayerDetailArray: {value: layerDetailArray ?? null}, terrainLayerDetail: appearance.layerDetail ?? {value: 0},
   terrainGrass: {value: layers?.grass}, terrainRock: {value: layers?.rock}, terrainSnow: {value: layers?.snow}, terrainMud: {value: layers?.mud},
   terrainForest: {value: layers?.forest}, terrainForestWeight: {value: field.forestMap ?? null},
   terrainSandWeight: {value: field.sandMap ?? null}, terrainSandColor: sandLook.color, terrainSandHeading: sandLook.rippleHeading,
