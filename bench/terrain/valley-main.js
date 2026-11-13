@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {cloneBiome, createTerrainAppearance, createTerrainWorld, createTerrainField, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, terrainWindowOrigin, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES} from '../../src/terrain/index.js';
+import {CLIPMAP_DEFAULTS, cloneBiome, createTerrainAppearance, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
@@ -8,18 +8,21 @@ import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} f
 import {createBenchPanel} from '../panel.js';
 import {hasTerrainTextureSet, loadTerrainTextures} from './textures.js';
 import {textureSetControls} from './controls.js';
-import {createValleyTiles} from './valley-tiles.js';
 import '../bench.css';
 
-const GRID = {
-  tileCount: 8, strideTiles: 2, tileSize: 32, cells: [32, 16, 8], distances: [65, 125], hysteresis: 8,
-  lodColors: [0x83e4bc, 0xffce78, 0xa7b2ff],
-};
+// Terrain rings around the focus (createTerrainClipmap) and the wireframe colour of each ring, inner to outer.
+// A lighter terrain for a weak GPU: ?cells=128&levels=6 in the address overrides the defaults.
+const query = new URLSearchParams(location.search);
+const CLIP = {...CLIPMAP_DEFAULTS, ...Object.fromEntries(['cells', 'levels'].filter(key => query.has(key)).map(key => [key, Number(query.get(key))]))};
+const LOD_COLORS = [0xffffff, 0x83e4bc, 0xffce78, 0xa7b2ff, 0xff9d9d, 0x9de0ff, 0xd5a7ff, 0xc8ff9d, 0xffd79d, 0x9dffd0];
 const VIEW = {
-  fov: 48, near: .5, far: 800, position: [110, 105, 145], target: [0, 8, 0],
-  speed: 16, low: 7, rise: 94, lookAhead: 20, edgeBuffer: 26,
+  fov: 48, near: .5, far: 6000, position: [110, 105, 145], target: [0, 8, 0],
+  speed: 16, low: 7, lookAhead: 20,
 };
+// Trees and rocks are placed per square tile, in the tiles within `reach` tiles of the focus, at most `tilesPerFrame`
+// new tiles a frame. slopeStep is the distance over which the ground slope is measured.
 const DRESSING = {
+  tileSize: 32, reach: 5, tilesPerFrame: 2, slopeStep: 1,
   seed: 238, attemptsPerTile: 34, hashX: 73856093, hashZ: 19349663, routeClearance: 9, minScale: .65, maxScale: 1.65,
   tree: {color: 0x355a37, radius: 1.2, height: 5.2, sides: 6, maxSlope: .63},
   rock: {color: 0x81837d, radius: 1.1, depthScale: .7, rate: .65},
@@ -30,16 +33,15 @@ const LAYER_COLORS = {grass: 0xb3c870, rock: 0x9d8ba0, snow: 0xe6eef2, mud: 0x6b
 const LAYER_NAMES = Object.keys(LAYER_COLORS);
 const layerColors = LAYER_NAMES.map(name => [name, new THREE.Color(LAYER_COLORS[name])]);
 const CONTROLS = {density: [0, 1, .01]};
-const VIEWS = ['Textures', 'Layer colours', 'Biome colours'];
+const VIEWS = ['Textures', 'Layer colours', 'Biome colours', 'LOD wireframe'];
+const JUNCTIONS = {edgeSharpness: ['Junction sharpness', 0, 1, .01, .25], edgeBreakup: ['Junction break-up', 0, 1, .01, .6], heightBlend: ['Texture height blend', 0, 1, .05, .24]};
 // Hand-placed biome map: regions per side, and one debug colour per world biome (also the 'Biome colours' view).
-const MAP = {columns: 8, rows: 8, autoAlpha: .35, windowColor: '#ffffff', font: '11px sans-serif', ink: '#10201f'};
+const MAP = {columns: 8, rows: 8, autoAlpha: .35, focusColor: '#ffffff', focusRadius: 4, font: '11px sans-serif', ink: '#10201f'};
 const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48fd1, 0xe0d36a, 0x8c9a6b,
   0xd99a5b, 0x5f8fbf, 0xbf6f9f, 0x9fbf5f, 0x7f7fbf, 0xbfa07f, 0x5fbf8f, 0xbf5f5f];
 const biomeColors = BIOME_SWATCHES.map((color, index) => ['biome' + index, new THREE.Color(color)]);
-const span = GRID.tileSize * GRID.tileCount, half = span / 2;
-const cells = GRID.tileCount * GRID.cells[0], resolution = cells + 1, spacing = span / cells;
 export async function mountValley() {
-  const settings = {seed: SEED, infinite: false, dressingSeed: DRESSING.seed, density: .62, lod: true, wireframe: false, view: VIEWS[0], flyover: false,
+  const settings = {seed: SEED, dressingSeed: DRESSING.seed, density: .62, view: VIEWS[0], flyover: false,
     ...WORLD_DEFAULTS, handPlaced: false};
   // The world's biomes: copies of catalogue biomes, so the catalogue stays as shipped. `biome` is the one being edited.
   const worldBiomes = [cloneBiome(DEFAULT_TERRAIN_BIOME)];
@@ -68,6 +70,9 @@ export async function mountValley() {
   let textures = await loadTextures(palette());
   const appearance = createTerrainAppearance();
   appearance.shoreWetness.value = 0;
+  // Softer than the library default: junctions read better at the scale of a landscape.
+  for (const [key, [, , , , value]] of Object.entries(JUNCTIONS)) appearance[key].value = value;
+  const overlays = LOD_COLORS.map(color => new THREE.MeshBasicMaterial({color, wireframe: true}));
   const biomeMaterial = new THREE.MeshLambertMaterial({vertexColors: true});
   const treeGeometry = new THREE.ConeGeometry(DRESSING.tree.radius, DRESSING.tree.height, DRESSING.tree.sides);
   treeGeometry.translate(0, DRESSING.tree.height / 2, 0);
@@ -80,93 +85,106 @@ export async function mountValley() {
   const instance = new THREE.Object3D();
   const dressing = new THREE.Group();
   scene.add(dressing);
-  let world, field, material, tiles, flyDistance = 0;
-  let origin = [-half, -half];
+  let world, clipmap;
+  const focus = new THREE.Vector3();
+  const layerTint = Object.fromEntries(layerColors), tintScratch = new THREE.Color();
 
+  // Layer weights and ground slope at a point, as the terrain paints them.
+  const paintSample = {x: 0, z: 0, height: 0, slope: 0, curvature: 0};
   function sample(x, z) {
-    const dx = (world.heightAt(x + spacing, z) - world.heightAt(x - spacing, z)) / (2 * spacing);
-    const dz = (world.heightAt(x, z + spacing) - world.heightAt(x, z - spacing)) / (2 * spacing);
+    const step = DRESSING.slopeStep;
+    const dx = (world.heightAt(x + step, z) - world.heightAt(x - step, z)) / (2 * step);
+    const dz = (world.heightAt(x, z + step) - world.heightAt(x, z - step)) / (2 * step);
+    Object.assign(paintSample, {x, z, height: world.heightAt(x, z), slope: Math.hypot(dx, dz)});
+    const {layers, sand} = world.paintAt(paintSample);
     // Sand lies over the other layers.
-    const sand = field.sandWeightAt(x, z);
-    const weights = {sand};
-    TERRAIN_LAYERS.forEach((name, layer) => { weights[name] = field.layerWeightAt(x, z, layer) * (1 - sand); });
-    world.weightsAt(x, z).forEach((share, index) => { weights['biome' + index] = share; });
-    return {dx, dz, weights};
+    return {slope: paintSample.slope, height: paintSample.height, forest: layers[TERRAIN_LAYERS.indexOf('forest')] * (1 - sand), rock: layers[TERRAIN_LAYERS.indexOf('rock')] * (1 - sand)};
   }
 
+  // Vertex colour of the debug views: the layers as painted, or the share of each biome.
+  function tint(x, z, paint, color) {
+    color.setRGB(0, 0, 0);
+    if (settings.view === VIEWS[2]) {
+      world.weightsAt(x, z).forEach((share, index) => { if (share > 0) color.add(tintScratch.copy(biomeColors[index][1]).multiplyScalar(share)); });
+      return;
+    }
+    if (settings.view !== VIEWS[1]) return;
+    TERRAIN_LAYERS.forEach((name, layer) => color.add(tintScratch.copy(layerTint[name]).multiplyScalar(paint.layers[layer] * (1 - paint.sand))));
+    color.add(tintScratch.copy(layerTint.sand).multiplyScalar(paint.sand));
+  }
+
+  // Dressing tiles by "column,row": the instanced meshes of one tile, built as the focus comes within reach.
+  const dressingTiles = new Map();
   function clearDressing() {
-    for (const mesh of [...dressing.children]) {
-      dressing.remove(mesh);
-      mesh.dispose();
-    }
+    for (const meshes of dressingTiles.values()) for (const mesh of meshes) { dressing.remove(mesh); mesh.dispose(); }
+    dressingTiles.clear();
   }
 
-  function placeDressing() {
-    clearDressing();
-    const placements = {tree: [], rock: []};
-    for (const {mesh} of tiles.tiles) {
-      const {x: centerX, z: centerZ} = mesh.position;
-      const tileX = Math.floor(centerX / GRID.tileSize);
-      const tileZ = Math.floor(centerZ / GRID.tileSize);
-      const random = seededRandom(settings.dressingSeed ^ Math.imul(tileX, DRESSING.hashX) ^ Math.imul(tileZ, DRESSING.hashZ));
-      for (let i = 0; i < DRESSING.attemptsPerTile; i++) {
-        const x = centerX + (random() - .5) * GRID.tileSize;
-        const z = centerZ + (random() - .5) * GRID.tileSize;
-        const chance = random(), species = random(), yaw = random() * Math.PI * 2;
-        const scale = THREE.MathUtils.lerp(DRESSING.minScale, DRESSING.maxScale, random());
-        if (chance >= settings.density || (world.routeX && Math.abs(x - world.routeX(z)) < DRESSING.routeClearance)) continue;
-        const {dx, dz, weights} = sample(x, z);
-        const tree = species < weights.forest && Math.hypot(dx, dz) <= DRESSING.tree.maxSlope;
-        if (tree || species > 1 - weights.rock * DRESSING.rock.rate) {
-          placements[tree ? 'tree' : 'rock'].push({x, z, yaw, scale});
-        }
-      }
+  function dressTile(column, row) {
+    const size = DRESSING.tileSize, placements = {tree: [], rock: []};
+    const random = seededRandom(settings.dressingSeed ^ Math.imul(column, DRESSING.hashX) ^ Math.imul(row, DRESSING.hashZ));
+    for (let i = 0; i < DRESSING.attemptsPerTile; i++) {
+      const x = (column + random()) * size, z = (row + random()) * size;
+      const chance = random(), species = random(), yaw = random() * Math.PI * 2;
+      const scale = THREE.MathUtils.lerp(DRESSING.minScale, DRESSING.maxScale, random());
+      if (chance >= settings.density || (world.routeX && Math.abs(x - world.routeX(z)) < DRESSING.routeClearance)) continue;
+      const ground = sample(x, z);
+      const tree = species < ground.forest && ground.slope <= DRESSING.tree.maxSlope;
+      if (tree || species > 1 - ground.rock * DRESSING.rock.rate) placements[tree ? 'tree' : 'rock'].push({x, y: ground.height, z, yaw, scale});
     }
-    for (const [kind, points] of Object.entries(placements)) {
-      if (!points.length) continue;
-      const {geometry, material} = props[kind];
-      const mesh = new THREE.InstancedMesh(geometry, material, points.length);
-      points.forEach(({x, z, yaw, scale}, index) => {
-        instance.position.set(x, field.heightAt(x, z), z);
+    return Object.entries(placements).filter(([, points]) => points.length).map(([kind, points]) => {
+      const mesh = new THREE.InstancedMesh(props[kind].geometry, props[kind].material, points.length);
+      points.forEach(({x, y, z, yaw, scale}, index) => {
+        instance.position.set(x, y, z);
         instance.rotation.y = yaw;
         instance.scale.setScalar(scale);
         instance.updateMatrix();
         mesh.setMatrixAt(index, instance.matrix);
       });
+      mesh.frustumCulled = false;   // instances spread over the tile, away from the geometry's own bounds
       dressing.add(mesh);
+      return mesh;
+    });
+  }
+
+  // Keeps the tiles within reach of the focus dressed, nearest first, and drops the others.
+  function updateDressing() {
+    const size = DRESSING.tileSize, reach = DRESSING.reach;
+    const centerColumn = Math.floor(focus.x / size), centerRow = Math.floor(focus.z / size);
+    for (const [key, meshes] of dressingTiles) {
+      const [column, row] = key.split(',').map(Number);
+      if (Math.max(Math.abs(column - centerColumn), Math.abs(row - centerRow)) <= reach) continue;
+      for (const mesh of meshes) { dressing.remove(mesh); mesh.dispose(); }
+      dressingTiles.delete(key);
+    }
+    let built = 0;
+    for (let ring = 0; ring <= reach && built < DRESSING.tilesPerFrame; ring++) {
+      for (let row = centerRow - ring; row <= centerRow + ring && built < DRESSING.tilesPerFrame; row++) {
+        for (let column = centerColumn - ring; column <= centerColumn + ring && built < DRESSING.tilesPerFrame; column++) {
+          const key = column + ',' + row;
+          if (Math.max(Math.abs(column - centerColumn), Math.abs(row - centerRow)) !== ring || dressingTiles.has(key)) continue;
+          dressingTiles.set(key, dressTile(column, row));
+          built++;
+        }
+      }
     }
   }
 
   function disposeTerrain() {
-    tiles?.dispose();
-    material?.dispose();
-    field?.dispose();
+    if (clipmap) { scene.remove(clipmap.group); clipmap.dispose(); }
+    clipmap = undefined;
   }
 
-  function createMaterial() {
-    return createTerrainMaterial({}, {field, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance});
-  }
-
-  function windowOrigin(position) {
-    return settings.infinite ? terrainWindowOrigin(position, GRID) : [-half, -half];
-  }
-
+  // Rebuilds the world and the terrain rings around the focus from the edited biomes.
   function regenerate() {
     const {seed, regionSize, blend, wander} = settings;
     world = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced ? map : undefined, regionSize, blend, wander});
-    buildWindow(windowOrigin(camera.position));
-  }
-
-  function buildWindow(nextOrigin) {
     disposeTerrain();
-    origin = nextOrigin;
-    const heights = Float32Array.from({length: resolution ** 2}, (_, index) =>
-      world.heightAt(origin[0] + index % resolution * spacing, origin[1] + Math.floor(index / resolution) * spacing));
-    field = createTerrainField({origin, size: [span, span], resolution: [resolution, resolution],
-      heights, seed: settings.seed, rules: worldBiomes[0].paint, paintAt: worldBiomes.length > 1 ? world.paintAt : undefined});
-    material = createMaterial();
-    tiles = createValleyTiles({field, scene, material, sample, config: GRID, biomeColors: settings.view === VIEWS[2] ? biomeColors.slice(0, worldBiomes.length) : layerColors, origin});
-    placeDressing();
+    clipmap = createTerrainClipmap({world, ...CLIP, tint, createMaterial: field =>
+      createTerrainMaterial({}, {field, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance})});
+    scene.add(clipmap.group);
+    clipmap.update(focus.x, focus.z);
+    clearDressing();
     drawMap();
   }
 
@@ -193,8 +211,10 @@ export async function mountValley() {
     }
     mapContext.globalAlpha = 1;
     const toMap = (coordinate, count) => (coordinate / settings.regionSize + Math.floor(count / 2)) * cell;
-    mapContext.strokeStyle = MAP.windowColor;
-    mapContext.strokeRect(toMap(origin[0], map.columns), toMap(origin[1], map.rows), span / settings.regionSize * cell, span / settings.regionSize * cell);
+    mapContext.strokeStyle = MAP.focusColor;
+    mapContext.beginPath();
+    mapContext.arc(toMap(focus.x, map.columns), toMap(focus.z, map.rows), MAP.focusRadius, 0, Math.PI * 2);
+    mapContext.stroke();
   }
   function paintMap(event) {
     const bounds = $map.getBoundingClientRect();
@@ -209,6 +229,7 @@ export async function mountValley() {
   const mapEvents = new AbortController();
   $map.addEventListener('pointerdown', paintMap, {signal: mapEvents.signal});
   $map.addEventListener('pointermove', event => { if (event.buttons & 1) paintMap(event); }, {signal: mapEvents.signal});
+  focus.copy(orbit.target);
   regenerate();
   const gui = createBenchPanel('Terrain generation');
   const presets = Object.fromEntries(Object.values(TERRAIN_BIOMES).map(entry => [entry.label, entry.id]));
@@ -219,7 +240,7 @@ export async function mountValley() {
   }
   async function applyTextures(sets) {
     const next = await loadTextures(sets);
-    material.setLayerTextures({layerArray: next.layerArray, layerDetailArray: next.layerDetailArray, detailNormal: next.detail});
+    for (const {material} of clipmap.rings) material.setLayerTextures({layerArray: next.layerArray, layerDetailArray: next.layerDetailArray, detailNormal: next.detail});
     disposeTextures(textures);
     textures = next;
   }
@@ -311,45 +332,48 @@ export async function mountValley() {
     const {seed, regionSize, blend, wander} = settings;
     return {seed, regionSize, blend, wander, biomes: worldBiomes, ...(settings.handPlaced && {map})};
   })}, 'copy').name('Copy world as JSON');
-  const view = gui.addFolder('View and streaming');
-  view.add(settings, 'infinite').name('Infinite streaming').onChange(rebuild);
-  view.add(settings, 'density', ...CONTROLS.density).name('Dressing density').onFinishChange(placeDressing);
-  view.add({reroll() { settings.dressingSeed = nextSeed(settings.dressingSeed); placeDressing(); }}, 'reroll').name('Reroll dressing');
-  view.add(settings, 'view', VIEWS).name('Show').onChange(() => buildWindow(origin));
-  view.add(settings, 'lod').name('Dynamic LOD');
-  view.add(settings, 'wireframe').name('LOD wireframe');
+  const junctions = gui.addFolder('Texture junctions').close();
+  for (const [key, [label, min, max, step]] of Object.entries(JUNCTIONS)) junctions.add(appearance[key], 'value', min, max, step).name(label);
+  const view = gui.addFolder('View');
+  view.add(settings, 'density', ...CONTROLS.density).name('Dressing density').onFinishChange(clearDressing);
+  view.add({reroll() { settings.dressingSeed = nextSeed(settings.dressingSeed); clearDressing(); }}, 'reroll').name('Reroll dressing');
+  view.add(settings, 'view', VIEWS).name('Show').onChange(() => clipmap.reshade());
   view.add(settings, 'flyover').name('Flyover').onChange(enabled => {
     orbit.enabled = !enabled;
-    if (enabled) flyDistance = 0;
-    else orbit.update();
+    if (enabled) flyZ = focus.z;
+    else { orbit.target.copy(focus); orbit.update(); }
   });
 
   const status = document.getElementById('status');
   const unbind = bindResize(renderer, camera);
   let lastStatus = -Infinity;
-  const routeLength = span - 2 * VIEW.edgeBuffer;
+  let flyZ = 0;
+  // Flies low along +Z, following the valley when the world has one.
   function fly(dt) {
-    flyDistance += dt * VIEW.speed;
-    if (!settings.infinite) flyDistance %= 2 * routeLength;
-    const forward = settings.infinite || flyDistance < routeLength;
-    const z = -routeLength / 2 + (forward ? flyDistance : 2 * routeLength - flyDistance);
-    const routeX = world.routeX ?? (() => 0);
-    const x = routeX(z);
-    const altitude = VIEW.low + (settings.infinite ? 0 : VIEW.rise * Math.sin(Math.PI * flyDistance / (2 * routeLength)) ** 2);
-    const targetZ = z + (forward ? VIEW.lookAhead : -VIEW.lookAhead);
-    camera.position.set(x, world.heightAt(x, z) + altitude, z);
-    camera.lookAt(routeX(targetZ), world.heightAt(routeX(targetZ), targetZ) + VIEW.low, targetZ);
+    flyZ += dt * VIEW.speed;
+    const routeX = world.routeX ?? (() => focus.x);
+    const x = routeX(flyZ), targetZ = flyZ + VIEW.lookAhead;
+    // Clear the ground ahead as well as below, or a steep rise would swallow the camera.
+    const ahead = world.heightAt(routeX(targetZ), targetZ);
+    camera.position.set(x, Math.max(world.heightAt(x, flyZ), ahead) + VIEW.low, flyZ);
+    camera.lookAt(routeX(targetZ), ahead + VIEW.low, targetZ);
   }
+  const meters = value => value >= 1 ? value + ' m' : value * 100 + ' cm';
   startFrameLoop(renderer, (dt, now) => {
     if (settings.flyover) fly(dt);
     else orbit.update();
-    const nextOrigin = windowOrigin(camera.position);
-    if (nextOrigin.some((coordinate, axis) => coordinate !== origin[axis])) buildWindow(nextOrigin);
+    // Detail follows what is looked at: the orbit target, or the camera when flying.
+    focus.copy(settings.flyover ? camera.position : orbit.target);
+    clipmap.update(focus.x, focus.z);
+    updateDressing();
     stage.update(camera);
-    const counts = tiles.update(camera, {...settings, surfaceMaterial: settings.view === VIEWS[0] ? material : biomeMaterial});
+    for (const {mesh, material, level} of clipmap.rings) {
+      mesh.material = settings.view === VIEWS[0] ? material : settings.view === VIEWS[3] ? overlays[level] : biomeMaterial;
+    }
     if (now - lastStatus >= STATUS_REFRESH_MS) {
       lastStatus = now;
-      status.textContent = 'Tiles · ' + counts.map((count, level) => 'LOD ' + level + ': ' + count).join(' · ')
+      if (settings.handPlaced) drawMap();
+      status.textContent = `${clipmap.levels} rings · cells ${meters(clipmap.cellSize)} to ${meters(clipmap.rings.at(-1).cell)} · ${clipmap.extent} m across`
         + (settings.view === VIEWS[1] ? '\nLayer colours · ' + LAYER_NAMES.join(', ') : '')
         + (worldBiomes.length > 1 ? '\nWorld · ' + worldBiomes.map((entry, index) => biomeName(index)).join(', ') + '\nTextures · shared, from biome 1' : '')
         + (missingSets.length ? '\nTexture sets not bundled, default used · ' + missingSets.join(', ') + ' · run npm run textures:fetch' : '');
@@ -365,6 +389,7 @@ export async function mountValley() {
     disposeTerrain();
     clearDressing();
     for (const {geometry, material} of Object.values(props)) { geometry.dispose(); material.dispose(); }
+    for (const overlay of overlays) overlay.dispose();
     disposeTextures(textures);
     biomeMaterial.dispose();
     stage.dispose();

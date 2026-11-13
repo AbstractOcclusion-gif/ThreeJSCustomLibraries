@@ -1,0 +1,209 @@
+import * as THREE from 'three';
+import {createDataTexture} from '../core/data-texture.js';
+
+// Camera-centred terrain: square rings of the same vertex count around a focus point, each ring's cells twice the
+// size of the ring inside it, so detail is fine near the focus and the view reaches far. When the focus moves, a
+// ring slides by whole cells: the samples it keeps are moved in memory and only the new strips are generated.
+// Each ring carries its own height and layer maps, shaped like a terrain field, for createTerrainMaterial.
+export const CLIPMAP_DEFAULTS = Object.freeze({
+  levels: 7,       // rings
+  cells: 256,      // cells per side of a ring: a multiple of 4
+  cellSize: .25,   // m, cell of the innermost ring
+});
+export const CLIPMAP_LIMITS = Object.freeze({levels: [1, 10], cells: [8, 512], cellSize: [.05, 8]});
+const BYTE = 255, LAYER_CHANNELS = 4, FOREST_LAYER = 4;
+const SNAP_CELLS = 2;   // a ring moves by this many of its cells, so it stays aligned with the cells of the ring outside
+
+// world: {heightAt(x, z), paintAt({x, z, height, slope, curvature}) -> {layers, sand}} (createTerrainWorld).
+// createMaterial(field, level) returns the material of a ring; tint(x, z, paint, color) writes an optional vertex colour.
+export function createTerrainClipmap({world, createMaterial, tint, ...overrides} = {}) {
+  const {levels, cells, cellSize} = {...CLIPMAP_DEFAULTS, ...overrides};
+  const within = (value, [min, max]) => Number.isFinite(value) && value >= min && value <= max;
+  if (!Number.isInteger(levels) || !within(levels, CLIPMAP_LIMITS.levels)) throw new RangeError('Invalid clipmap levels');
+  if (!Number.isInteger(cells) || cells % 4 || !within(cells, CLIPMAP_LIMITS.cells)) throw new RangeError('Clipmap cells must be a multiple of 4 in range');
+  if (!within(cellSize, CLIPMAP_LIMITS.cellSize)) throw new RangeError('Invalid clipmap cell size');
+  if (typeof world?.heightAt !== 'function' || typeof world.paintAt !== 'function' || typeof createMaterial !== 'function') {
+    throw new TypeError('A clipmap needs a world with heightAt and paintAt, and a material factory');
+  }
+  const n = cells + 1, count = n * n;
+  const group = new THREE.Group();
+  const color = new THREE.Color();
+
+  // Index buffers, shared by the rings: every cell except the square hole the inner ring fills (hole: [x, z] in cells).
+  const indexCache = new Map();
+  function indexFor(hole) {
+    const key = hole ? hole.join() : 'full';
+    if (!indexCache.has(key)) {
+      const indices = new Uint32Array((cells * cells - (hole ? (cells / 2) ** 2 : 0)) * 6);
+      let offset = 0;
+      for (let z = 0; z < cells; z++) for (let x = 0; x < cells; x++) {
+        if (hole && x >= hole[0] && x < hole[0] + cells / 2 && z >= hole[1] && z < hole[1] + cells / 2) continue;
+        const a = z * n + x, b = a + 1, c = a + n, d = c + 1;
+        indices.set([a, c, b, b, c, d], offset);
+        offset += 6;
+      }
+      indexCache.set(key, new THREE.BufferAttribute(indices, 1));
+    }
+    return indexCache.get(key);
+  }
+
+  const rings = Array.from({length: levels}, (_, level) => {
+    const cell = cellSize * 2 ** level, size = cells * cell;
+    const heights = new Float32Array(count), weights = new Uint8Array(count * LAYER_CHANNELS);
+    const forest = new Uint8Array(count), sand = new Uint8Array(count);
+    const positions = new Float32Array(count * 3), normals = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) { positions[i * 3] = (i % n) * cell; positions[i * 3 + 2] = Math.floor(i / n) * cell; }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    const colors = tint ? new Float32Array(count * 3) : null;
+    if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const field = {
+      bounds: new THREE.Vector4(0, 0, size, size),
+      heightMap: createDataTexture(heights, n, n, {format: THREE.RedFormat, type: THREE.FloatType}),
+      weightMap: createDataTexture(weights, n, n, {filter: 'linear'}),
+      forestMap: createDataTexture(forest, n, n, {format: THREE.RedFormat, filter: 'linear'}),
+      sandMap: createDataTexture(sand, n, n, {format: THREE.RedFormat, filter: 'linear'}),
+    };
+    const material = createMaterial(field, level);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.frustumCulled = false;   // the ring surrounds the camera
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return {level, cell, size, heights, weights, forest, sand, positions, normals, colors, geometry, field, material, mesh, origin: null, hole: undefined};
+  });
+
+  // Moves what a ring keeps when its origin shifts by (dx, dz) cells: the new [i, j] is the old [i + dx, j + dz].
+  function slide(array, stride, dx, dz) {
+    const row = n * stride;
+    if (dz > 0) array.copyWithin(0, dz * row);
+    else if (dz < 0) array.copyWithin(-dz * row, 0, (n + dz) * row);
+    if (!dx) return;
+    for (let j = 0; j < n; j++) {
+      const start = j * row, end = start + row;
+      if (dx > 0) array.copyWithin(start, start + dx * stride, end);
+      else array.copyWithin(start - dx * stride, start, end + dx * stride);
+    }
+  }
+
+  const sample = {x: 0, z: 0, height: 0, slope: 0, curvature: 0};
+  // Paint, normal and tint of sample (i, j) from its four neighbours; a neighbour outside the ring comes from the world.
+  function shade(ring, i, j) {
+    const {cell, heights, origin} = ring, index = j * n + i;
+    const x = origin[0] + i * cell, z = origin[1] + j * cell, height = heights[index];
+    // Rounded like the stored heights, so a sample is shaded the same whether its neighbour is stored or not.
+    const beyond = (px, pz) => Math.fround(world.heightAt(px, pz));
+    const west = i > 0 ? heights[index - 1] : beyond(x - cell, z), east = i < cells ? heights[index + 1] : beyond(x + cell, z);
+    const north = j > 0 ? heights[index - n] : beyond(x, z - cell), south = j < cells ? heights[index + n] : beyond(x, z + cell);
+    const dx = (east - west) / (2 * cell), dz = (south - north) / (2 * cell);
+    const length = Math.hypot(dx, 1, dz);
+    ring.normals[index * 3] = -dx / length; ring.normals[index * 3 + 1] = 1 / length; ring.normals[index * 3 + 2] = -dz / length;
+    sample.x = x; sample.z = z; sample.height = height; sample.slope = Math.hypot(dx, dz);
+    sample.curvature = (west + east + north + south - 4 * height) / (cell * cell);
+    const paint = world.paintAt(sample);
+    for (let layer = 0; layer < LAYER_CHANNELS; layer++) ring.weights[index * LAYER_CHANNELS + layer] = Math.round(paint.layers[layer] * BYTE);
+    ring.forest[index] = Math.round((paint.layers[FOREST_LAYER] ?? 0) * BYTE);
+    ring.sand[index] = Math.round(paint.sand * BYTE);
+    if (ring.colors && tint) {
+      tint(x, z, paint, color);
+      ring.colors[index * 3] = color.r; ring.colors[index * 3 + 1] = color.g; ring.colors[index * 3 + 2] = color.b;
+    }
+  }
+
+  // Generates the samples of a ring that are new after a move of (dx, dz) cells; all of them when `all`.
+  function fill(ring, dx, dz, all) {
+    const {cell, heights, origin} = ring;
+    const fresh = (i, j) => all || (dx > 0 ? i >= n - dx : i < -dx) || (dz > 0 ? j >= n - dz : j < -dz);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      if (fresh(i, j)) heights[j * n + i] = world.heightAt(origin[0] + i * cell, origin[1] + j * cell);
+    }
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (fresh(i, j)) shade(ring, i, j);
+  }
+
+  // Writes the heights to the mesh. On the outer edge, the vertices the ring outside does not have sit on the
+  // straight line between their neighbours, so the two rings meet without a crack.
+  function lift(ring) {
+    const {positions, heights} = ring;
+    for (let i = 0; i < count; i++) positions[i * 3 + 1] = heights[i];
+    if (ring.level === levels - 1) return;
+    for (let k = 1; k < cells; k += 2) {
+      for (const [index, step] of [[k, 1], [cells * n + k, 1], [k * n, n], [k * n + cells, n]]) {
+        positions[index * 3 + 1] = (heights[index - step] + heights[index + step]) / 2;
+      }
+    }
+  }
+
+  function upload(ring) {
+    const {geometry, field, mesh, origin} = ring;
+    field.bounds.set(origin[0], origin[1], ring.size, ring.size);
+    mesh.position.set(origin[0], 0, origin[1]);
+    for (const texture of Object.values(field)) if (texture.isTexture) texture.needsUpdate = true;
+    for (const attribute of Object.values(geometry.attributes)) attribute.needsUpdate = true;
+  }
+
+  let samplesGenerated = 0;
+  return {
+    group, levels, cells, cellSize,
+    rings: rings.map(({level, cell, size, mesh, material, field}) => ({level, cell, size, mesh, material, field})),
+    get extent() { return rings.at(-1).size; },
+    // Samples generated by the last update: a measure of its cost.
+    get samplesGenerated() { return samplesGenerated; },
+    originOf: level => rings[level].origin,
+    heightAt: (x, z) => world.heightAt(x, z),
+    // Centres the rings on a point. Returns true when a ring moved.
+    update(x, z) {
+      if (!Number.isFinite(x) || !Number.isFinite(z)) throw new RangeError('Clipmap focus must be finite');
+      samplesGenerated = 0;
+      let moved = false;
+      for (const ring of rings) {
+        const snap = ring.cell * SNAP_CELLS, half = ring.size / 2;
+        const next = [Math.round(x / snap) * snap - half, Math.round(z / snap) * snap - half];
+        const previous = ring.origin;
+        if (previous && previous[0] === next[0] && previous[1] === next[1]) continue;
+        const dx = previous ? Math.round((next[0] - previous[0]) / ring.cell) : n;
+        const dz = previous ? Math.round((next[1] - previous[1]) / ring.cell) : n;
+        const all = Math.abs(dx) >= n || Math.abs(dz) >= n;
+        ring.origin = next;
+        if (!all) {
+          for (const [array, stride] of [[ring.heights, 1], [ring.weights, LAYER_CHANNELS], [ring.forest, 1], [ring.sand, 1], [ring.normals, 3], [ring.colors, 3]]) {
+            if (array) slide(array, stride, dx, dz);
+          }
+        }
+        fill(ring, dx, dz, all);
+        samplesGenerated += all ? count : count - (n - Math.abs(dx)) * (n - Math.abs(dz));
+        lift(ring);
+        upload(ring);
+        moved = true;
+      }
+      if (moved) {
+        rings.forEach((ring, level) => {
+          const inner = rings[level - 1];
+          const hole = inner ? [Math.round((inner.origin[0] - ring.origin[0]) / ring.cell), Math.round((inner.origin[1] - ring.origin[1]) / ring.cell)] : null;
+          const key = hole ? hole.join() : 'full';
+          if (ring.hole === key) return;
+          ring.hole = key;
+          ring.geometry.setIndex(indexFor(hole));
+        });
+      }
+      return moved;
+    },
+    // Recomputes paint, normals and tint everywhere, e.g. after the tint or the paint rules changed.
+    reshade(nextTint = tint) {
+      tint = nextTint;
+      for (const ring of rings) {
+        if (!ring.origin) continue;
+        for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) shade(ring, i, j);
+        upload(ring);
+      }
+    },
+    dispose() {
+      for (const {geometry, field, material} of rings) {
+        geometry.setIndex(null);
+        geometry.dispose();
+        material.dispose();
+        for (const texture of Object.values(field)) if (texture.isTexture) texture.dispose();
+      }
+      indexCache.clear();
+    },
+  };
+}

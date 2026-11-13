@@ -731,3 +731,4 @@ export {createProceduralTerrain, createValley, terrainWindowOrigin, TERRAIN_LAND
 export {createRelief, reliefShape, validateRelief, RELIEF_SHAPES, RELIEF_MAX_SHAPES} from './relief.js';
 export {TERRAIN_BIOMES, DEFAULT_TERRAIN_BIOME, cloneBiome, validateBiome} from './biomes.js';
 export {createTerrainWorld, validateWorld, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAX_BIOMES, WORLD_MAP_AUTO} from './world.js';
+export {createTerrainClipmap, CLIPMAP_DEFAULTS, CLIPMAP_LIMITS} from './clipmap.js';
