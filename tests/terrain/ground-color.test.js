@@ -21,3 +21,19 @@ test('the ground colour of a painted sample mixes its sets, harmonised as the ma
  const sand = new THREE.Color(.8, .7, .5);
  assert.deepEqual(terrainGroundColor(out, {palette: [1, 0, 0, 0], sand: 1}, palette, appearance, sand).toArray(), sand.toArray());
 });
+
+test('a terrain world serves as the ground of the light probes', async () => {
+ const {cloneBiome, createTerrainWorld, terrainLightGround} = await import('../../src/terrain/index.js');
+ const {createLightProbes} = await import('../../src/lighting/index.js');
+ assert.throws(() => terrainLightGround({}), TypeError);
+ const world = createTerrainWorld({seed: 4, biomes: [cloneBiome('alpine')]}), appearance = createTerrainAppearance();
+ const ground = terrainLightGround({world, appearance}), expected = new THREE.Color(), got = new THREE.Color();
+ terrainGroundColor(expected, world.paintAt(world.sampleAt(12, -8)), world.palette, appearance);
+ assert.deepEqual(ground.colorAt(12, -8, got).toArray(), expected.toArray());
+ assert.equal(ground.heightAt(12, -8), world.heightAt(12, -8));
+ const probes = createLightProbes({ground, columns: 4, layers: 2, budget: 16});
+ probes.update(12, -8);
+ const column = probes.columnAt(12, -8);
+ assert.ok(Math.abs(column.height - world.heightAt(12, -8, 4)) < .2 && column.sky.every(share => share > 0 && share <= 1));
+ probes.dispose();
+});

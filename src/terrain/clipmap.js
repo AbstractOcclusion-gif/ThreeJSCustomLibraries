@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {createDataTexture} from '../core/data-texture.js';
-import {createSkyVisibility, bakeSkyRow} from './sky-visibility.js';
+import {createSkyVisibility, bakeSkyRow} from '../core/sky-visibility.js';
 
 // Camera-centred terrain: square rings of the same vertex count around a focus point, each ring's cells twice the
 // size of the ring inside it, so detail is fine near the focus and the view reaches far. When the focus moves, a
@@ -14,7 +14,7 @@ export const CLIPMAP_DEFAULTS = Object.freeze({
   // shape of the ground still reads where its cells are large. It applies to rings with cells of `normalFromCell` m
   // or more and is baked in the background, `normalSamples` relief samples per update. normalDetail 1 turns it off.
   normalDetail: 2, normalFromCell: 2, normalSamples: 5000,
-  // Each ring carries skyMap: the sky visibility of its ground (sky-visibility.js), one texel per `snapCells` cells,
+  // Each ring carries skyMap: the sky visibility of its ground (core sky-visibility.js), one texel per `snapCells` cells,
   // baked in the background, about `skySamples` relief samples per update. skySamples 0: no sky map.
   // `sky`: settings of the measure (SKY_VISIBILITY_DEFAULTS).
   skySamples: 4000,

@@ -2,6 +2,9 @@
 // A material takes `lighting: {glsl, uniforms}`. The GLSL must declare the uniforms it needs and define
 //   vec3 shade(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap)
 //   vec3 applyFog(vec3 color, float viewDistance)
+// It may also define LIGHT_SHADE_AT and
+//   vec3 shadeAt(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap, vec3 worldPosition)
+// for ambient light that changes from place to place; the lib's materials call it when it is there.
 // This file is the default implementation: sun + hemisphere + linear distance fog. A project may pass its own.
 // Light values are in Three's units (colour x intensity of a DirectionalLight / HemisphereLight) and shade() is the
 // diffuse term of Three's lit materials, so a hook surface and a MeshStandardMaterial of the same colour match under the
@@ -18,18 +21,31 @@ export const LIGHTING_DEFAULTS = Object.freeze({
 export const DEFAULT_SUN_DIRECTION = Object.freeze([0.3, 0.8, 0.5]);
 export const CLEAR_NOON_SUN = Object.freeze([1, 0.96, 0.9]);
 
-export const LIGHT_GLSL = /* glsl */`
+// The ambient light of the default hook: `vec3 lightAmbient(vec3 n, vec3 worldPosition)`, the irradiance on a surface
+// facing n. Here the hemisphere, the same everywhere. createLighting({ambient: {glsl, uniforms}}) swaps it for one
+// that depends on the place (the light probes of the lighting module); its GLSL may use the hook's uniforms.
+export const LIGHT_AMBIENT_GLSL = /* glsl */`
+vec3 lightAmbient(vec3 n, vec3 worldPosition) { return mix(uHemiGround, uHemiSky, n.y * 0.5 + 0.5); }`;
+
+export const lightingGLSL = (ambient = LIGHT_AMBIENT_GLSL) => /* glsl */`
 uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uHemiSky; uniform vec3 uHemiGround;
 uniform vec3 uFogColor; uniform vec2 uFogRange;
 const float LIGHT_RECIPROCAL_PI = 0.3183098861837907;   // Lambert: a white surface returns irradiance / pi, as Three's BRDF
+${ambient}
+#define LIGHT_SHADE_AT
+vec3 shadeAt(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap, vec3 worldPosition) {
+  float ndl = max((dot(n, uSunDir) + wrap) / (1.0 + wrap), 0.0);
+  return albedo * LIGHT_RECIPROCAL_PI * (lightAmbient(n, worldPosition) * ao + uSunColor * ndl * sunVisibility);
+}
+// Without a place: the hemisphere, whatever the ambient.
 vec3 shade(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap) {
   float ndl = max((dot(n, uSunDir) + wrap) / (1.0 + wrap), 0.0);
-  vec3 hemi = mix(uHemiGround, uHemiSky, n.y * 0.5 + 0.5);
-  return albedo * LIGHT_RECIPROCAL_PI * (hemi * ao + uSunColor * ndl * sunVisibility);
+  return albedo * LIGHT_RECIPROCAL_PI * (mix(uHemiGround, uHemiSky, n.y * 0.5 + 0.5) * ao + uSunColor * ndl * sunVisibility);
 }
 vec3 applyFog(vec3 color, float viewDistance) {
   return mix(color, uFogColor, smoothstep(uFogRange.x, uFogRange.y, viewDistance));
 }`;
+export const LIGHT_GLSL = lightingGLSL();
 
 export const NOISE_GLSL = /* glsl */`
 float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
@@ -53,8 +69,10 @@ export function createLightingUniforms(options = {}) {
   };
 }
 
-export function createLighting(options) {
-  return {glsl: LIGHT_GLSL, uniforms: createLightingUniforms(options)};
+// options: LIGHTING_DEFAULTS overrides, and `ambient: {glsl, uniforms}` (see LIGHT_AMBIENT_GLSL).
+export function createLighting({ambient, ...options} = {}) {
+  if (ambient !== undefined && (typeof ambient?.glsl !== 'string' || typeof ambient.uniforms !== 'object')) throw Error('Lighting ambient needs glsl and uniforms');
+  return {glsl: ambient ? lightingGLSL(ambient.glsl) : LIGHT_GLSL, uniforms: {...createLightingUniforms(options), ...ambient?.uniforms}};
 }
 
 // Drive the uniforms from ordinary Three lights (e.g. the ones the weather adapter animates) and the scene fog.

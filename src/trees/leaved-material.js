@@ -56,7 +56,11 @@ export function createLeavedMaterial({lighting = createLighting(), leafTexture, 
           if (leafTexel.a < uLeafCutoff) discard;
           albedo *= dot(leafTexel.rgb, vec3(0.2126, 0.7152, 0.0722)) / uLeafLuminance;
         }
+        #ifdef LIGHT_SHADE_AT
+        vec3 color = shadeAt(albedo, n, mix(0.35, 1.0, sunVisibility), 0.6 + 0.4 * clumps, 0.45, vWorld);
+        #else
         vec3 color = shade(albedo, n, mix(0.35, 1.0, sunVisibility), 0.6 + 0.4 * clumps, 0.45);
+        #endif
         gl_FragColor = vec4(applyFog(color, distance(vWorld, cameraPosition)), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

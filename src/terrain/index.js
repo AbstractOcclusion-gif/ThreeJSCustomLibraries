@@ -615,6 +615,16 @@ export function terrainGroundColor(target, paint, palette, appearance, sandColor
  return sandColor && paint.sand > 0 ? target.lerp(sandColor, paint.sand) : target;
 }
 
+// A palette world as the ground of the light probes (lighting module: createLightProbes({ground})): its height and,
+// by terrainGroundColor, its colour. palette: the world's, with the `means` of its texture sets when known.
+export function terrainLightGround({world, palette = world?.palette, appearance, sandColor} = {}) {
+ if (typeof world?.heightAt !== 'function' || typeof world.paintAt !== 'function' || typeof world.sampleAt !== 'function') throw new TypeError('Terrain light ground needs a terrain world');
+ return {
+  heightAt: world.heightAt,
+  colorAt: (x, z, target) => terrainGroundColor(target, world.paintAt(world.sampleAt(x, z)), palette, appearance, sandColor),
+ };
+}
+
 export function createTerrainMaterial(parameters = {}, {
  field, layers, layerArray, layerDetailArray, palette, cutout, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, sky, ...surface
 } = {}) {
@@ -730,7 +740,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (field.morph) material.defines = {...material.defines, TERRAIN_MORPH: 1};
  // field.normalMap (a far clipmap ring): the ground is lit from normals baked finer than its mesh.
  if (field.normalMap) material.defines = {...material.defines, TERRAIN_NORMAL_MAP: 1};
- // A sky map (sky-visibility.js): ambient light, diffuse and reflected, dims where the relief hides the sky.
+ // A sky map (core sky-visibility.js): ambient light, diffuse and reflected, dims where the relief hides the sky.
  if (skyMap) material.defines = {...material.defines, TERRAIN_SKY_MAP: 1};
  material.onBeforeCompile = shader => {
   compileSurface(shader);
@@ -966,4 +976,4 @@ export {createRelief, reliefShape, validateRelief, RELIEF_SHAPES, RELIEF_MAX_SHA
 export {TERRAIN_BIOMES, BIOME_TEXTURE_DEFAULTS, DEFAULT_TERRAIN_BIOME, cloneBiome, validateBiome} from './biomes.js';
 export {createTerrainWorld, validateWorld, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAX_BIOMES, WORLD_MAP_AUTO, WORLD_PALETTE_MAX} from './world.js';
 export {createTerrainClipmap, CLIPMAP_DEFAULTS, CLIPMAP_LIMITS} from './clipmap.js';
-export {createSkyVisibility, bakeSkyMap, SKY_VISIBILITY_DEFAULTS, SKY_VISIBILITY_LIMITS} from './sky-visibility.js';
+export {createSkyVisibility, bakeSkyMap, SKY_VISIBILITY_DEFAULTS, SKY_VISIBILITY_LIMITS} from '../core/sky-visibility.js';

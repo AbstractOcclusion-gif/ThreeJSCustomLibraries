@@ -132,7 +132,11 @@ function terrainMaterial(water, wet, lighting) {
         #ifdef COAST_CAUSTICS
         focus = causticLight(vWorld);
         #endif
+        #ifdef LIGHT_SHADE_AT
+        vec3 color = shadeAt(albedo * ripple, n, focus, 1.0, 0.0, vWorld);
+        #else
         vec3 color = shade(albedo * ripple, n, focus, 1.0, 0.0);
+        #endif
         if (wet > 0.0) { vec3 V = normalize(cameraPosition - vWorld), H = normalize(V + uSunDir);   // the film's mirror-flat sheen
           color += uSunColor * pow(max(dot(n, H), 0.0), waterSpecularExponent(min(uWetSmoothness, WET_SMOOTHNESS_CEILING))) * (wet * WET_SHEEN_STRENGTH); }
         gl_FragColor = vec4(applyFog(color, distance(vWorld, cameraPosition)), 1.0);

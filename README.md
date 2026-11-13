@@ -103,6 +103,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | vegetation (grass with per-instance tint, specimens, procedural meadow tree, generated free assets, Synty loader code) | `three-kit/vegetation` | `bench/vegetation/` | ✓ |
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
+| lighting (light probes: ambient light that follows the ground, for standard and hook materials) | `three-kit/lighting` | `bench/lighting/` | ✓ |
 | cable (articulated rope on cannon-es, tube view) | `three-kit/cable` | `bench/cable/` | ✓ |
 | destruction (rigid structures, impact fracture, overload detachment) | `three-kit/destruction`, `/destruction/three` | `bench/destruction/` | ✓ |
 | camera (director, rigs, bullet time, replay, collision, post, panel) | `three-kit/camera` | `bench/camera/` | ✓ |
@@ -127,6 +128,7 @@ everything in the last column is optional and has a calm, clear-noon default.
 | `vegetation` | — | three | `environment` (`setEnvironment` on grass and specimens, or per call in `update`) |
 | `trees` | — | three | `lighting` hook, `environment` (`setEnvironment`) |
 | `boundaries` | `trees` (hedges) | three | `lighting` hook, `environment` (`setEnvironment`), `assets` |
+| `lighting` | — | three | a ground `{heightAt, colorAt}`, the `lighting` hook |
 | `cable` | — | three, cannon-es | `environment` (`setEnvironment`) |
 | `destruction`, `destruction/three` | cable physics and view for structural rigs; chips and puffs for views and debris | cannon-es; three for the view; optional caller-supplied Jolt | catalogue URL for authored assets |
 | `camera` | — | three | load `three-kit/camera/panel.css` when you use `createCameraPanel` |
@@ -193,6 +195,30 @@ speaks Three's units (colour x intensity) and its `shade()` is Three's diffuse t
 lights looks the same on both paths. What the hook does not receive is shadow maps, the environment map (sky reflections,
 image-based ambient) and any light other than the sun and the hemisphere: a host that adds those lights only its standard
 materials with them.
+
+**Ambient by place.** `createLighting({ambient: {glsl, uniforms}})` swaps the hook's ambient light (the hemisphere, the
+same everywhere) for one that depends on the position: the GLSL defines `vec3 lightAmbient(vec3 n, vec3 worldPosition)`.
+The hook then also defines `LIGHT_SHADE_AT` and `shadeAt(albedo, n, sunVisibility, ao, wrap, worldPosition)`, which the
+lib's materials call when it is there. The basic stage passes it on: `createBasicStage({scene, ambient})`.
+
+### Light probes
+
+`createLightProbes({ground, ...LIGHT_PROBE_DEFAULTS})` from `three-kit/lighting` is that ambient. A grid of probe columns
+(32 x 32, 4 m apart, 4 probes each from 1 m to 64 m above the ground) follows a focus: `update(x, z)` once per frame
+measures a few of the columns that came into the grid. Each probe holds the share of the sky seen from there and the
+colour of the ground under it, so a surface takes a dimmer sky at the bottom of a valley and, from below, the light its
+own ground sends back. `ground` is any `{heightAt(x, z, cell), colorAt(x, z, target)}`; a terrain world gives one with
+`terrainLightGround({world, palette, appearance})`. Only the ground blocks and returns light: objects receive it.
+
+```js
+const probes = createLightProbes({ground});
+const stage = createBasicStage({scene, ambient: probes.ambient});   // hook materials: stage.lighting
+probes.applyTo(standardMaterial, stage.lighting);                   // lit Three materials
+// each frame: stage.update(camera); probes.update(focus.x, focus.z);
+```
+
+`probes.strength.value` (0..1) is their share in the ambient: 0 is the plain hemisphere. `probes.refresh()` measures
+everything again after the ground changed. The probes hold no light, so the sun and sky can change freely.
 
 ## Bench
 
@@ -326,7 +352,7 @@ snow, rain and puddles. Source: `src/terrain/`.
 | `world.js` | `createTerrainWorld({seed, biomes, regionSize, blend, wander, map, water, waterLevel})`: biomes laid out in regions, drawn from the seed or placed in `map`, with relief and paint blended across wandering borders. `heightAt`, `paintAt`, `sampleAt`, `palette`, `waterLevel`. |
 | `terrain-rules.js` | The paint rules. They read the terrain itself (slope and hollow-or-ridge over fixed distances, `PAINT_REACH`; the shaded side; a moisture built from them; standing water) and return one weight per role (`TERRAIN_PALETTE_ROLES`: grass, rock, snow, mud, forest, scree, soil), sand and moisture. Settings: `TERRAIN_PAINT_DEFAULTS` / `TERRAIN_PAINT_FIELDS`. |
 | `clipmap.js` | `createTerrainClipmap({world, createMaterial, levels, cells, cellSize})`: the far terrain. Camera-centred rings whose cells double from ring to ring (25 cm to 16 m, 4 km across by default). `update(x, z, maxRings)` slides them and generates only the new strips; each ring is drawn in chunks the renderer can cull. Toward its edge a ring eases into the shape of the ring outside it (`field.morph`), so detail grows in without popping. Far rings are lit from normals baked in the background at `normalDetail` times their mesh resolution (`field.normalMap`), so relief still reads where cells are large. |
-| `sky-visibility.js` | `createSkyVisibility(heightAt, {directions, firstStep, reach})`: the share of the sky each point of the ground sees, from a scan of the horizon: the terrain's large-scale ambient occlusion. Clipmap rings bake it in the background into `field.skyMap` (`skySamples` per update, 0 = off); `bakeSkyMap()` makes one for a terrain field (material option `sky: {map, bounds}`). It dims ambient light only, never the sun; `appearance.skyOcclusion` is its strength. Contact-scale shadow stays with the camera module's GTAO. |
+| `core/sky-visibility.js` | `createSkyVisibility(heightAt, {directions, firstStep, reach})` (in core, shared with the light probes; also exported by terrain): the share of the sky each point of the ground sees, from a scan of the horizon: the terrain's large-scale ambient occlusion. Clipmap rings bake it in the background into `field.skyMap` (`skySamples` per update, 0 = off); `bakeSkyMap()` makes one for a terrain field (material option `sky: {map, bounds}`). It dims ambient light only, never the sun; `appearance.skyOcclusion` is its strength. Contact-scale shadow stays with the camera module's GTAO. |
 | `field.js` | `createTerrainField(...)`: the near, deformable ground. Digging with rims (`deform`), a 3D snow layer that packs under a load (`setSnowCover`, `compactSnow`), drifts and melting. With `paintAt` and `paletteSize` it is painted by a world like the rings. |
 | `index.js` | `createTerrainMaterial(parameters, options)`: a standard material with triplanar texture sets, relief-led junctions, per-layer normal and roughness, procedural sand, and the surface weather (wetness, snow, puddles, tracks, runoff). `palette` mode blends up to 16 sets with one weight each, pulls their colours into one family (`appearance.harmony`), tints grass from dry to lush and varies colour at large scale. Looks: `createTerrainAppearance`, `createSnowLook`, `createSandLook`. |
 | `drainage.js`, `runoff.js` | Where water gathers and runs on a field: basins, flow routing, the runoff texture the material draws as streams. |

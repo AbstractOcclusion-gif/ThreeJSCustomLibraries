@@ -1,6 +1,7 @@
-// Sky visibility of a relief: the share of the sky's light that reaches a level patch of ground, 1 in the open and
-// less at the bottom of a valley or the foot of a cliff. It is the large-scale ambient occlusion of the terrain:
-// it dims the ambient light only, never the sun. Small-scale contact shadow is left to screen-space AO (camera post).
+// Sky visibility over a relief: the share of the sky's light that reaches a level patch of ground, 1 in the open and
+// less at the bottom of a valley or the foot of a cliff. It is the large-scale ambient occlusion of a ground: it dims
+// the ambient light only, never the sun. Small-scale contact shadow is left to screen-space AO (camera post).
+// Shared by the terrain (sky maps of its rings) and the light probes (lighting module).
 // Measured by scanning the horizon: along `directions` headings, the steepest rise of the ground seen from the point,
 // at distances that double from `firstStep` up to `reach`.
 export const SKY_VISIBILITY_DEFAULTS = Object.freeze({
@@ -13,8 +14,9 @@ const FAR_STEPS = 4;   // a coarse map (spacing over `reach`) still looks this m
 const BYTE = 255;
 
 // heightAt(x, z, cell): the relief, band-limited to `cell` metres when it can (createTerrainWorld's heightAt).
-// Returns {settings, at(x, z, spacing = 0) -> 0..1, samples(spacing)}: `spacing` is the distance between the points
-// asked for (a map's texel), so nothing finer than the map can hold is measured; samples: relief samples one point costs.
+// Returns {settings, at(x, z, spacing = 0, lift = 0) -> 0..1, samples(spacing)}: `spacing` is the distance between the
+// points asked for (a map's texel), so nothing finer than the map can hold is measured; `lift`: metres above the ground
+// of the point looked from; samples: relief samples one point costs.
 export function createSkyVisibility(heightAt, overrides = {}) {
   if (typeof heightAt !== 'function') throw new TypeError('Sky visibility needs a heightAt function');
   const settings = {...SKY_VISIBILITY_DEFAULTS, ...overrides};
@@ -32,8 +34,8 @@ export function createSkyVisibility(heightAt, overrides = {}) {
   return {
     settings,
     samples(spacing = 0) { return 1 + directions * (1 + Math.floor(Math.log2(last(spacing) / first(spacing)))); },
-    at(x, z, spacing = 0) {
-      const start = first(spacing), end = last(spacing), base = heightAt(x, z, start);
+    at(x, z, spacing = 0, lift = 0) {
+      const start = first(spacing), end = last(spacing), base = heightAt(x, z, start) + lift;
       let hidden = 0;
       for (const [dx, dz] of headings) {
         let rise = 0;   // tangent of the horizon's elevation along this heading
