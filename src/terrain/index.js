@@ -40,6 +40,8 @@ export function createTerrainAppearance() {
  return {
   tiling: {value: .45}, rockScale: {value: .55}, sharpness: {value: 3.5}, antiTiling: {value: .85},
   detailStrength: {value: .6}, heightBlend: {value: .24},
+  edgeSharpness: {value: .6},  // junctions between layers: 0 = even fade, 1 = the layer standing higher wins outright
+  edgeBreakup: {value: .6},    // fine wander of the junctions that hides the steps of the weight grid (0 = off)
   waterLevel: {value: 0}, shoreWidth: {value: .8}, shoreWetness: {value: 1},
  };
 }
@@ -71,6 +73,7 @@ const int TERRAIN_SNOW_ROUGHNESS = TERRAIN_DETAIL + 2;
 #endif
 uniform vec4 terrainBounds;
 uniform float terrainTiling, terrainSharpness, terrainAntiTiling, terrainDetailStrength, terrainHeightBlend;
+uniform float terrainEdgeSharpness, terrainEdgeBreakup;
 uniform float terrainRockScale;
 uniform float terrainWaterLevel, terrainShoreWidth, terrainShoreWetness, terrainContactBand;
 uniform bool terrainProp;
@@ -172,6 +175,29 @@ float terrainSandRipples(vec2 p) {
 }
 #endif
 
+// Offset, in weight texels, applied where the layer maps are read: the junctions wander at a scale finer than the
+// grid, so its steps and straight diagonals do not show. Each octave fades before a pixel spans it.
+vec2 terrainEdgeWarp(vec2 world) {
+ const vec2 wavelength = vec2(.9, .22);   // m, the two scales of the wander
+ const vec2 reach = vec2(1.1, .45);       // weight texels each scale moves a junction at full break-up
+ float footprint = length(fwidth(world));
+ vec2 warp = vec2(0.0);
+ for (int i = 0; i < 2; i++) {
+  float visible = 1.0 - smoothstep(.25, .6, footprint / wavelength[i]);
+  if (visible <= 0.0) continue;
+  vec2 p = world / wavelength[i];
+  warp += (vec2(valueNoise(vec3(p, 71.0 + float(i))), valueNoise(vec3(p + 19.7, 83.0 + float(i)))) - .5) * 2.0 * reach[i] * visible;
+ }
+ return warp * terrainEdgeBreakup;
+}
+
+// Sharpens a junction: each weight relative to the strongest is raised to a power, so the fade narrows around the
+// line where two layers are equal. That line already follows the texture relief (terrainHeightBlend).
+float terrainEdge(float weight, float strongest) {
+ const float fullPower = 7.0;   // exponent added at edge sharpness 1
+ return weight > 0.0 ? weight * pow(weight / strongest, terrainEdgeSharpness * fullPower) : 0.0;
+}
+
 float terrainHeightAt(vec2 grid, out vec3 groundNormal) {
  ivec2 size = textureSize(terrainHeights, 0);
  ivec2 i = min(ivec2(grid), size - 2);
@@ -269,7 +295,8 @@ const TERRAIN_FRAGMENT = /* glsl */`
  terrainAxes *= smoothstep(vec3(.001), vec3(.008), terrainAxes);
  terrainAxes /= dot(terrainAxes, vec3(1.0));
  vec3 terrainSign = sign(terrainNormal + vec3(.00001));
- vec4 terrainWeights = textureLod(terrainLayers, (terrainGrid + .5) / terrainSize, 0.0);
+ vec2 terrainWeightUV = (terrainGrid + .5 + (terrainEdgeBreakup > 0.0 ? terrainEdgeWarp(terrainGround.xz) : vec2(0.0))) / terrainSize;
+ vec4 terrainWeights = textureLod(terrainLayers, terrainWeightUV, 0.0);
  vec4 grass = vec4(0.0), rock = vec4(0.0), snow = vec4(0.0), mud = vec4(0.0);
  if (terrainWeights.x > 0.0) grass = terrainTriplanar(TERRAIN_GRASS, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
  if (terrainWeights.y > 0.0) rock = terrainTriplanar(TERRAIN_ROCK, terrainP * terrainRockScale, terrainDx * terrainRockScale, terrainDy * terrainRockScale, terrainSign, terrainAxes);
@@ -283,10 +310,15 @@ const TERRAIN_FRAGMENT = /* glsl */`
  vec4 forest = vec4(0.0);
  float forestWeight = 0.0;
  #ifdef TERRAIN_FOREST_FLOOR
- forestWeight = textureLod(terrainForestWeight, (terrainGrid + .5) / terrainSize, 0.0).r;
+ forestWeight = textureLod(terrainForestWeight, terrainWeightUV, 0.0).r;
  if (forestWeight > 0.0) forest = terrainTriplanar(TERRAIN_FOREST, terrainP, terrainDx, terrainDy, terrainSign, terrainAxes);
  forestWeight *= exp2((forest.a - .5) * terrainHeightBlend * 8.0);
  #endif
+ if (terrainEdgeSharpness > 0.0) {
+  float strongest = max(max(max(terrainWeights.x, terrainWeights.y), max(terrainWeights.z, terrainWeights.w)), max(forestWeight, .0001));
+  terrainWeights = vec4(terrainEdge(terrainWeights.x, strongest), terrainEdge(terrainWeights.y, strongest), terrainEdge(terrainWeights.z, strongest), terrainEdge(terrainWeights.w, strongest));
+  forestWeight = terrainEdge(forestWeight, strongest);
+ }
  float totalWeight = max(dot(terrainWeights, vec4(1.0)) + forestWeight, .0001);
  terrainWeights /= totalWeight;
  forestWeight /= totalWeight;
@@ -302,7 +334,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
  metalnessFactor *= 1.0 - terrainContact;
  vec3 sandNormal = terrainNormal;
  #ifdef TERRAIN_SAND
- sandCover = terrainProp ? 0.0 : textureLod(terrainSandWeight, (terrainGrid + .5) / terrainSize, 0.0).r;
+ sandCover = terrainProp ? 0.0 : textureLod(terrainSandWeight, terrainWeightUV, 0.0).r;
  if (sandCover > 0.0) {
   // Sand fills the hollows of the ground it meets first, so its edge follows the texture instead of fading evenly.
   const float sandEdgeWidth = .25;
@@ -357,6 +389,7 @@ export function createTerrainMaterial(parameters = {}, {
  const hasLayers = layerArray !== undefined ?
   layerArray?.isDataArrayTexture && layerArray.image.depth >= (field?.forestMap ? TERRAIN_LAYERS.length : 4) :
   TERRAIN_LAYERS.slice(0, 4).every(name => layers?.[name]?.isTexture);
+ if (!appearance.edgeSharpness || !appearance.edgeBreakup) throw Error('Terrain appearance needs edgeSharpness and edgeBreakup: build it with createTerrainAppearance()');
  if (!field?.heightMap || !field?.weightMap || !hasLayers || !detailNormal?.isTexture) {
   throw Error('Terrain material needs a field, layer textures and a detail normal');
  }
@@ -390,7 +423,8 @@ export function createTerrainMaterial(parameters = {}, {
   terrainDetail: {value: detailNormal}, terrainProp: {value: contactBand !== undefined}, terrainContactBand: {value: contactBand ?? 0},
   terrainTiling: appearance.tiling, terrainSharpness: appearance.sharpness, terrainAntiTiling: appearance.antiTiling,
   terrainRockScale: appearance.rockScale ?? {value: .55},
-  terrainDetailStrength: appearance.detailStrength, terrainHeightBlend: appearance.heightBlend, terrainWaterLevel: appearance.waterLevel,
+  terrainDetailStrength: appearance.detailStrength, terrainHeightBlend: appearance.heightBlend,
+  terrainEdgeSharpness: appearance.edgeSharpness, terrainEdgeBreakup: appearance.edgeBreakup, terrainWaterLevel: appearance.waterLevel,
   terrainShoreWidth: appearance.shoreWidth, terrainShoreWetness: appearance.shoreWetness,
   terrainSnowNormal: {value: snowMaterial?.normal ?? null},
   terrainSnowRoughness: {value: snowMaterial?.roughness ?? null},
