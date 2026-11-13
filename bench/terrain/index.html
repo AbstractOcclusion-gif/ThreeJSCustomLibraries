@@ -8,6 +8,8 @@
 <header><div><small>THREE-KIT / TERRAIN</small><h1>Terrain</h1></div><a href="../" target="_top">All modules</a></header>
 <aside><nav aria-label="Terrain tools"><a href="./">Generation</a> · <a href="?mode=surface">Surface effects</a></nav>
 <p class="intro">Pick a biome preset, then edit its relief, paint rules and texture sets in the panel. Copy the result as JSON to keep it.</p>
+<canvas id="biome-map" width="208" height="208" style="position:static;display:none;width:208px;height:208px;margin:12px 0;cursor:crosshair;touch-action:none"></canvas>
+<p id="biome-map-help" class="footnote" hidden>Click or drag to place the edited biome in a region. Shift-click gives a region back to the seed. The white frame is the terrain in view.</p>
 <div id="status" role="status"></div><div id="error" role="alert" hidden></div>
 </aside>
 <script type="module">
