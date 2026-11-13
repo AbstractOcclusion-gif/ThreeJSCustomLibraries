@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {bakeSkyMap, BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {bakeSkyMap, terrainGroundColor, BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createDataTexture} from '../../src/core/data-texture.js';
@@ -43,6 +43,9 @@ const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
 // test balls roll, so they leave ruts and marks. It sits on a `snap` m grid so its edge follows the cells of every
 // ring; the rings leave it a square `margin` m smaller and it is drawn just in front of them. A ball is launched
 // `ahead` m in front of the focus; one started within `edge` m of the border moves the area there (its marks are lost).
+// Ground bounce: the ambient light from below follows the colour of the ground around the focus, read at
+// `points` x `points` places over a square of `span` m, at each refresh of the status text.
+const BOUNCE = {span: 80, points: 5};
 const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, skyTexel: 2, trackResolution: 512, trackContrast: .12, edge: 12, ahead: 6,
   ball: {radius: 1.5, minRadius: .4, maxRadius: 4, baseRadius: .72, speed: 7, color: 0x8d8478, roughness: .8}, fallBelow: 12,
   offset: -1};
@@ -59,7 +62,7 @@ const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48f
 const biomeColors = BIOME_SWATCHES.map((color, index) => ['biome' + index, new THREE.Color(color)]);
 export async function mountValley() {
   const settings = {seed: SEED, dressingSeed: DRESSING.seed, density: .62, view: VIEWS[0], flyover: false,
-    ...WORLD_DEFAULTS, handPlaced: false, water: true, ballRadius: PLAY.ball.radius, snow: false, wetness: 0};
+    ...WORLD_DEFAULTS, handPlaced: false, water: true, ballRadius: PLAY.ball.radius, snow: false, wetness: 0, bounce: 1};
   // The world's biomes: copies of catalogue biomes, so the catalogue stays as shipped. `biome` is the one being edited.
   const worldBiomes = [cloneBiome(DEFAULT_TERRAIN_BIOME)];
   let biome = worldBiomes[0];
@@ -435,6 +438,7 @@ export async function mountValley() {
   });
   materialFolder.add(appearance.bakedNormals, 'value', 0, 1, .01).name('Baked far relief lighting');
   materialFolder.add(appearance.skyOcclusion, 'value', 0, 1, .01).name('Sky occlusion (ambient in valleys)');
+  materialFolder.add(settings, 'bounce', 0, 1, .01).name('Ground bounce (ambient from below)').onChange(updateBounce);
   materialFolder.add(appearance.farTiling.value, 'z', .05, 1, .01).name('Far texture size (1 = off)');
   materialFolder.add(appearance.farTiling.value, 'x', 10, 400, 5).name('Far textures from · m');
   materialFolder.add(appearance.farTiling.value, 'y', 20, 800, 5).name('Far textures fully at · m');
@@ -477,6 +481,18 @@ export async function mountValley() {
     camera.position.set(x, Math.max(world.heightAt(x, flyZ), ahead) + VIEW.low, flyZ);
     camera.lookAt(routeX(targetZ), ahead + VIEW.low, targetZ);
   }
+  // The ground colour around the focus, into the stage's ambient light from below.
+  const bounceColor = new THREE.Color(), bounceSample = new THREE.Color();
+  function updateBounce() {
+    if (!(settings.bounce > 0)) { stage.setGround(null); return; }
+    const {span, points} = BOUNCE, palette = {...world.palette, means: textures.means};
+    bounceColor.setRGB(0, 0, 0);
+    for (let j = 0; j < points; j++) for (let i = 0; i < points; i++) {
+      const x = focus.x + (i / (points - 1) - .5) * span, z = focus.z + (j / (points - 1) - .5) * span;
+      bounceColor.add(terrainGroundColor(bounceSample, world.paintAt(world.sampleAt(x, z)), palette, appearance, sandLook.color.value));
+    }
+    stage.setGround(bounceColor.multiplyScalar(1 / (points * points)), settings.bounce);
+  }
   const meters = value => value >= 1 ? value + ' m' : value * 100 + ' cm';
   startFrameLoop(renderer, (dt, now) => {
     if (settings.flyover) fly(dt);
@@ -497,6 +513,7 @@ export async function mountValley() {
     }
     if (now - lastStatus >= STATUS_REFRESH_MS) {
       lastStatus = now;
+      updateBounce();
       if (settings.handPlaced) drawMap();
       status.textContent = `${clipmap.levels} rings · cells ${meters(clipmap.cellSize)} to ${meters(clipmap.rings.at(-1).cell)} · ${clipmap.extent} m across`
         + (settings.view === VIEWS[1] ? '\nLayer colours · ' + LAYER_NAMES.join(', ') : '')

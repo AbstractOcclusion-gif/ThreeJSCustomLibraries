@@ -31,6 +31,7 @@ const PAGES = {
   water: ['water'], weather: ['weather'], sound: ['sound'],
   interaction: ['interaction', 'puzzle'],
   save: ['save'],
+  lighting: [],   // core and the stage only
 };
 const EVERY_PAGE = ['core', 'stage', 'ui'];
 const MIXED_PAGES = ['demo-ocean', 'demo-all'];

@@ -1,4 +1,4 @@
-export {LIGHT_GLSL, NOISE_GLSL, LIGHTING_DEFAULTS, DEFAULT_SUN_DIRECTION, CLEAR_NOON_SUN, createLighting, createLightingUniforms, syncLighting, syncLightingFromEnvironment} from './lighting.js';
+export {LIGHT_GLSL, NOISE_GLSL, LIGHTING_DEFAULTS, DEFAULT_SUN_DIRECTION, CLEAR_NOON_SUN, createLighting, createLightingUniforms, groundBounce, syncLighting, syncLightingFromEnvironment} from './lighting.js';
 export {createEnvironment, setEnvironmentWind} from './environment.js';
 export {createTrackMask} from './track-mask.js';
 export {createVegetationAtlas, FREE_ATLAS_RECTS} from './vegetation-atlas.js';

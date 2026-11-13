@@ -80,6 +80,15 @@ export function syncLighting(uniforms, {sun, hemi, fog, fogRange} = {}) {
   } else if (fogRange) uniforms.uFogRange.value.set(fogRange[0], fogRange[1]);
 }
 
+// One-bounce ground light: the light an open, matte ground of colour `albedo` sends back up, as the ground colour
+// of a hemisphere light (colour x intensity, to write into HemisphereLight.groundColor / environment.ambient.ground /
+// uHemiGround). The ground receives the sun by the height of the sun and the whole sky; a matte surface returns its
+// colour's share of that. sunColor and skyColor are colour x intensity; sunDirection points toward the sun.
+export function groundBounce(target, albedo, {sunColor, sunDirection, skyColor}) {
+  const sunHeight = Math.max(sunDirection.y, 0);
+  return target.setRGB(albedo.r * (sunColor.r * sunHeight + skyColor.r), albedo.g * (sunColor.g * sunHeight + skyColor.g), albedo.b * (sunColor.b * sunHeight + skyColor.b));
+}
+
 // Same, from the shared environment (core/environment.js) instead of Three lights. Fog is left to the scene.
 export function syncLightingFromEnvironment(uniforms, environment) {
   uniforms.uSunDir.value.copy(environment.sun.direction);

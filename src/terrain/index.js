@@ -594,6 +594,27 @@ const TERRAIN_FRAGMENT = /* glsl */`
 `;
 
 // Repeat-wrapped color maps (separate or packed in TERRAIN_LAYERS order) carry material height in alpha.
+// The colour a painted sample of a palette world shows, without its textures: the average of each texture set
+// (palette.means; else the target colour of its role), moved toward the role's target colour by the colour harmony
+// as the material does, weighted as painted, with sand over it. For the light the ground sends back up
+// (stage.setGround, core groundBounce). paint: world.paintAt(sample); sandColor: the sand look's colour.
+const groundScratch = new THREE.Color();
+export function terrainGroundColor(target, paint, palette, appearance, sandColor) {
+ if (!paint?.palette || !Array.isArray(palette?.roles) || !appearance?.roleTints || !appearance.harmony) throw Error('Terrain ground colour needs a palette paint, its palette and a terrain appearance');
+ target.setRGB(0, 0, 0);
+ let total = 0;
+ palette.roles.forEach((role, index) => {
+  const weight = paint.palette[index];
+  if (!(weight > 0)) return;
+  const tint = appearance.roleTints.value[TERRAIN_PALETTE_ROLES.indexOf(role)];
+  groundScratch.copy(palette.means?.[index] ?? tint).lerp(tint, appearance.harmony.value);
+  target.r += groundScratch.r * weight; target.g += groundScratch.g * weight; target.b += groundScratch.b * weight;
+  total += weight;
+ });
+ if (total > 0) target.multiplyScalar(1 / total);
+ return sandColor && paint.sand > 0 ? target.lerp(sandColor, paint.sand) : target;
+}
+
 export function createTerrainMaterial(parameters = {}, {
  field, layers, layerArray, layerDetailArray, palette, cutout, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, sky, ...surface
 } = {}) {

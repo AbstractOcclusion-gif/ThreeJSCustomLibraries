@@ -3,7 +3,7 @@
 // No weather and no terrain: a project that has those drives the same environment object from them instead.
 import * as THREE from 'three';
 import {createEnvironment, setEnvironmentWind} from '../core/environment.js';
-import {createLighting, syncLighting, LIGHTING_DEFAULTS, CLEAR_NOON_SUN} from '../core/lighting.js';
+import {createLighting, groundBounce, syncLighting, LIGHTING_DEFAULTS, CLEAR_NOON_SUN} from '../core/lighting.js';
 import {createSkyDome, createSkyUniforms} from '../core/sky.js';
 
 export const STAGE_DEFAULTS = Object.freeze({
@@ -34,11 +34,21 @@ export function createBasicStage({scene, sky = true, ground = true, shadows = fa
     groundMesh.receiveShadow = true; scene.add(groundMesh);
   }
   let level = 1, disposed = false;
+  // Ground bounce (setGround): the colour of the ground around the view and the share of its bounce in the ambient.
+  const groundAlbedo = new THREE.Color(), bounce = new THREE.Color(), plainGround = new THREE.Color(LIGHTING_DEFAULTS.hemiGround);
+  let bounceShare = 0;
   function apply() {
     sun.position.copy(sun.target.position).addScaledVector(direction, SUN_DISTANCE);
     sun.intensity = o.sunIntensity * level; hemi.intensity = o.ambientIntensity * level;
     environment.sun.color.copy(sun.color).multiplyScalar(sun.intensity);
-    environment.ambient.sky.copy(hemi.color).multiplyScalar(hemi.intensity); environment.ambient.ground.copy(hemi.groundColor).multiplyScalar(hemi.intensity);
+    environment.ambient.sky.copy(hemi.color).multiplyScalar(hemi.intensity);
+    hemi.groundColor.copy(plainGround);
+    if (bounceShare > 0 && hemi.intensity > 0) {
+      // The light keeps colour and intensity apart, so the bounce is written as a colour for the current intensity.
+      groundBounce(bounce, groundAlbedo, {sunColor: environment.sun.color, sunDirection: direction, skyColor: environment.ambient.sky});
+      hemi.groundColor.lerp(bounce.multiplyScalar(1 / hemi.intensity), bounceShare);
+    }
+    environment.ambient.ground.copy(hemi.groundColor).multiplyScalar(hemi.intensity);
     environment.light.setScalar(level); environment.daylight = level;
     if (skyUniforms) { skyUniforms.uSkySunDir.value.copy(direction); skyUniforms.uSunCol.value.setRGB(...CLEAR_NOON_SUN).multiplyScalar(level); skyUniforms.uDaylight.value = level; }
     syncLighting(lighting.uniforms, {sun, hemi, fog: scene.fog});
@@ -52,6 +62,15 @@ export function createBasicStage({scene, sky = true, ground = true, shadows = fa
     },
     // 1 = clear noon, 0 = dark. Scales the lights, the sky and environment.light together.
     setLight(next) { if (!Number.isFinite(next) || next < 0) throw Error('Stage light must be non-negative'); level = next; apply(); return stage; },
+    // Ground bounce: the ambient light from below takes the colour and strength of the sun and sky returned by a
+    // ground of this colour (core groundBounce), instead of the fixed ground colour of the hemisphere light.
+    // albedo: a THREE.Color (linear), or null for the fixed colour; share 0..1 of the bounce in the result.
+    setGround(albedo, share = 1) {
+      if (albedo !== null && !albedo?.isColor) throw Error('Stage ground needs a colour, or null');
+      if (!Number.isFinite(share) || share < 0 || share > 1) throw Error('Stage ground bounce share must be between 0 and 1');
+      if (albedo) groundAlbedo.copy(albedo);
+      bounceShare = albedo ? share : 0; apply(); return stage;
+    },
     setWind(speed, headingDegrees, gust = environment.wind.gust) { setEnvironmentWind(environment, speed, headingDegrees); environment.wind.gust = gust; return stage; },
     // Once per frame: keeps the sky dome on the camera and the lighting hook in step with the scene fog.
     update(camera) { if (disposed) return; if (dome && camera) camera.getWorldPosition(dome.position); syncLighting(lighting.uniforms, {sun, hemi, fog: scene.fog}); },

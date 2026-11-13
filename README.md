@@ -154,6 +154,9 @@ module what it needs to be seen alone: a clear gradient sky, a sun, an ambient l
 and an environment kept in step with them. It returns `{environment, lighting, sun, hemi, sky, skyUniforms, ground}` and
 `setSun(elevationDegrees, azimuthDegrees)`, `setLight(level)` (1 = clear noon), `setWind(speed, headingDegrees, gust)`,
 `update(camera)` once per frame, and `dispose()`. Pass `sky: false` or `ground: false` when the host has its own.
+`setGround(albedo, share = 1)` turns on the ground bounce: the ambient light from below becomes what a ground of that colour
+returns of the sun and the sky (`groundBounce()` in `three-kit/core`), in the hemisphere light, the environment and the hook
+alike; `setGround(null)` restores the fixed colour. A terrain gives its colour with `terrainGroundColor()`.
 
 ### Environment contract
 
