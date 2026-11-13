@@ -12,7 +12,7 @@ import {benchRenderer, onLeave, bindResize, startFrameLoop, STATUS_REFRESH_MS} f
 import {presetsFolder, stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {createRollingBodies} from './ball.js';
-import {loadConifers} from './conifers.js';
+import {loadTreeModels} from './conifers.js';
 import {Sphere} from 'cannon-es';
 import '../bench.css';
 
@@ -60,8 +60,14 @@ const specimens = comparisonItems.map(({profile, items}) => {
   return plants;
 });
 const imported = new Map();
-let importPending, leaving = false;
-const view = {layout: 'Species comparison'};
+const loading = new Map();
+const loadFailures = new Map();
+let leaving = false;
+const authoredItems = [
+  {profile: 'ez-oak', items: [{x: -4, z: 0, h: 6, variant: 0}]},
+  {profile: 'ez-spruce', items: [{x: 4, z: 0, h: 6, variant: 0}]},
+];
+const view = {layout: 'EZ-Tree comparison'};
 const meadowNoise = valueNoise(23);
 function placements() {
   const random = seededRandom(7), out = [];
@@ -146,35 +152,43 @@ const rollBall = () => launchBalls(1);
 
 const gui = createBenchPanel('Vegetation');
 function syncVisibility() {
-  const compare = view.layout !== 'Meadow';
+  const meadow = view.layout === 'Meadow';
+  const authored = view.layout === 'EZ-Tree comparison';
   const showImported = view.layout === 'Imported conifers';
-  trees.group.visible = bushes.group.visible = !compare;
-  for (const plants of specimens) plants.group.visible = compare && !(showImported && imported.has(plants.profile.name));
-  for (const plants of imported.values()) plants.group.visible = showImported;
-  $('species-order').hidden = !compare;
+  trees.group.visible = bushes.group.visible = meadow;
+  for (const plants of specimens) plants.group.visible = !meadow && !authored && !(showImported && imported.has(plants.profile.name));
+  for (const [profile, plants] of imported) plants.group.visible = profile.startsWith('ez-') ? authored : showImported;
+  $('species-order').hidden = meadow || authored;
+  $('authored-order').hidden = !authored;
+  $('authored-loading').hidden = !authored || authoredItems.every(({profile}) => imported.has(profile));
+  $('authored-loading').textContent = authoredItems.some(({profile}) => loadFailures.has(profile))
+    ? 'A tree could not load. Reopen this view to retry.' : 'Loading EZ-Tree models…';
 }
 function applyView() {
   const compare = view.layout !== 'Meadow';
-  syncVisibility();
-  if (view.layout === 'Imported conifers' && !importPending) {
-    importPending = Promise.all(comparisonItems.slice(-2).map(async ({profile, items}) => {
-      try {
-        const plants = await loadConifers({scene, profile, items, environment: stage.environment});
-        if (leaving) plants.dispose();
-        else {
-          imported.set(profile, plants);
-          syncVisibility();
-        }
-      } catch (error) {
-        console.warn(`Could not load ${profile} model. Using the procedural profile.`, error);
-      }
-    }));
+  const authored = view.layout === 'EZ-Tree comparison';
+  const itemsToLoad = authored ? authoredItems : view.layout === 'Imported conifers' ? comparisonItems.slice(-2) : [];
+  for (const {profile, items} of itemsToLoad) {
+    if (imported.has(profile) || loading.has(profile)) continue;
+    loadFailures.delete(profile);
+    const pending = loadTreeModels({scene, profile, items, environment: stage.environment}).then(plants => {
+      if (leaving) plants.dispose();
+      else imported.set(profile, plants);
+    }).catch(error => {
+      loadFailures.set(profile, error);
+      console.warn(`Could not load ${profile} model.`, error);
+    }).finally(() => {
+      loading.delete(profile);
+      if (!leaving) syncVisibility();
+    });
+    loading.set(profile, pending);
   }
-  camera.position.set(...(compare ? [4.5, 13, 50] : [13, 5.5, 16]));
-  controls.target.set(compare ? 4.5 : 0, compare ? 2.6 : 1, 0);
+  syncVisibility();
+  camera.position.set(...(authored ? [0, 5.5, 18] : compare ? [4.5, 13, 50] : [13, 5.5, 16]));
+  controls.target.set(compare && !authored ? 4.5 : 0, compare ? 2.6 : 1, 0);
   controls.update();
 }
-const viewControl = gui.add(view, 'layout', ['Species comparison', 'Imported conifers', 'Meadow']).name('View').onChange(applyView);
+const viewControl = gui.add(view, 'layout', ['EZ-Tree comparison', 'Species comparison', 'Imported conifers', 'Meadow']).name('View').onChange(applyView);
 applyView();
 const stageUI = stageControls(gui, stage);
 Object.assign(stageUI.state, {windSpeed: START_WIND, gust: P.plants.gust}); stageUI.apply();

@@ -3,11 +3,13 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 const models = {
   pine: new URL('../../assets/trees/pine.glb', import.meta.url).href,
   spruce: new URL('../../assets/trees/spruce.glb', import.meta.url).href,
+  'ez-oak': new URL('../../assets/trees/ez-oak.glb', import.meta.url).href,
+  'ez-spruce': new URL('../../assets/trees/ez-spruce.glb', import.meta.url).href,
 };
 const WIND = {maximum: 3, perSpeed: .08, perGust: .1, travel: .16};
 const TURN = Math.PI * 2;
 
-export async function loadConifers({scene, profile, items, environment}) {
+export async function loadTreeModels({scene, profile, items, environment}) {
   const {scene: model} = await new GLTFLoader().loadAsync(models[profile]);
   const bounds = new THREE.Box3().setFromObject(model);
   const centre = bounds.getCenter(new THREE.Vector3());
