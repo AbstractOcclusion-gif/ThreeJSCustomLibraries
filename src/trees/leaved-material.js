@@ -5,15 +5,17 @@
 import * as THREE from 'three';
 import {createLighting, NOISE_GLSL} from '../core/lighting.js';
 
-export function createLeavedMaterial({lighting = createLighting(), leafTexture, leafCutoff = .5, leafLuminance = .56, canopy = null, nearHole = false} = {}) {
+export function createLeavedMaterial({lighting = createLighting(), leafTexture, barkTexture, barkRect = [0, 0, 1, 1], leafCutoff = .5, leafLuminance = .56, canopy = null, nearHole = false} = {}) {
   const defines = {};
   if (canopy) defines.USE_CANOPY_MAP = 1;
   if (nearHole) defines.USE_NEAR_HOLE = 1;
+  if (barkTexture) defines.USE_BARK_TEXTURE = 1;
   const uniforms = {
     ...lighting.uniforms,
     uTime: {value: 0}, uWind: {value: 1}, uLeaf: {value: leafTexture}, uLeafCutoff: {value: leafCutoff}, uLeafLuminance: {value: leafLuminance},
     uCanopy: {value: canopy?.texture ?? null}, uExtent: {value: canopy?.extent ?? new THREE.Vector2(1, 1)},
     uNearCentre: {value: new THREE.Vector2()}, uNearRadius: {value: new THREE.Vector2(0, 0)},
+    uBark: {value: barkTexture ?? null}, uBarkRect: {value: new THREE.Vector4(...barkRect)},
   };
   return new THREE.ShaderMaterial({
     uniforms, defines, side: THREE.DoubleSide, vertexColors: true,   // declares `attribute vec3 color` (the baked shade)
@@ -28,7 +30,7 @@ export function createLeavedMaterial({lighting = createLighting(), leafTexture, 
         vec4 world = modelMatrix * instanceMatrix * vec4(p, 1.0);
         vWorld = world.xyz; vColor = color; vUv = uv; vLeaf = leaf;
         #ifdef USE_INSTANCING_COLOR
-        vColor *= instanceColor;
+        if (leaf >= 0.0) vColor *= instanceColor;
         #endif
         vNormal = normalize(mat3(modelMatrix * instanceMatrix) * normal);
         gl_Position = projectionMatrix * viewMatrix * world;
@@ -37,6 +39,7 @@ export function createLeavedMaterial({lighting = createLighting(), leafTexture, 
       ${lighting.glsl}
       ${NOISE_GLSL}
       uniform sampler2D uLeaf; uniform float uLeafCutoff, uLeafLuminance;
+      uniform sampler2D uBark; uniform vec4 uBarkRect;
       uniform sampler2D uCanopy; uniform vec2 uExtent; uniform vec2 uNearCentre; uniform vec2 uNearRadius;
       varying vec3 vColor; varying vec3 vNormal; varying vec3 vWorld; varying vec2 vUv; varying float vLeaf;
       void main() {
@@ -51,6 +54,14 @@ export function createLeavedMaterial({lighting = createLighting(), leafTexture, 
         float clumps = valueNoise(vWorld * 0.9) * 0.65 + valueNoise(vWorld * 2.3) * 0.35;
         vec3 n = normalize(vNormal + (vec3(valueNoise(vWorld * 1.7 + 11.0), valueNoise(vWorld * 1.7 + 23.0), valueNoise(vWorld * 1.7 + 37.0)) - 0.5) * 0.9);
         vec3 albedo = vColor * (0.85 + 0.45 * clumps);
+        #ifdef USE_BARK_TEXTURE
+        if (vLeaf < -0.5) {
+          vec2 inset = 0.5 / vec2(textureSize(uBark, 0));
+          vec3 bark = texture2D(uBark, mix(uBarkRect.xy + inset, uBarkRect.xy + uBarkRect.zw - inset, vUv)).rgb;
+          float grain = dot(bark, vec3(0.2126, 0.7152, 0.0722));
+          albedo *= mix(0.55, 1.15, clamp(grain / 0.08, 0.0, 1.0));
+        }
+        #endif
         if (vLeaf > 0.5) {
           vec4 leafTexel = texture2D(uLeaf, vUv);
           if (leafTexel.a < uLeafCutoff) discard;

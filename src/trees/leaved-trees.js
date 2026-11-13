@@ -18,7 +18,7 @@ export class LeavedTrees {
    * region (default: the generated atlas); sampleGround(x, z) -> y; canopy: {texture, extent: Vector2} enables the canopy
    * sun-visibility map; nearHole: enables the dithered near hole (setNearHole()).
    */
-  constructor({scene, profile = 'tree', lighting, leafTexture, leafRect, leafLuminance, leafCutoff = .5, cellSize = 80, sampleGround = () => 0, canopy = null, nearHole = false} = {}) {
+  constructor({scene, profile = 'tree', lighting, leafTexture, leafRect, barkTexture, barkRect, leafLuminance, leafCutoff = .5, cellSize = 80, sampleGround = () => 0, canopy = null, nearHole = false} = {}) {
     if (!scene) throw Error('LeavedTrees needs a scene');
     this.scene = scene; this.cellSize = cellSize; this.sampleGround = sampleGround;
     this.group = new THREE.Group(); this.group.name = 'leaved-trees'; scene.add(this.group);
@@ -26,10 +26,12 @@ export class LeavedTrees {
     // Without a `lighting` hook the trees own a default one, which setEnvironment() may drive.
     this.ownsLighting = !lighting; lighting ??= createLighting(); this.environment = null;
     this.ownsLeaf = !leafTexture;
-    this.leafTexture = leafTexture ?? createVegetationAtlas();
+    this.leafTexture = leafTexture ?? createVegetationAtlas({twigCards: Boolean(resolveProfile(profile).branches)});
     this.leafRect = leafRect ?? (leafTexture ? [0, 0, 1, 1] : FREE_ATLAS_RECTS.leaf);
     const luminance = leafLuminance ?? meanLeafLuminance(this.leafTexture, this.leafRect);
-    this.material = createLeavedMaterial({lighting, leafTexture: this.leafTexture, leafCutoff, leafLuminance: luminance, canopy, nearHole});
+    this.material = createLeavedMaterial({lighting, leafTexture: this.leafTexture, leafCutoff, leafLuminance: luminance, canopy, nearHole,
+      barkTexture: barkTexture ?? (this.ownsLeaf ? this.leafTexture : null),
+      barkRect: barkRect ?? (barkTexture ? [0, 0, 1, 1] : FREE_ATLAS_RECTS.bark)});
     this.setProfile(profile);
   }
 

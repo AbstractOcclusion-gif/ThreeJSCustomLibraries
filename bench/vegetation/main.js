@@ -48,8 +48,8 @@ const comparison = [
 ];
 const variantRows = [4, 0, -4];
 const specimens = comparison.map(({profile, x, h, r}) => {
-  const plants = new LeavedTrees({scene, profile, lighting, sampleGround: heightAt, leafTexture: free.atlas, leafRect: free.atlasRects.leaf});
-  plants.place(variantRows.map((z, variant) => ({x, z, h, r, variant, yaw: 0, tint: highlight.toArray()})));
+  const plants = new LeavedTrees({scene, profile, lighting, sampleGround: heightAt});
+  plants.place(variantRows.map((z, variant) => ({x: x + z * .55, z, h, r, variant, yaw: 0, tint: highlight.toArray()})));
   plants.setEnvironment(stage.environment);
   return plants;
 });
