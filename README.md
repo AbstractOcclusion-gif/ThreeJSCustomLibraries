@@ -419,7 +419,9 @@ rocks.dispose();
 ```
 
 Each rock is a closed convex hull with flat normals and face-projected UVs
-in metre units. Cliff runs arrange overlapping hulls as individual columns.
+in metre units. Cliff mode generates one elongated hull and samples ground
+height at its centre. The span is its nominal width. Use `size` to scale each
+rock and `variation` (0–1) to adjust seeded size, aspect and ring variation.
 Scatter samples positions independently, so stones can overlap. The caller
 owns any supplied material. A mixed demo can supply its weather material and
 drive snow through its existing surface hook.

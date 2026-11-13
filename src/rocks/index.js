@@ -15,20 +15,22 @@ export const ROCK_PROFILES = Object.freeze({
 });
 
 export const ROCK_DEFAULTS = Object.freeze({
-  seed: 1, environment: 'alpine', mode: 'boulder', count: 24, span: 12, burial: .12,
+  seed: 1, environment: 'alpine', mode: 'boulder', count: 24, span: 12, burial: .12, size: 1, variation: 1,
 });
 const MODES = Object.freeze({
-  stone: {size: [.45,.33,.43], scale: [.75,1.25]},
-  boulder: {size: [2.5,2.25,2.3], scale: [.8,1.2]},
-  scatter: {size: [.95,.71,.9], scale: [.24,1.35]},
-  cliff: {size: [1,4.6,2.8], scale: [.7,1.25], overlap: .28, setback: .18},
+  stone: {size: [.45,.33,.43], scale: [.55,1.45]},
+  boulder: {size: [2.5,2.25,2.3], scale: [.65,1.45]},
+  scatter: {size: [.95,.71,.9], scale: [.18,1.55]},
+  cliff: {size: [1,4.6,2.8], scale: [.8,1.2]},
 });
+const AXIS_SCALE = [.72, 1.28];
+const RING_SCALE = [.78, 1.22];
 const TURN = Math.PI * 2;
 const HALF = .5;
 const sample = (random, [min, max]) => THREE.MathUtils.lerp(min, max, random());
 const signed = random => sample(random, [-1, 1]);
 
-function rockGeometry(shape, dimensions, random) {
+function rockGeometry(shape, dimensions, random, variation) {
   const phase = random() * TURN;
   const leanX = signed(random) * shape.lean;
   const leanZ = signed(random) * shape.lean;
@@ -36,9 +38,10 @@ function rockGeometry(shape, dimensions, random) {
   const points = [];
   for (const [height, radius] of shape.rings) {
     const ringTwist = signed(random) * shape.taper;
+    const ringScale = THREE.MathUtils.lerp(1, sample(random, RING_SCALE), variation);
     for (const [side, rib] of ribs.entries()) {
       const angle = phase + (side + ringTwist) * TURN / shape.sides;
-      const edge = radius * rib * (1 + signed(random) * shape.irregularity * HALF);
+      const edge = radius * ringScale * rib * (1 + signed(random) * shape.irregularity * HALF);
       const y = height === 0 ? 0 : height + signed(random) * shape.taper * HALF;
       points.push(new THREE.Vector3(
         (Math.cos(angle) * edge * HALF + height * leanX) * dimensions[0],
@@ -66,11 +69,14 @@ function rockGeometry(shape, dimensions, random) {
 
 /** Static meshes in metres, +Y up. The caller owns supplied materials and placement. */
 export function createRocks({material, heightAt = () => 0, ...options} = {}) {
-  const {seed, environment, mode, count, span, burial} = {...ROCK_DEFAULTS, ...options};
+  const {seed, environment, mode, count, span, burial, size, variation} = {...ROCK_DEFAULTS, ...options};
   if (!Object.hasOwn(ROCK_PROFILES, environment) || !Object.hasOwn(MODES, mode)) throw new RangeError('Unknown rock environment or mode');
   if (!Number.isSafeInteger(seed) || !Number.isSafeInteger(count) || count < 1 ||
       !Number.isFinite(span) || span <= 0 || !Number.isFinite(burial) || burial < 0 || burial > 1) {
     throw new RangeError('Invalid rock seed, count, span or burial');
+  }
+  if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(variation) || variation < 0 || variation > 1) {
+    throw new RangeError('Rock size must be positive and variation must be between zero and one');
   }
 
   const shape = ROCK_PROFILES[environment];
@@ -81,8 +87,8 @@ export function createRocks({material, heightAt = () => 0, ...options} = {}) {
   group.name = mode;
   const ownsMaterial = material == null;
   const rockMaterial = material ?? new THREE.MeshStandardMaterial();
-  const multiple = mode === 'scatter' || mode === 'cliff';
-  const step = span / count;
+  const scatter = mode === 'scatter';
+  const cliff = mode === 'cliff';
   function dispose() {
     group.removeFromParent();
     for (const mesh of group.children) mesh.geometry.dispose();
@@ -91,24 +97,24 @@ export function createRocks({material, heightAt = () => 0, ...options} = {}) {
   }
 
   try {
-    for (let index = 0; index < (multiple ? count : 1); index++) {
-      const scale = sample(placementRandom, layout.scale);
-      const dimensions = layout.size.map((value, axis) => value * scale * shape.size[axis]);
+    for (let index = 0; index < (scatter ? count : 1); index++) {
+      const scale = size * THREE.MathUtils.lerp(1, sample(placementRandom, layout.scale), variation);
+      const dimensions = layout.size.map((value, axis) => {
+        const aspect = THREE.MathUtils.lerp(1, sample(shapeRandom, AXIS_SCALE), variation);
+        const extent = cliff && axis === 0 ? span : value;
+        return extent * scale * shape.size[axis] * aspect;
+      });
       let x = 0, z = 0;
-      if (mode === 'scatter') {
+      if (scatter) {
         x = signed(placementRandom) * span * HALF;
         z = signed(placementRandom) * span * HALF;
-      } else if (mode === 'cliff') {
-        x = (index + HALF) * step - span * HALF;
-        z = signed(placementRandom) * step * layout.setback;
-        dimensions[0] = step * (1 + layout.overlap);
       }
       const y = heightAt(x, z);
       if (!Number.isFinite(y)) throw new RangeError('Rock ground height must be finite');
-      const mesh = new THREE.Mesh(rockGeometry(shape, dimensions, shapeRandom), rockMaterial);
+      const mesh = new THREE.Mesh(rockGeometry(shape, dimensions, shapeRandom, variation), rockMaterial);
       mesh.name = `${mode}_${index + 1}`;
       mesh.position.set(x, y - dimensions[1] * burial, z);
-      mesh.rotation.y = mode === 'cliff' ? signed(placementRandom) * shape.taper : placementRandom() * TURN;
+      mesh.rotation.y = cliff ? signed(placementRandom) * shape.taper : placementRandom() * TURN;
       mesh.castShadow = mesh.receiveShadow = true;
       group.add(mesh);
     }

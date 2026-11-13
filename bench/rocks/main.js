@@ -6,7 +6,7 @@ import {createRocks, ROCK_DEFAULTS, ROCK_PROFILES} from '../../src/rocks/index.j
 import {createBenchPanel} from '../panel.js';
 import '../bench.css';
 
-const PREVIEW = {columns: 8, roughness: .9, maxPixelRatio: 2, fov: 42, near: .02, far: 150, framing: 1.3};
+const PREVIEW = {roughness: .9, maxPixelRatio: 2, fov: 42, near: .02, far: 150, framing: 1.3};
 const scene = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, PREVIEW.maxPixelRatio));
@@ -17,7 +17,7 @@ const camera = new THREE.PerspectiveCamera(PREVIEW.fov, 1, PREVIEW.near, PREVIEW
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
 const direction = new THREE.Vector3(1, .72, 1.3).normalize();
-const state = {...ROCK_DEFAULTS, columns: PREVIEW.columns, finish: 'Rock', normalStrength: 1};
+const state = {...ROCK_DEFAULTS, finish: 'Rock', normalStrength: 1};
 const status = document.querySelector('#status');
 const loader = new THREE.TextureLoader();
 const files = import.meta.glob('../../assets/terrain/{rock_wall_02,mossy_rock}/{color,normal,roughness}.jpg', {
@@ -44,7 +44,7 @@ function frame() {
   orbit.update();
 }
 function rebuild(reframe = false) {
-  const next = createRocks({...state, count: state.mode === 'cliff' ? state.columns : state.count, material});
+  const next = createRocks({...state, material});
   rocks?.dispose();
   rocks = next;
   scene.add(rocks.group);
@@ -60,7 +60,8 @@ panel.add(state, 'mode', ['stone', 'boulder', 'scatter', 'cliff']).onChange(() =
 panel.add(state, 'environment', Object.keys(ROCK_PROFILES)).onChange(() => rebuild());
 panel.add(state, 'seed', 0, 65535, 1).onFinishChange(() => rebuild());
 panel.add(state, 'count', 1, 120, 1).name('Scatter count').onFinishChange(() => rebuild());
-panel.add(state, 'columns', 1, 24, 1).name('Cliff columns').onFinishChange(() => rebuild());
+panel.add(state, 'size', .25, 3, .05).name('Size multiplier').onFinishChange(() => rebuild(true));
+panel.add(state, 'variation', 0, 1, .05).name('Shape and size variation').onFinishChange(() => rebuild(true));
 panel.add(state, 'span', 2, 24, .5).name('Span (m)').onFinishChange(() => rebuild(true));
 panel.add(state, 'burial', 0, .45, .01).onFinishChange(() => rebuild());
 panel.add(state, 'finish', Object.keys(finishes)).onChange(() => {
