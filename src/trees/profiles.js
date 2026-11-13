@@ -51,7 +51,20 @@ export const SPECIES = Object.freeze({
     crown: {depth: .42, mainRadius: .53, mainCentreY: .86, fixedSquash: .31},
     lobes: {count: [6, 8], radius: [.24, .43], offset: [.39, .81], drop: [-.26, .65], baseY: .79},
     core: {radiusShare: .44}, cards: {needle: true, size: [.26, .43], perUnitArea: 112, subcells: 1},
-    branches: {origin: [.58, .81], radius: .055, tipRadius: .013, bend: .035},
+    branches: {origin: [.53, .67], radius: .025, tipRadius: .005, bend: .025},
+  }),
+  spruce: mergeProfile(TREE_PROFILE, {
+    name: 'spruce', trunk: {radiusBottom: .086, radiusTop: .009, topIntoCrown: 1, color: '#74563e'},
+    crown: {depth: .86, mainRadius: .13, mainCentreY: .95, fixedSquash: .49},
+    lobes: {count: [0, 0], tiers: [
+      {height: .23, reach: .67, radius: .4, branches: 6},
+      {height: .38, reach: .54, radius: .36, branches: 6},
+      {height: .53, reach: .42, radius: .29, branches: 5},
+      {height: .68, reach: .29, radius: .23, branches: 5},
+      {height: .81, reach: .16, radius: .18, branches: 4},
+    ]},
+    core: {radiusShare: .67}, cards: {needle: true, size: [.21, .34], perUnitArea: 76, subcells: 1},
+    branches: {origin: [.22, .91], radius: .024, tipRadius: .004, bend: .018},
   }),
 });
 export const PROFILES = Object.freeze({tree: TREE_PROFILE, bush: BUSH_PROFILE, ...SPECIES});

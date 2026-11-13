@@ -12,6 +12,7 @@ import {benchRenderer, onLeave, bindResize, startFrameLoop, STATUS_REFRESH_MS} f
 import {presetsFolder, stageControls} from '../kit/controls.js';
 import {detectAssets} from '../kit/assets.js';
 import {createRollingBodies} from './ball.js';
+import {loadConifers} from './conifers.js';
 import {Sphere} from 'cannon-es';
 import '../bench.css';
 
@@ -46,14 +47,23 @@ const comparison = [
   {profile: 'birch', x: -4.5, h: 6, r: 1.35},
   {profile: 'hawthorn', x: 4.5, h: 2.4, r: 1.5},
   {profile: 'pine', x: 13.5, h: 6, r: 1.9},
+  {profile: 'spruce', x: 22.5, h: 6, r: 1.75},
 ];
 const variantRows = [4, 0, -4];
-const specimens = comparison.map(({profile, x, h, r}) => {
+const specimens = await Promise.all(comparison.map(async ({profile, x, h, r}) => {
+  const items = variantRows.map((z, variant) => ({x: x + z * .55, z, h, r, variant, yaw: 0, tint: highlight.toArray()}));
+  if (profile === 'pine' || profile === 'spruce') {
+    try {
+      return await loadConifers({scene, profile, items, environment: stage.environment});
+    } catch (error) {
+      console.warn(`Could not load ${profile} model. Using the procedural profile.`, error);
+    }
+  }
   const plants = new LeavedTrees({scene, profile, lighting, sampleGround: heightAt});
-  plants.place(variantRows.map((z, variant) => ({x: x + z * .55, z, h, r, variant, yaw: 0, tint: highlight.toArray()})));
+  plants.place(items);
   plants.setEnvironment(stage.environment);
   return plants;
-});
+}));
 const view = {layout: 'Species comparison'};
 const meadowNoise = valueNoise(23);
 function placements() {
@@ -143,8 +153,8 @@ function applyView() {
   trees.group.visible = bushes.group.visible = !compare;
   for (const plants of specimens) plants.group.visible = compare;
   $('species-order').hidden = !compare;
-  camera.position.set(...(compare ? [0, 11, 39] : [13, 5.5, 16]));
-  controls.target.set(0, compare ? 2.6 : 1, 0);
+  camera.position.set(...(compare ? [4.5, 13, 50] : [13, 5.5, 16]));
+  controls.target.set(compare ? 4.5 : 0, compare ? 2.6 : 1, 0);
   controls.update();
 }
 const viewControl = gui.add(view, 'layout', ['Species comparison', 'Meadow']).name('View').onChange(applyView);

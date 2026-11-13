@@ -80,10 +80,11 @@ function appendTrunk(out, T, topY, textured) {
 
 function appendBranch(out, profile, lobe, band) {
   const {branches, trunk} = profile;
-  const root = new THREE.Vector3(0, THREE.MathUtils.lerp(...branches.origin, hash2(lobe.seed, 0, 9)), 0);
   const tip = lobe.centre;
+  const originY = THREE.MathUtils.lerp(...branches.origin, hash2(lobe.seed, 0, 9));
+  const root = new THREE.Vector3(0, Math.min(originY, tip.y), 0);
   const elbow = root.clone().lerp(tip, .62);
-  elbow.y += branches.bend;
+  elbow.y = Math.min(elbow.y + branches.bend, tip.y);
   const color = new THREE.Color(trunk.color).convertSRGBToLinear();
   const sides = trunk.sides;
   const stride = sides + 1;
@@ -131,6 +132,15 @@ export function leavedTreeGeometry(profile, variant, leafRect = [0, 0, 1, 1]) {
     const drop = THREE.MathUtils.lerp(L.drop[0], L.drop[1], hash2(variant, k, 7)) * depth * L.dropScale;
     lobes.push({centre: new THREE.Vector3(Math.cos(angle) * offset, (L.baseY ?? crownCentreY) - drop * L.dropShare, Math.sin(angle) * offset), radius,
       seed: seed + k + 1, tint: 1 + L.tintJitter * (hash2(variant, k, 8) * 2 - 1)});
+  }
+  for (const [tierIndex, {height, reach, radius, branches}] of (L.tiers ?? []).entries()) {
+    for (let i = 0; i < branches; i++) {
+      const angle = (i / branches) * Math.PI * 2 + tierIndex * GOLDEN_ANGLE + hash2(variant, i, tierIndex) * LOBE_ANGLE_JITTER;
+      lobes.push({
+        centre: new THREE.Vector3(Math.cos(angle) * reach, height, Math.sin(angle) * reach),
+        radius, seed: seed + lobes.length, tint: 1,
+      });
+    }
   }
   for (const lobe of lobes) appendCore(out, P, noise, lobe.centre, lobe.radius, squash, lobe.seed, band);
   for (const lobe of lobes) appendCards(out, P, noise, lobe.centre, lobe.radius, squash, lobe.seed, lobe.tint, band, leafRect);

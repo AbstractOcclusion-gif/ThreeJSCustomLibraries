@@ -11,7 +11,7 @@ test('profiles resolve by name or partial object and presets/trees mirror the bu
  assert.equal(bush.trunk.enabled, false);
  assert.equal(bush.cards.scale, .4);
  assert.deepEqual(bush.lobes.count, [3, 5]);
- for (const name of ['oak', 'birch', 'hawthorn', 'pine']) {
+ for (const name of ['oak', 'birch', 'hawthorn', 'pine', 'spruce']) {
   assert.equal(resolveProfile(name).name, name);
   assert.ok(resolveProfile(name).branches);
  }
