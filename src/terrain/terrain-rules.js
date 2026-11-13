@@ -28,7 +28,7 @@ const NOISE=Object.freeze({local:{seed:3,scale:8},patch:{seed:37,octave:2.13,off
 // How much the local break-up moves each boundary: exposed slope, valley wall, mud basin, sand line (m).
 const BREAKUP=Object.freeze({slope:.2,wall:.15,basin:.8,sand:.5});
 // Forest floor: smoothstep edges over (patch x patchGain + (coverage - .5) x coverGain + .5).
-const FOREST=Object.freeze({edges:[.35,.65],patchGain:.38,coverGain:1.8});
+const FOREST=Object.freeze({edges:[.35,.65],patchGain:.38,coverGain:1.06});
 export function createTerrainRules(seed,settings={}){
  const config={...TERRAIN_PAINT_DEFAULTS,...settings};validateTerrainPaint(config);
  const local=valueNoise(seed+NOISE.local.seed),patch=valueNoise(seed+NOISE.patch.seed);

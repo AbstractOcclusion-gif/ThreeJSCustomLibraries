@@ -73,6 +73,36 @@ export function snowTrackControls(gui, {field, paint, footstep, contact}) {
   return folder;
 }
 
+// One dropdown per layer over the texture catalogue. onChange(sets) loads and applies them; a set that fails to load
+// is reported in the folder title and the dropdown returns to the set in use.
+export function textureSetControls(gui, {sets, catalogue, onChange}) {
+  const title = 'Texture sets';
+  const folder = gui.addFolder(title).close();
+  const labels = Object.fromEntries(Object.values(catalogue).map(set => [set.label, set.id]));
+  const applied = {...sets};
+  let busy = false;
+  for (const layer of Object.keys(sets)) {
+    const controller = folder.add(sets, layer, labels).name(layer).onChange(async () => {
+      if (busy) return;
+      busy = true;
+      folder.title(`${title} · loading…`);
+      try {
+        await onChange({...sets});
+        Object.assign(applied, sets);
+        folder.title(title);
+      } catch (error) {
+        Object.assign(sets, applied);
+        folder.title(`${title} · ${error.message}`);
+      } finally {
+        busy = false;
+        folder.controllersRecursive().forEach(item => item.updateDisplay());
+      }
+    });
+    controller.domElement.title = 'Texture set of the ' + layer + ' layer';
+  }
+  return folder;
+}
+
 // Marks a rolling or landing body leaves in bare mud and sand (CONTACT_SURFACES.mud and .sand).
 export function groundTrackControls(gui, {mud, sand}) {
   const folder = gui.addFolder('Mud and sand tracks').close();

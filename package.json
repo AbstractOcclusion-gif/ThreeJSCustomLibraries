@@ -54,6 +54,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "stage:webaquarium": "node scripts/stage-webaquarium.mjs",
+    "textures:fetch": "node scripts/fetch-terrain-textures.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node scripts/run-tests.mjs all",
     "test:weather": "node --test tests/weather/weather.test.js tests/weather/lifecycle.test.js",

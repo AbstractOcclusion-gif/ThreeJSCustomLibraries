@@ -60,6 +60,35 @@ test('terrain material takes per-layer detail only with one slice per packed lay
  plain.dispose(); detailed.dispose(); field.dispose();
 });
 
+test('the paint rules put rock on steep ground, snow above its line, mud in basins and forest by its coverage', async () => {
+ const {createTerrainRules} = await import('../../src/terrain/index.js');
+ const rules = createTerrainRules(1, {mudFromRunout: false, forestCover: .5});
+ const mean = (rule, sample, count = 900) => {
+  const total = [0, 0, 0, 0, 0];
+  for (let i = 0; i < count; i++) {
+   const weights = rule.weights({x: (i % 30) * 5.3, z: Math.floor(i / 30) * 4.1, ...sample});
+   assert.ok(Math.abs(weights.reduce((sum, weight) => sum + weight) - 1) < 1e-9);
+   weights.forEach((weight, layer) => { total[layer] += weight / count; });
+  }
+  return total;
+ };
+ const [GRASS, ROCK, SNOW, MUD, FOREST] = [0, 1, 2, 3, 4];
+ assert.ok(mean(rules, {height: 50, slope: 1.6})[ROCK] > .99);
+ assert.ok(mean(rules, {height: 50, slope: 0})[ROCK] < .01);
+ assert.ok(mean(rules, {height: 50, slope: 0, wall: 1.5})[ROCK] > .99);
+ assert.ok(mean(rules, {height: 200, slope: 0})[SNOW] > .99);
+ assert.ok(Math.abs(mean(rules, {height: 150, slope: 0})[SNOW] - .5) < .1);
+ assert.ok(mean(rules, {height: -3, slope: 0})[MUD] > .99);
+ assert.ok(mean(rules, {height: 50, slope: 0})[MUD] < .01);
+ assert.equal(mean(createTerrainRules(1, {}), {height: -3, slope: 0})[MUD], 0);
+ const flat = mean(rules, {height: 50, slope: 0});
+ assert.ok(Math.abs(flat[FOREST] - .5) < .1 && Math.abs(flat[GRASS] - .5) < .1);
+ const shares = [.1, .3, .5, .7, .9].map(forestCover => mean(createTerrainRules(1, {forestCover}), {height: 50, slope: 0})[FOREST]);
+ assert.ok(shares[0] < .02 && shares.at(-1) > .98);
+ for (let i = 1; i < shares.length; i++) assert.ok(shares[i] > shares[i - 1] || shares[i] === 1);
+ assert.ok(shares[1] > .02 && shares[3] < .98, 'forest coverage must act over the middle of its range');
+});
+
 test('ocean coast terrain builds on the lighting hook and shares its uniforms', () => {
  const scene = new THREE.Scene(), lighting = createLighting();
  const coast = new OceanCoastTerrain({scene, settings: {centerZ: -220}, lighting});

@@ -493,6 +493,30 @@ export function createTerrainMaterial(parameters = {}, {
   terrainSnowNormalStrength: {value: snowMaterial?.normalStrength ?? 1},
   terrainSnowCover: field.snowCover ?? {value: false}, terrainSnowDepth: {value: field.snowMap ?? null},
  };
+ // Swaps the layer textures in place, e.g. after picking another texture set. Pass only what changes; the caller
+ // disposes the textures it replaces. Per-layer detail and snow detail can be swapped, not added.
+ material.setLayerTextures = ({layerArray: nextLayers, layerDetailArray: nextDetail, detailNormal: nextNormal, snowMaterial: nextSnow} = {}) => {
+  if (nextLayers !== undefined) {
+   if (!layerArray) throw Error('Terrain material was built without a packed layer array');
+   if (!nextLayers?.isDataArrayTexture || nextLayers.image.depth !== layerArray.image.depth) throw Error('Terrain layer array needs the same number of layers');
+   uniforms.terrainLayerArray.value = nextLayers;
+  }
+  if (nextDetail !== undefined) {
+   if (!layerDetailArray) throw Error('Terrain material was built without per-layer detail');
+   if (!nextDetail?.isDataArrayTexture || nextDetail.image.depth !== layerDetailArray.image.depth) throw Error('Terrain layer detail needs one slice per layer of the layer array');
+   uniforms.terrainLayerDetailArray.value = nextDetail;
+  }
+  if (nextNormal !== undefined) {
+   if (!nextNormal?.isTexture) throw Error('Terrain detail normal must be a texture');
+   uniforms.terrainDetail.value = nextNormal;
+  }
+  if (nextSnow !== undefined) {
+   if (!snowMaterial) throw Error('Terrain material was built without snow detail');
+   if (!nextSnow?.normal?.isTexture || !nextSnow?.roughness?.isTexture) throw Error('Snow detail needs a normal and a roughness texture');
+   uniforms.terrainSnowNormal.value = nextSnow.normal;
+   uniforms.terrainSnowRoughness.value = nextSnow.roughness;
+  }
+ };
  material.onBeforeCompile = shader => {
   compileSurface(shader);
   Object.assign(shader.uniforms, uniforms);

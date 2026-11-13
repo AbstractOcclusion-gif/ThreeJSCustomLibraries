@@ -9,7 +9,8 @@ import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} f
 import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
-import {groundTrackControls, runoffControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
+import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
+import {groundTrackControls, runoffControls, textureSetControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
 import {createTerrainBasins} from './basins.js';
 import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from './footsteps.js';
 import {CONTACT_SURFACES, createTerrainImpacts} from './impacts.js';
@@ -65,7 +66,9 @@ const surfaceLook = createSurfaceLook();
 const drainage = createTerrainDrainage(field, {maxPuddleDepth: puddle.maxDepth});
 let drainageDirty = false, meltDrainageDirty = false, meltFlowDirty = false, meltBakeElapsed = 0;
 let rollingBakeElapsed = 0;
-const {layerArray, layerDetailArray, detail, rock, snowMaterial} = await loadTerrainTextures(renderer, {snowDetail: true, layerDetail: true});
+const TEXTURE_OPTIONS = {snowDetail: true, layerDetail: true};
+let textures = await loadTerrainTextures(renderer, TEXTURE_OPTIONS);
+const {layerArray, layerDetailArray, detail, rock, snowMaterial} = textures;
 const appearance = createTerrainAppearance();
 appearance.shoreWetness.value = 0;   // each puddle has its own local fill level
 const surfaceWeather = createSurfaceWeather();
@@ -200,6 +203,22 @@ function resetTerrain() {
   stage.sun.shadow.needsUpdate = true;
 }
 surfaceFolder.add({clear: resetTerrain}, 'clear').name('Reset tracks and terrain');
+const disposeTextures = set => {
+  for (const texture of [set.layerArray, set.layerDetailArray, set.detail, set.rock, set.snowMaterial.normal, set.snowMaterial.roughness]) texture.dispose();
+};
+textureSetControls(gui, {
+  sets: {...DEFAULT_TERRAIN_TEXTURES}, catalogue: TERRAIN_TEXTURE_SETS,
+  async onChange(sets) {
+    const next = await loadTerrainTextures(renderer, {...TEXTURE_OPTIONS, sets});
+    for (const material of [groundMaterial, snowCapMaterial, boulderMaterial]) {
+      material.setLayerTextures({layerArray: next.layerArray, layerDetailArray: next.layerDetailArray, detailNormal: next.detail, snowMaterial: next.snowMaterial});
+    }
+    boulderMaterial.map = next.rock;
+    disposeTextures(textures);
+    textures = next;
+    stage.sun.shadow.needsUpdate = true;
+  },
+});
 snowLookControls(gui, snowLook);
 sandLookControls(gui, sandLook);
 snowBodyControls(gui, {field, onRelay: resetTerrain});
@@ -330,12 +349,11 @@ document.body.dataset.ready = 'true';
 window.terrainBench = {field, rules, sandLook, appearance, surfaceWeather, surfaceWater, tracks, drainage, runoff, impacts, rainAmount, rills, puddleFill, stage, scene, camera, renderer};
 onLeave(() => {
   renderer.setAnimationLoop(null); unbindResize(); trackEvents.abort();
-  snowMaterial.normal.dispose(); snowMaterial.roughness.dispose();
   boulderGeometry.dispose(); boulderMaterial.dispose();
   snowCapGeometry.dispose(); snowCapMaterial.dispose();
   impacts.dispose();
   runoff.dispose();
   drainage.dispose();
-  tracks.dispose(); field.dispose(); groundMaterial.dispose(); layerArray.dispose(); layerDetailArray.dispose(); detail.dispose(); rock.dispose();
+  tracks.dispose(); field.dispose(); groundMaterial.dispose(); disposeTextures(textures);
   stage.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
 });
