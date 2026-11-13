@@ -50,20 +50,17 @@ const comparison = [
   {profile: 'spruce', x: 22.5, h: 6, r: 1.75},
 ];
 const variantRows = [4, 0, -4];
-const specimens = await Promise.all(comparison.map(async ({profile, x, h, r}) => {
-  const items = variantRows.map((z, variant) => ({x: x + z * .55, z, h, r, variant, yaw: 0, tint: highlight.toArray()}));
-  if (profile === 'pine' || profile === 'spruce') {
-    try {
-      return await loadConifers({scene, profile, items, environment: stage.environment});
-    } catch (error) {
-      console.warn(`Could not load ${profile} model. Using the procedural profile.`, error);
-    }
-  }
+const comparisonItems = comparison.map(({profile, x, h, r}) => ({
+  profile, items: variantRows.map((z, variant) => ({x: x + z * .55, z, h, r, variant, yaw: 0, tint: highlight.toArray()})),
+}));
+const specimens = comparisonItems.map(({profile, items}) => {
   const plants = new LeavedTrees({scene, profile, lighting, sampleGround: heightAt});
   plants.place(items);
   plants.setEnvironment(stage.environment);
   return plants;
-}));
+});
+const imported = new Map();
+let importPending, leaving = false;
 const view = {layout: 'Species comparison'};
 const meadowNoise = valueNoise(23);
 function placements() {
@@ -148,16 +145,36 @@ function launchBalls(count, box = false) {
 const rollBall = () => launchBalls(1);
 
 const gui = createBenchPanel('Vegetation');
-function applyView() {
-  const compare = view.layout === 'Species comparison';
+function syncVisibility() {
+  const compare = view.layout !== 'Meadow';
+  const showImported = view.layout === 'Imported conifers';
   trees.group.visible = bushes.group.visible = !compare;
-  for (const plants of specimens) plants.group.visible = compare;
+  for (const plants of specimens) plants.group.visible = compare && !(showImported && imported.has(plants.profile.name));
+  for (const plants of imported.values()) plants.group.visible = showImported;
   $('species-order').hidden = !compare;
+}
+function applyView() {
+  const compare = view.layout !== 'Meadow';
+  syncVisibility();
+  if (view.layout === 'Imported conifers' && !importPending) {
+    importPending = Promise.all(comparisonItems.slice(-2).map(async ({profile, items}) => {
+      try {
+        const plants = await loadConifers({scene, profile, items, environment: stage.environment});
+        if (leaving) plants.dispose();
+        else {
+          imported.set(profile, plants);
+          syncVisibility();
+        }
+      } catch (error) {
+        console.warn(`Could not load ${profile} model. Using the procedural profile.`, error);
+      }
+    }));
+  }
   camera.position.set(...(compare ? [4.5, 13, 50] : [13, 5.5, 16]));
   controls.target.set(compare ? 4.5 : 0, compare ? 2.6 : 1, 0);
   controls.update();
 }
-const viewControl = gui.add(view, 'layout', ['Species comparison', 'Meadow']).name('View').onChange(applyView);
+const viewControl = gui.add(view, 'layout', ['Species comparison', 'Imported conifers', 'Meadow']).name('View').onChange(applyView);
 applyView();
 const stageUI = stageControls(gui, stage);
 Object.assign(stageUI.state, {windSpeed: START_WIND, gust: P.plants.gust}); stageUI.apply();
@@ -188,6 +205,7 @@ startFrameLoop(renderer, (dt, now) => {
   trees.setEnvironment(environment); bushes.setEnvironment(environment);
   trees.update(dt); bushes.update(dt);
   for (const plants of specimens) if (plants.group.visible) plants.update(dt);
+  for (const plants of imported.values()) if (plants.group.visible) plants.update(dt);
   balls.update(dt);
   grass.update(dt, {camera, environment, transmission: P.grass.transmission * environment.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density, recoverySeconds: P.interact.recoverySeconds});
   renderer.render(scene, camera);
@@ -195,9 +213,11 @@ startFrameLoop(renderer, (dt, now) => {
 });
 document.body.dataset.ready = 'true';
 onLeave(() => {
+  leaving = true;
   renderer.setAnimationLoop(null); unbindResize();
   grass?.dispose(); trees.dispose(); bushes.dispose(); free.grassGeometries.forEach(geometry => geometry.dispose()); free.dispose();
   for (const plants of specimens) plants.dispose();
+  for (const plants of imported.values()) plants.dispose();
   stage.dispose(); controls.dispose(); gui.destroy(); renderer.dispose();
 });
 window.vegetationBench = {get grass() { return grass; }, trees, bushes, rollBall, bodies: balls, stage, scene, camera, renderer, pack};

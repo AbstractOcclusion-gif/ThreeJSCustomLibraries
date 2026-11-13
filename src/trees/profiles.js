@@ -25,46 +25,56 @@ export function mergeProfile(base, partial = {}) {
   for (const [k, v] of Object.entries(partial)) out[k] = isObject(v) && isObject(base[k]) ? mergeProfile(base[k], v) : structuredClone(v);
   return out;
 }
+const BROADLEAF_SHOOTS = [
+  {along: .16, spread: .78, lift: .2, size: .58},
+  {along: .57, spread: .65, lift: .08, size: .5},
+];
+const CONIFER_SHOOTS = [
+  {along: .02, spread: .82, lift: -.17, size: .72},
+  {along: .38, spread: .66, lift: -.23, size: .63},
+  {along: .72, spread: .45, lift: -.12, size: .53},
+];
+
 export const SPECIES = Object.freeze({
   oak: mergeProfile(TREE_PROFILE, {
     name: 'oak', trunk: {radiusBottom: .15, radiusTop: .065, topIntoCrown: .65},
     crown: {depth: .56, mainRadius: .65, mainSquash: .92},
     lobes: {count: [5, 7], radius: [.34, .53], offset: [.48, .92], drop: [-.24, .36]},
-    core: {radiusShare: .54}, cards: {size: [.21, .36], perUnitArea: 54, subcells: 1},
-    branches: {origin: [.32, .62], radius: .081, tipRadius: .018, bend: .1},
+    core: {radiusShare: .29}, cards: {size: [.24, .39], perUnitArea: 78, subcells: 1},
+    branches: {origin: [.32, .62], radius: .066, tipRadius: .013, bend: .1, shoots: BROADLEAF_SHOOTS, shootThickness: .34},
   }),
   birch: mergeProfile(TREE_PROFILE, {
     name: 'birch', trunk: {radiusBottom: .075, radiusTop: .019, color: '#d6c9b3', topIntoCrown: .91},
     crown: {depth: .68, mainRadius: .43, mainSquash: .8, mainCentreY: .72},
     lobes: {count: [8, 11], radius: [.19, .35], offset: [.31, .82], drop: [-.46, .42], baseY: .62},
-    core: {radiusShare: .35}, cards: {size: [.16, .29], perUnitArea: 72, yCompensation: .73, subcells: 1},
-    branches: {origin: [.23, .61], radius: .045, tipRadius: .008, bend: .21},
+    core: {radiusShare: 0}, cards: {size: [.19, .31], perUnitArea: 98, yCompensation: .73, subcells: 1},
+    branches: {origin: [.23, .61], radius: .031, tipRadius: .005, bend: .12, shoots: BROADLEAF_SHOOTS.map(shoot => ({...shoot, lift: -.32})), shootThickness: .31},
   }),
   hawthorn: mergeProfile(BUSH_PROFILE, {
     name: 'hawthorn', crown: {mainRadius: .49, mainCentreY: .67, fixedSquash: .59},
     lobes: {count: [7, 9], radius: [.26, .45], offset: [.42, .86], drop: [-.24, .33], baseY: .52},
-    core: {radiusShare: .52}, cards: {size: [.3, .48], perUnitArea: 106, subcells: 1},
-    branches: {count: 3, origin: [0, .08], radius: .041, tipRadius: .01, bend: .04},
+    core: {radiusShare: .27}, cards: {size: [.32, .51], perUnitArea: 123, subcells: 1},
+    branches: {count: 3, origin: [0, .08], radius: .037, tipRadius: .008, bend: .04, shoots: BROADLEAF_SHOOTS, shootThickness: .26},
   }),
   pine: mergeProfile(TREE_PROFILE, {
     name: 'pine', trunk: {radiusBottom: .105, radiusTop: .03, topIntoCrown: .91, color: '#a26e45'},
     crown: {depth: .42, mainRadius: .53, mainCentreY: .86, fixedSquash: .31},
     lobes: {count: [6, 8], radius: [.24, .43], offset: [.39, .81], drop: [-.26, .65], baseY: .79},
-    core: {radiusShare: .44}, cards: {needle: true, size: [.26, .43], perUnitArea: 112, subcells: 1},
-    branches: {origin: [.53, .67], radius: .025, tipRadius: .005, bend: .025},
+    core: {radiusShare: .23}, cards: {needle: true, size: [.31, .48], perUnitArea: 128, subcells: 1},
+    branches: {origin: [.53, .67], radius: .025, tipRadius: .005, bend: .025, shoots: CONIFER_SHOOTS, shootThickness: .32},
   }),
   spruce: mergeProfile(TREE_PROFILE, {
     name: 'spruce', trunk: {radiusBottom: .086, radiusTop: .009, topIntoCrown: 1, color: '#74563e'},
-    crown: {depth: .86, mainRadius: .13, mainCentreY: .95, fixedSquash: .49},
+    crown: {depth: .86, mainRadius: .12, mainCentreY: .93, fixedSquash: .43},
     lobes: {count: [0, 0], tiers: [
       {height: .23, reach: .67, radius: .4, branches: 6},
       {height: .38, reach: .54, radius: .36, branches: 6},
       {height: .53, reach: .42, radius: .29, branches: 5},
       {height: .68, reach: .29, radius: .23, branches: 5},
       {height: .81, reach: .16, radius: .18, branches: 4},
-    ]},
-    core: {radiusShare: .67}, cards: {needle: true, size: [.21, .34], perUnitArea: 76, subcells: 1},
-    branches: {origin: [.22, .91], radius: .024, tipRadius: .004, bend: .018},
+    ], tierVariation: {gapChance: .62, angle: 1.05, length: [.66, 1.18], elevation: .095, droop: .16}},
+    core: {radiusShare: .26}, cards: {needle: true, size: [.25, .41], perUnitArea: 117, subcells: 1},
+    branches: {origin: [.22, .91], radius: .024, tipRadius: .004, bend: .012, shoots: CONIFER_SHOOTS, shootThickness: .32},
   }),
 });
 export const PROFILES = Object.freeze({tree: TREE_PROFILE, bush: BUSH_PROFILE, ...SPECIES});
