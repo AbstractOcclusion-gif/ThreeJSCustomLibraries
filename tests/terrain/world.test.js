@@ -50,18 +50,63 @@ test('painted regions hold their biome at the centre and blend relief and paint 
 
 test('unpainted regions are drawn from the seed, repeatably, and wander moves the borders', () => {
  const auto = map(new Array(9).fill(WORLD_MAP_AUTO));
- const a = createTerrainWorld({seed: SEED, biomes: biomes(), map: auto, regionSize: SIZE});
- const b = createTerrainWorld({seed: SEED, biomes: biomes(), regionSize: SIZE});
+ const a = createTerrainWorld({seed: SEED, biomes: biomes(), map: auto, regionSize: SIZE, climate: false});
+ const b = createTerrainWorld({seed: SEED, biomes: biomes(), regionSize: SIZE, climate: false});
  const used = new Set();
  for (let column = -6; column <= 6; column++) for (let row = -6; row <= 6; row++) {
   assert.equal(a.regionBiome(column, row), b.regionBiome(column, row));
   used.add(a.regionBiome(column, row));
  }
  assert.equal(used.size, 3);
- const straight = createTerrainWorld({seed: SEED, biomes: biomes(), regionSize: SIZE, wander: 0});
+ const straight = createTerrainWorld({seed: SEED, biomes: biomes(), regionSize: SIZE, wander: 0, climate: false});
  let moved = 0;
  for (let z = 0; z < 400; z += 10) moved += Math.abs(straight.weightsAt(100, z)[0] - b.weightsAt(100, z)[0]) > .05;
  assert.ok(moved > 5);
+});
+
+test('regions are drawn by weight, and by the climate the biomes live in', () => {
+ const count = (world, reach = 20) => {
+  const tally = new Array(world.biomes.length).fill(0);
+  for (let column = -reach; column <= reach; column++) for (let row = -reach; row <= reach; row++) tally[world.regionBiome(column, row)]++;
+  return tally;
+ };
+ // Weights: a biome three times as common takes about three times the regions; weight 0 only where painted.
+ const weighted = biomes();
+ weighted[0].weight = 3; weighted[2].weight = 0;
+ const cells = new Array(9).fill(WORLD_MAP_AUTO); cells[4] = 2;
+ const byWeight = createTerrainWorld({seed: SEED, biomes: weighted, regionSize: SIZE, climate: false, map: map(cells)});
+ const [plains, mountains, desert] = count(byWeight);
+ assert.ok(plains / mountains > 2.4 && plains / mountains < 3.6, `${plains} : ${mountains}`);
+ assert.equal(desert, 1);
+ assert.equal(byWeight.regionBiome(0, 0), 2);
+ assert.throws(() => createTerrainWorld({seed: SEED, biomes: weighted.map(biome => ({...biome, weight: 0}))}), /weight/);
+ // Climate: each region takes a biome that lives in its climate, or the nearest one.
+ const hot = (x, z) => ({temperature: x > 0 ? .95 : .05, moisture: .1});
+ const byClimate = createTerrainWorld({seed: SEED, biomes: biomes(), regionSize: SIZE, climateAt: hot});
+ for (let row = -8; row <= 8; row++) {
+  assert.equal(byClimate.regionBiome(3, row), 2, 'hot and dry: desert');
+  assert.equal(byClimate.regionBiome(-3, row), 1, 'cold: mountains, the nearest');
+ }
+ assert.deepEqual(byClimate.climateAt(50, 0), {temperature: .95, moisture: .1});
+ // A biome without a climate lives anywhere, and climate: false ignores them all.
+ const anywhere = biomes(); delete anywhere[0].climate;
+ const mixed = count(createTerrainWorld({seed: SEED, biomes: anywhere, regionSize: SIZE, climateAt: hot}));
+ assert.ok(mixed[0] > mixed[2] && mixed[2] > 0, 'it takes the cold side alone and shares the hot side with the desert');
+ assert.equal(mixed[1], 0, 'mountains fit nowhere better than it does');
+ assert.ok(count(createTerrainWorld({seed: SEED, biomes: biomes(), regionSize: SIZE, climateAt: hot, climate: false})).every(regions => regions > 300));
+ assert.throws(() => createTerrainWorld({seed: SEED, biomes: biomes(), climateAt: 3}), TypeError);
+ assert.throws(() => createTerrainWorld({seed: SEED, biomes: biomes(), climateAt: () => ({temperature: 2, moisture: 0})}).regionBiome(9, 9), /temperature/);
+ // The world's own climate reaches both ends and changes slowly: neighbouring regions mostly share a biome.
+ const own = createTerrainWorld({seed: SEED, biomes: biomes(), regionSize: SIZE});
+ let low = 1, high = 0, same = 0, pairs = 0;
+ for (let x = -20000; x <= 20000; x += 500) for (let z = -20000; z <= 20000; z += 500) {
+  const {temperature} = own.climateAt(x, z);
+  low = Math.min(low, temperature); high = Math.max(high, temperature);
+ }
+ assert.ok(low < .05 && high > .95);
+ for (let column = -20; column < 20; column++) for (let row = -20; row <= 20; row++) { pairs++; same += own.regionBiome(column, row) === own.regionBiome(column + 1, row); }
+ assert.ok(same / pairs > .6, `${same} of ${pairs}`);
+ assert.ok(count(own).every(regions => regions > 0));
 });
 
 test('a terrain field paints the stitched layers of a world', () => {

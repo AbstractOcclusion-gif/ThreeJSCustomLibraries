@@ -973,7 +973,7 @@ uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the n
 
 export {createProceduralTerrain, createValley, terrainWindowOrigin, TERRAIN_LANDFORMS, VALLEY_DEFAULTS} from './valley.js';
 export {createRelief, reliefShape, validateRelief, RELIEF_SHAPES, RELIEF_MAX_SHAPES} from './relief.js';
-export {TERRAIN_BIOMES, BIOME_TEXTURE_DEFAULTS, DEFAULT_TERRAIN_BIOME, cloneBiome, validateBiome} from './biomes.js';
+export {TERRAIN_BIOMES, BIOME_TEXTURE_DEFAULTS, BIOME_WEIGHT_FIELD, BIOME_CLIMATE_AXES, DEFAULT_TERRAIN_BIOME, cloneBiome, validateBiome} from './biomes.js';
 export {createTerrainWorld, validateWorld, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAX_BIOMES, WORLD_MAP_AUTO, WORLD_PALETTE_MAX} from './world.js';
 export {createTerrainClipmap, CLIPMAP_DEFAULTS, CLIPMAP_LIMITS} from './clipmap.js';
 export {createSkyVisibility, bakeSkyMap, SKY_VISIBILITY_DEFAULTS, SKY_VISIBILITY_LIMITS} from '../core/sky-visibility.js';

@@ -1,24 +1,28 @@
 import {valueNoise} from '../core/value-noise.js';
 import {hash2} from '../core/hash.js';
-import {validateBiome} from './biomes.js';
+import {validateBiome, BIOME_CLIMATE_AXES} from './biomes.js';
 import {createRelief} from './relief.js';
 import {createTerrainRules, PAINT_REACH, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
 
 // A world lays biomes out in square regions and stitches them: across a border the relief and the layer paint of
 // the two biomes blend, along a line that wanders so the grid of regions does not show. A region takes the biome
-// painted in the map, or one drawn from the seed where the map has none.
+// painted in the map, or one drawn from the seed where the map has none: among the biomes whose climate holds the
+// climate of the region (or comes nearest), by their weights. The climate is two slow fields, temperature and
+// moisture, drawn from the seed; a host with a climate of its own passes climateAt.
 const number = (label, min, max, step) => Object.freeze({label, min, max, step});
 export const WORLD_DEFAULTS = Object.freeze({
   regionSize: 160,   // m, side of a region
   blend: .4,         // share of a region over which two neighbours blend: 0 = a hard line, 1 = always blending
   wander: .3,        // how far the borders stray from straight, as a share of the region size
   waterLevel: -.5,   // m, surface of the standing water (lakes, rivers, sea) when the world has water
+  climateSize: 1400, // m, size of the climate zones (several regions wide, so like biomes gather)
 });
 export const WORLD_FIELDS = Object.freeze({
   regionSize: number('Region size · m', 20, 4000, 5),
   blend: number('Border blend', .02, 1, .01),
   wander: number('Border wander', 0, 1, .01),
   waterLevel: number('Water level · m', -60, 300, .05),
+  climateSize: number('Climate zone size · m', 50, 40000, 50),
 });
 export const WORLD_MAX_BIOMES = 16;
 export const WORLD_MAP_AUTO = -1;       // map cell left to the seed
@@ -26,6 +30,10 @@ export const WORLD_PALETTE_MAX = 16;    // texture sets a world can show: one we
 const PALETTE_GROUP = 4;                // palette weights travel four to a texel
 const WANDER = Object.freeze({scale: .6, seeds: [211, 223]});   // wander features, in regions; noise seed offsets
 const REGION_SEED = 97;
+// The world's own climate: one noise per axis, spread by `gain` so the cold, hot, dry and wet ends are reached.
+const CLIMATE = Object.freeze({seeds: [401, 409], gain: 1.2});
+const REGION_CACHE = 4096;   // regions whose biome is remembered: enough for every ring of a clipmap
+const REGION_SPAN = 2 ** 20;  // regions each way from the origin that the memory can tell apart
 // The terrain layer each palette role counts as where only the layers are known.
 const LEGACY_LAYER = TERRAIN_PALETTE_ROLES.map(role => TERRAIN_LAYERS.indexOf({scree: 'rock', soil: 'mud'}[role] ?? role));
 const smooth = (from, to, value) => {
@@ -44,18 +52,23 @@ export function validateWorld(settings) {
 // map: {columns, rows, cells}: biome indices, row-major along +X then +Z, centred on the world origin; a cell holds
 // a biome index or WORLD_MAP_AUTO.
 // water: true floods the ground below settings.waterLevel: the rules then paint banks and beds.
-export function createTerrainWorld({seed, biomes, map, water = false, ...overrides} = {}) {
+// climate: false ignores the climates of the biomes: regions are drawn by weight alone.
+// climateAt(x, z) -> {temperature, moisture}, each 0..1: the host's climate, in place of the world's own.
+export function createTerrainWorld({seed, biomes, map, water = false, climate = true, climateAt, ...overrides} = {}) {
   const settings = {...WORLD_DEFAULTS, ...overrides};
   validateWorld(settings);
   if (!Number.isSafeInteger(seed)) throw new RangeError('A world needs an integer seed');
   if (!Array.isArray(biomes) || !biomes.length || biomes.length > WORLD_MAX_BIOMES) throw new RangeError(`A world needs 1 to ${WORLD_MAX_BIOMES} biomes`);
   biomes.forEach(validateBiome);
+  if (climateAt !== undefined && typeof climateAt !== 'function') throw new TypeError('A world climate is a function of x and z');
+  const weights = biomes.map(biome => biome.weight ?? 1);
+  if (!weights.some(weight => weight > 0) && !map) throw new RangeError('A world needs a biome with a weight, or a map');
   if (map) {
     const {columns, rows, cells} = map;
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1 || cells?.length !== columns * rows) throw new RangeError('A world map needs columns x rows cells');
     for (const cell of cells) if (!Number.isInteger(cell) || cell < WORLD_MAP_AUTO || cell >= biomes.length) throw new RangeError(`World map cell names no biome: ${cell}`);
   }
-  const {regionSize, blend, wander} = settings;
+  const {regionSize, blend, wander, climateSize} = settings;
   const count = biomes.length;
   const reliefs = biomes.map(biome => createRelief(seed, biome.relief));
   const rules = biomes.map(biome => createTerrainRules(seed, {...biome.paint, mudFromRunout: false}));
@@ -75,14 +88,59 @@ export function createTerrainWorld({seed, biomes, map, water = false, ...overrid
   const wanderX = valueNoise(seed + WANDER.seeds[0]), wanderZ = valueNoise(seed + WANDER.seeds[1]);
   const wanderSize = regionSize * WANDER.scale;
 
+  const climateNoise = CLIMATE.seeds.map(offset => valueNoise(seed + offset));
+  const ownClimate = (x, z) => {
+    const [temperature, moisture] = climateNoise.map(noise => Math.max(0, Math.min(1, .5 + .5 * CLIMATE.gain * noise(x / climateSize, z / climateSize))));
+    return {temperature, moisture};
+  };
+  const worldClimate = climateAt ?? ownClimate;
+  const byClimate = climate && count > 1 && biomes.some(biome => biome.climate);
+  // How far a climate lies outside the one a biome lives in: 0 inside.
+  const misfit = (biome, here) => !biome.climate ? 0 : Math.hypot(...BIOME_CLIMATE_AXES.map(axis => {
+    const [min, max] = biome.climate[axis], value = here[axis];
+    if (!(value >= 0 && value <= 1)) throw new RangeError(`World climate ${axis} must be within 0..1`);
+    return Math.max(min - value, value - max, 0);
+  }));
+  const fits = new Float64Array(count);
+
+  // The biome drawn for region (column, row): among those that fit its climate best, by weight.
+  function drawBiome(column, row) {
+    let best = 0;
+    if (byClimate) {
+      const here = worldClimate((column + .5) * regionSize, (row + .5) * regionSize);
+      best = Infinity;
+      for (let i = 0; i < count; i++) {
+        fits[i] = weights[i] > 0 ? misfit(biomes[i], here) : Infinity;
+        best = Math.min(best, fits[i]);
+      }
+    } else fits.fill(0);
+    let total = 0;
+    for (let i = 0; i < count; i++) if (fits[i] === best) total += weights[i];
+    let draw = hash2(column, row, seed + REGION_SEED) * total, last = 0;
+    for (let i = 0; i < count; i++) {
+      if (fits[i] !== best || !(weights[i] > 0)) continue;
+      last = i;
+      if ((draw -= weights[i]) < 0) return i;
+    }
+    return last;
+  }
+
   // Biome of region (column, row); region (0, 0) starts at the world origin.
+  const drawn = new Map();
   function regionBiome(column, row) {
     if (map) {
       const i = column + Math.floor(map.columns / 2), j = row + Math.floor(map.rows / 2);
       const painted = i >= 0 && j >= 0 && i < map.columns && j < map.rows ? map.cells[j * map.columns + i] : WORLD_MAP_AUTO;
       if (painted !== WORLD_MAP_AUTO) return painted;
     }
-    return Math.min(count - 1, Math.floor(hash2(column, row, seed + REGION_SEED) * count));
+    if (Math.abs(column) >= REGION_SPAN || Math.abs(row) >= REGION_SPAN) return drawBiome(column, row);
+    const key = (column + REGION_SPAN) * 2 * REGION_SPAN + row + REGION_SPAN;
+    let index = drawn.get(key);
+    if (index === undefined) {
+      if (drawn.size >= REGION_CACHE) drawn.clear();
+      drawn.set(key, index = drawBiome(column, row));
+    }
+    return index;
   }
 
   // Share of each biome at a point, written into `out` (one entry per biome, summing to 1).
@@ -154,6 +212,8 @@ export function createTerrainWorld({seed, biomes, map, water = false, ...overrid
     settings, biomes, palette, paintReach: PAINT_REACH,
     waterLevel: water ? settings.waterLevel : null,   // null: a dry world
     heightAt, hollowAt, sampleAt, weightsAt, paintAt, regionBiome,
+    // The climate the regions are drawn by: {temperature, moisture} at a point.
+    climateAt: worldClimate,
     // A valley route only makes sense in a world of one biome.
     routeX: count === 1 ? reliefs[0].routeX : undefined,
   };

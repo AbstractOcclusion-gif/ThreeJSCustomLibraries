@@ -90,6 +90,12 @@ test('every catalogue biome is valid, builds finite relief and clones to an edit
  assert.notEqual(TERRAIN_BIOMES.desert.relief[1].amplitude, 9);
  validateBiome(copy);
  assert.throws(() => cloneBiome('moon'), /Unknown terrain biome/);
+ assert.deepEqual(copy.climate, {temperature: [.7, 1], moisture: [0, .25]});
+ assert.equal(copy.weight, 1);
+ assert.throws(() => validateBiome({...copy, weight: -1}), /weight/);
+ assert.throws(() => validateBiome({...copy, climate: {temperature: [.8, .2], moisture: [0, 1]}}), /climate temperature/);
+ assert.throws(() => validateBiome({...copy, climate: {temperature: [0, 1]}}), /climate moisture/);
+ validateBiome({...copy, weight: undefined, climate: undefined});
  assert.throws(() => validateBiome({...copy, textures: {...copy.textures, rock: 'marble'}}), /texture set for rock/);
  const {sandBelow, ...paint} = copy.paint;
  assert.throws(() => validateBiome({...copy, paint}), /no paint setting: sandBelow/);

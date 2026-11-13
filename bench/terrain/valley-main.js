@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {bakeSkyMap, terrainGroundColor, BIOME_TEXTURE_DEFAULTS, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {bakeSkyMap, terrainGroundColor, BIOME_CLIMATE_AXES, BIOME_TEXTURE_DEFAULTS, BIOME_WEIGHT_FIELD, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createDataTexture} from '../../src/core/data-texture.js';
@@ -62,7 +62,7 @@ const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48f
 const biomeColors = BIOME_SWATCHES.map((color, index) => ['biome' + index, new THREE.Color(color)]);
 export async function mountValley() {
   const settings = {seed: SEED, dressingSeed: DRESSING.seed, density: .62, view: VIEWS[0], flyover: false,
-    ...WORLD_DEFAULTS, handPlaced: false, water: true, ballRadius: PLAY.ball.radius, snow: false, wetness: 0, bounce: 1};
+    ...WORLD_DEFAULTS, handPlaced: false, byClimate: true, water: true, ballRadius: PLAY.ball.radius, snow: false, wetness: 0, bounce: 1};
   // The world's biomes: copies of catalogue biomes, so the catalogue stays as shipped. `biome` is the one being edited.
   const worldBiomes = [cloneBiome(DEFAULT_TERRAIN_BIOME)];
   let biome = worldBiomes[0];
@@ -269,8 +269,8 @@ export async function mountValley() {
   // when the world's palette of texture sets changed; a newer rebuild started meanwhile wins.
   let building = 0;
   async function regenerate() {
-    const {seed, regionSize, blend, wander, waterLevel, water} = settings;
-    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced ? map : undefined, regionSize, blend, wander, waterLevel, water});
+    const {seed, regionSize, blend, wander, waterLevel, water, climateSize, byClimate: climate} = settings;
+    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced ? map : undefined, regionSize, blend, wander, waterLevel, water, climateSize, climate});
     const build = ++building, key = next.palette.sets.join() + '|' + next.palette.roles.join();
     if (key !== texturesKey) {
       const loaded = await loadPalette(next.palette);
@@ -385,6 +385,7 @@ export async function mountValley() {
     }
     for (const [key, {label, min, max, step}] of Object.entries(WORLD_FIELDS)) worldFolder.add(settings, key, min, max, step).name(label).onFinishChange(rebuild);
     worldFolder.add(settings, 'water').name('Water (lakes, rivers, sea)').onChange(rebuild);
+    worldFolder.add(settings, 'byClimate').name('Place biomes by climate').onChange(rebuild);
     worldFolder.add(settings, 'handPlaced').name('Hand-placed map').onChange(rebuild);
   }
   mountWorld();
@@ -396,6 +397,14 @@ export async function mountValley() {
       mountWorld(); mountEditor();
       rebuild();
     });
+    // Where the world lays this biome: how common it is and the climate it lives in (0 cold or dry .. 1 hot or wet).
+    const placeFolder = biomeFolder.addFolder('Placement in the world').close();
+    biome.weight ??= 1;
+    placeFolder.add(biome, 'weight', BIOME_WEIGHT_FIELD.min, BIOME_WEIGHT_FIELD.max, BIOME_WEIGHT_FIELD.step).name(BIOME_WEIGHT_FIELD.label).onFinishChange(rebuild);
+    biome.climate ??= Object.fromEntries(BIOME_CLIMATE_AXES.map(axis => [axis, [0, 1]]));
+    for (const axis of BIOME_CLIMATE_AXES) for (const [end, label] of [[0, 'from'], [1, 'up to']]) {
+      placeFolder.add(biome.climate[axis], end, 0, 1, .01).name(`${axis} ${label}`).onFinishChange(rebuild);
+    }
     const reliefFolder = biomeFolder.addFolder('Relief (applied top to bottom)');
     biome.relief.forEach((entry, index) => {
       const spec = RELIEF_SHAPES[entry.shape];
@@ -426,8 +435,8 @@ export async function mountValley() {
   };
   gui.add({copy: copy(() => biome)}, 'copy').name('Copy edited biome as JSON');
   gui.add({copy: copy(() => {
-    const {seed, regionSize, blend, wander, waterLevel, water} = settings;
-    return {seed, regionSize, blend, wander, waterLevel, water, biomes: worldBiomes, ...(settings.handPlaced && {map})};
+    const {seed, regionSize, blend, wander, waterLevel, water, climateSize, byClimate: climate} = settings;
+    return {seed, regionSize, blend, wander, waterLevel, water, climateSize, climate, biomes: worldBiomes, ...(settings.handPlaced && {map})};
   })}, 'copy').name('Copy world as JSON');
   const materialFolder = appearanceControls(gui, appearance, 'Material').close();
   materialFolder.add(appearance.harmony, 'value', 0, 1, .01).name('Colour harmony between layers');
