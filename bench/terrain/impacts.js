@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {Body, Box, Material, Sphere, Vec3, World} from 'cannon-es';
-import {createTerrainCollider} from './heightfield.js';
+import {createSurroundCollider, createTerrainCollider} from './heightfield.js';
 
 const STEP = 1 / 120;
 // Per ground type: print and impact are the dig depths in metres of a rolling contact and of a hard landing.
@@ -24,7 +24,11 @@ export const TRACK_RADIUS = Object.freeze({sphere: .31, box: .39});
 const IMPACT_CHIPS = Object.freeze({max: 26, perVolume: 30, size: 1.2, maxShock: 70, shockPerSpeed: 6});
 const MAX_BLOCKS = 8, ICE_BREAK_ENERGY = 1100, ICE_CRACK_RADIUS = 1.8, FALL_OUT_HEIGHT = -12;   // blocks; J; m; m
 const MAX_SUBSTEPS = 6;
-export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips, surfaces = CONTACT_SURFACES, trackRadius = TRACK_RADIUS, fallOutHeight = FALL_OUT_HEIGHT}) {
+// Ground beyond the field (the `surround` option): a square `size` m wide sampled every `cell` m, laid again around
+// the latest body when it comes within `margin` m of the edge. Bodies it leaves behind are removed. Under the field
+// it is sunk by `sink` m.
+const SURROUND = Object.freeze({size: 192, cell: 1, margin: 40, sink: 60});
+export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips, surfaces = CONTACT_SURFACES, trackRadius = TRACK_RADIUS, fallOutHeight = FALL_OUT_HEIGHT, surround}) {
  const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
  world.defaultContactMaterial.friction = .52;
  world.defaultContactMaterial.restitution = .12;
@@ -32,6 +36,17 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
  const [shape] = ground.shapes;
  world.addBody(ground);
  chips?.setGround(field.heightAt);
+ // surround: {heightAt(x, z), lift()}: the relief around the field and how far lying snow raises it. With it a body
+ // that rolls off the field keeps rolling on the relief (without marking it) and never drops through.
+ if (surround && typeof surround.heightAt !== 'function') throw Error('The surround of the field needs heightAt');
+ let outer = null;
+ function laySurround(center) {
+  if (outer) world.removeBody(outer.body);
+  outer = createSurroundCollider({heightAt: surround.heightAt, center, size: SURROUND.size, cell: SURROUND.cell, sink: SURROUND.sink,
+   hole: {x: field.bounds.x, z: field.bounds.y, size: field.bounds.z}, lift: surround.lift?.() ?? 0});
+  world.addBody(outer.body);
+  for (const body of active.keys()) body.wakeUp();
+ }
  const geometries = {sphere: new THREE.SphereGeometry(.72, 24, 16), box: new THREE.BoxGeometry(1.42, .94, 1.8)};
  const active = new Map(), strongest = new Map();
  const blockMaterial = new Material({friction: 1, restitution: .12});
@@ -109,6 +124,7 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
   setSurface(surface) {
    for (const entry of active.values()) remove(entry);
    chips?.clear();
+   if (outer) { world.removeBody(outer.body); outer = null; }   // laid again, at the new height, under the next body
    return field.setSnowCover(surface === 'snow', updateSample);
   },
   // at: {position: [x, z], velocity: [x, z], scale} places the body anywhere on the field, `scale` times its size.
@@ -142,6 +158,10 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
   },
   update(dt, iceProgress = 0, waterLevel = 0) {
    if (ice?.sync(world, iceProgress, waterLevel)) for (const body of active.keys()) body.wakeUp();
+   if (surround && active.size) {
+    const lead = [...active.keys()].at(-1).position;
+    if (!outer || outer.inset(lead.x, lead.z) < SURROUND.margin) laySurround(lead);
+   }
    if (active.size) world.step(STEP, dt, MAX_SUBSTEPS);
    if (fractures.length) {
     for (const {x, z, energy} of fractures) {
@@ -151,7 +171,8 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
     if (ice.sync(world, iceProgress, waterLevel)) for (const body of active.keys()) body.wakeUp();
    }
    for (const entry of active.values()) {
-    if (entry.body.position.y < fallOutHeight) { remove(entry); continue; }
+    const {x, y, z} = entry.body.position;
+    if (y < (outer ? outer.low - SURROUND.sink : fallOutHeight) || (outer && outer.inset(x, z) < 0)) { remove(entry); continue; }
     entry.mesh.position.copy(entry.body.position); entry.mesh.quaternion.copy(entry.body.quaternion);
    }
    chips?.tick(dt);

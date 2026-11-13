@@ -44,6 +44,8 @@ const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
 const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, trackResolution: 512, trackContrast: .12, edge: 12, ahead: 6,
   ball: {radius: 1.5, minRadius: .4, maxRadius: 4, baseRadius: .72, speed: 7, color: 0x8d8478, roughness: .8}, fallBelow: 12,
   offset: -1};
+// Rings moved per frame: one keeps the cost of a frame even; the others catch up on the next frames.
+const RINGS_PER_FRAME = 1;
 const VIEWS = ['Textures', 'Layer colours', 'Biome colours', 'LOD wireframe'];
 // Softer junctions than the library default: they read better at the scale of a landscape.
 const TOOL_APPEARANCE = {edgeSharpness: .25};
@@ -103,6 +105,11 @@ export async function mountValley() {
   const dressing = new THREE.Group();
   scene.add(dressing);
   let world, clipmap, play;
+  // Vertex colours are only worked out for the views that show them.
+  const debugView = () => settings.view === VIEWS[1] || settings.view === VIEWS[2];
+  // Time spent keeping the terrain around the focus, per frame, over the last status period.
+  const timing = {total: 0, worst: 0, frames: 0, add(ms) { this.total += ms; this.worst = Math.max(this.worst, ms); this.frames++; },
+    read() { const text = this.frames ? `${(this.total / this.frames).toFixed(1)} ms mean, ${this.worst.toFixed(1)} ms worst` : ''; this.total = this.worst = this.frames = 0; return text; }};
   const cutout = {value: new THREE.Vector4()};
   // Wetness and snow of the ground, shared by the rings and the play area.
   const weather = createSurfaceWeather();
@@ -225,7 +232,8 @@ export async function mountValley() {
     mesh.receiveShadow = true;
     scene.add(mesh);
     cutout.value.set(origin[0] + margin, origin[1] + margin, size - 2 * margin, size - 2 * margin);
-    const impacts = createTerrainImpacts({scene, field, tracks, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow});
+    const impacts = createTerrainImpacts({scene, field, tracks, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow,
+      surround: {heightAt: world.heightAt, lift: () => settings.snow ? SNOW_DEFAULTS.driftDepth : 0}});
     play = {field, tracks, material, mesh, impacts, origin};
     applySnow();
   }
@@ -263,7 +271,7 @@ export async function mountValley() {
     }
     world = next;
     disposeTerrain();
-    clipmap = createTerrainClipmap({world, ...CLIP, tint, createMaterial: field =>
+    clipmap = createTerrainClipmap({world, ...CLIP, tint: debugView() ? tint : undefined, createMaterial: field =>
       createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook, weather, cutout})});
     scene.add(clipmap.group);
     applySnow();
@@ -436,7 +444,7 @@ export async function mountValley() {
   const view = gui.addFolder('View');
   view.add(settings, 'density', ...CONTROLS.density).name('Dressing density').onFinishChange(clearDressing);
   view.add({reroll() { settings.dressingSeed = nextSeed(settings.dressingSeed); clearDressing(); }}, 'reroll').name('Reroll dressing');
-  view.add(settings, 'view', VIEWS).name('Show').onChange(() => clipmap.reshade());
+  view.add(settings, 'view', VIEWS).name('Show').onChange(() => { if (debugView()) clipmap.reshade(tint); });
   view.add(settings, 'flyover').name('Flyover').onChange(enabled => {
     orbit.enabled = !enabled;
     if (enabled) flyZ = focus.z;
@@ -463,14 +471,17 @@ export async function mountValley() {
     else orbit.update();
     // Detail follows what is looked at: the orbit target, or the camera when flying.
     focus.copy(settings.flyover ? camera.position : orbit.target);
-    clipmap.update(focus.x, focus.z);
+    const started = performance.now();
+    clipmap.update(focus.x, focus.z, RINGS_PER_FRAME);
     updateDressing();
+    timing.add(performance.now() - started);
     play?.impacts.update(dt);
     weather.update(dt, null);
     waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
     stage.update(camera);
-    for (const {mesh, material, level} of clipmap.rings) {
-      mesh.material = settings.view === VIEWS[0] ? material : settings.view === VIEWS[3] ? overlays[level] : biomeMaterial;
+    for (const {meshes, material, level} of clipmap.rings) {
+      const shown = settings.view === VIEWS[0] ? material : settings.view === VIEWS[3] ? overlays[level] : biomeMaterial;
+      if (meshes[0].material !== shown) for (const mesh of meshes) mesh.material = shown;
     }
     if (now - lastStatus >= STATUS_REFRESH_MS) {
       lastStatus = now;
@@ -479,11 +490,12 @@ export async function mountValley() {
         + (settings.view === VIEWS[1] ? '\nLayer colours · ' + LAYER_NAMES.join(', ') : '')
         + (worldBiomes.length > 1 ? '\nWorld · ' + worldBiomes.map((entry, index) => biomeName(index)).join(', ') : '')
         + `\nTexture sets in view · ${world.palette.sets.length} of ${WORLD_PALETTE_MAX}`
+        + `\nTerrain upkeep per frame · ${timing.read()}`
         + (missingSets.length ? '\nTexture sets not bundled, default used · ' + missingSets.join(', ') + ' · run npm run textures:fetch' : '');
     }
     renderer.render(scene, camera);
   });
-  window.terrainTool = {get world() { return world; }, get clipmap() { return clipmap; }, get play() { return play; }, focus, camera, orbit, settings, appearance};
+  window.terrainTool = {get world() { return world; }, get clipmap() { return clipmap; }, get play() { return play; }, focus, camera, orbit, scene, settings, appearance};
   onLeave(() => {
     renderer.setAnimationLoop(null);
     unbind();

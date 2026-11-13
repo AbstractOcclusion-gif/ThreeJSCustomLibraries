@@ -90,7 +90,7 @@ export function createTerrainRules(seed,settings={}){
    return config.forestCover?roles.slice(0,TERRAIN_LAYERS.length):roles.slice(0,TERRAIN_LAYERS.length-1);
   },
   // Everything the ground shows at a sample {x, z, height, slope, hollow?, dx?, dz?, water?, curvature?}: `roles`, one
-  // weight per TERRAIN_PALETTE_ROLES summing to 1, and `moisture` (0 dry .. 1 wet). dx and dz are the ground slopes
+  // weight per TERRAIN_PALETTE_ROLES summing to 1, `moisture` (0 dry .. 1 wet) and `sand` (0..1, see sand()). dx and dz are the ground slopes
   // along +X and +Z, for the shaded side; hollow and slope are measured over PAINT_REACH; water is the depth of
   // standing water over the sample in metres, negative for the height of dry ground above it.
   paint:sample=>paint(sample,true),
@@ -135,7 +135,9 @@ export function createTerrainRules(seed,settings={}){
     for(let role=0;role<roles.length;role++)roles[role]*=role===ROLE.rock?1:1-bank;
     roles[ROLE.mud]+=bank*(1-gravel);roles[ROLE.scree]+=bank*gravel;
    }
-   return{roles,moisture:wet};
+   // Sand, as sand(): worked out here from the same noise, so a caller that wants everything pays for it once.
+   const sand=smooth(-p.sandBlend,p.sandBlend,p.sandBelow-height+BREAKUP.sand*n)*(1-rock);
+   return{roles,moisture:wet,sand};
  }
 }
 export const dominantTerrainLayer=weights=>TERRAIN_LAYERS[weights.indexOf(Math.max(...weights))];

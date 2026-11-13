@@ -62,6 +62,8 @@ export function createTerrainAppearance() {
   // Junction sharpness applies near the camera and fades out between these two distances (m): from afar a sharp
   // edge between two flat colours reads as a pattern.
   edgeFade: {value: new THREE.Vector2(25, 110)},
+  // Palette mode: the layers' normal detail fades out between these two distances (m) and is not sampled beyond.
+  detailFade: {value: new THREE.Vector2(70, 160)},
   waterLevel: {value: 0}, shoreWidth: {value: .8}, shoreWetness: {value: 1},
  };
 }
@@ -116,7 +118,7 @@ const float terrainRoleRoughness[${TERRAIN_PALETTE_ROLES.length}] = float[](${TE
 uniform float terrainMacroVariation, terrainHarmony;
 uniform vec3 terrainPaletteMean[TERRAIN_PALETTE_SIZE];   // average colour of each set, linear
 uniform vec3 terrainRoleTint[${TERRAIN_PALETTE_ROLES.length}];
-uniform vec2 terrainEdgeFade;
+uniform vec2 terrainEdgeFade, terrainDetailFade;
 #ifdef TERRAIN_CLIMATE
 uniform sampler2D terrainClimate;   // r = moisture, 0 dry .. 1 wet
 uniform vec3 terrainDryTint, terrainLushTint;
@@ -347,6 +349,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
  float terrainContact = 1.0;
  float terrainGroundRelief = .5;
  float sandCover = 0.0;
+ float terrainDetailNear = 1.0;
  if (terrainProp) {
   terrainGround.y = terrainHeightAt(terrainGrid, terrainNormal);
   terrainContact = 0.0;
@@ -359,7 +362,9 @@ const TERRAIN_FRAGMENT = /* glsl */`
  if (!terrainProp || (terrainInside && terrainContactBand > 0.0 && aboveGround < terrainContactBand * 1.45)) {
  vec3 terrainAxes = pow(abs(terrainNormal), vec3(terrainSharpness));
  terrainAxes /= max(dot(terrainAxes, vec3(1.0)), .0001);
- terrainAxes *= smoothstep(vec3(.001), vec3(.008), terrainAxes);
+ // A projection that would add only a few percent is not sampled: most ground then reads its textures once, not thrice.
+ const vec2 axisCut = vec2(.03, .08);
+ terrainAxes *= smoothstep(vec3(axisCut.x), vec3(axisCut.y), terrainAxes);
  terrainAxes /= dot(terrainAxes, vec3(1.0));
  vec3 terrainSign = sign(terrainNormal + vec3(.00001));
  vec2 terrainWeightUV = (terrainGrid + .5 + (terrainEdgeBreakup > 0.0 ? terrainEdgeWarp(terrainGround.xz) : vec2(0.0))) / terrainSize;
@@ -374,6 +379,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
  }
  // Snow shows the snow set wherever it lies: as a layer of the field, or as the snow of the surface weather.
  bool snowLies = (terrainSnowCover || surfaceWeather.y > 0.0) && !terrainProp;
+ const float paletteMinShare = .012;   // a set under this share (3 of 255) is not sampled: it would not show
  float strongest = .0001;
  vec3 climateTint = vec3(1.0);
  #ifdef TERRAIN_CLIMATE
@@ -383,7 +389,7 @@ const TERRAIN_FRAGMENT = /* glsl */`
   paletteTexel[i] = vec4(0.0);
   int role = terrainPaletteRole[i];
   paletteScale[i] = role == TERRAIN_ROCK ? terrainRockScale : role == TERRAIN_MUD ? mudScale : 1.0;
-  if (paletteWeight[i] <= 0.0 && !(snowLies && i == terrainPaletteSnow)) continue;
+  if (paletteWeight[i] <= paletteMinShare && !(snowLies && i == terrainPaletteSnow)) { paletteWeight[i] = 0.0; continue; }
   paletteTexel[i] = terrainTriplanar(i, terrainP * paletteScale[i], terrainDx * paletteScale[i], terrainDy * paletteScale[i], terrainSign, terrainAxes);
   paletteTexel[i].rgb *= mix(vec3(1.0), terrainRoleTint[role] / max(terrainPaletteMean[i], vec3(.02)), terrainHarmony);
   if (role == TERRAIN_GRASS || role == TERRAIN_FOREST) paletteTexel[i].rgb *= climateTint;
@@ -422,7 +428,9 @@ const TERRAIN_FRAGMENT = /* glsl */`
  vec3 layerNormalDetail = vec3(0.0);
  float layerDetailShare = 0.0;
  #ifdef TERRAIN_LAYER_DETAIL
- layerDetailShare = terrainLayerDetail;
+ // Fine normals do not show from afar: past the detail fade neither they nor the shared detail are sampled.
+ terrainDetailNear = 1.0 - smoothstep(terrainDetailFade.x, terrainDetailFade.y, length(vViewPosition));
+ layerDetailShare = terrainDetailNear > 0.0 ? terrainLayerDetail : 0.0;
  if (layerDetailShare > 0.0) {
   const float minShare = .02;   // a set under this share is not sampled: it would not show
   vec4 surface = vec4(0.0);
@@ -533,12 +541,12 @@ const TERRAIN_FRAGMENT = /* glsl */`
   roughnessFactor = mix(roughnessFactor, terrainSandRoughness, sandCover * terrainContact);
  }
  #endif
- if (terrainDetailStrength > 0.0) {
+ if (terrainDetailStrength > 0.0 && terrainDetailNear > 0.0) {
   const float sharedDetailScale = 3.4;   // repeats of the shared detail normal per layer repeat
   vec3 detail = layerDetailShare < 1.0 ? terrainNormalDetail(TERRAIN_DETAIL, terrainP * sharedDetailScale, terrainDx * sharedDetailScale, terrainDy * sharedDetailScale, terrainSign, terrainAxes).xyz : vec3(0.0);
   detail = mix(detail, layerNormalDetail, layerDetailShare);
   // Neither the shared rock detail nor the layer under the sand belongs on sand.
-  vec3 detailedNormal = normalize(terrainNormal + detail * terrainDetailStrength * (1.0 - sandCover));
+  vec3 detailedNormal = normalize(terrainNormal + detail * terrainDetailStrength * terrainDetailNear * (1.0 - sandCover));
   normal = normalize(mix(normal, transformDirection(detailedNormal, viewMatrix), terrainContact));
  }
  if (sandCover > 0.0) normal = normalize(mix(normal, transformDirection(sandNormal, viewMatrix), sandCover * terrainContact));
@@ -560,7 +568,7 @@ export function createTerrainMaterial(parameters = {}, {
   if (!Number.isInteger(palette?.size) || palette.size < 4 || palette.size % 4 || !Array.isArray(palette.roles) || !palette.roles.length) throw Error('Terrain palette needs a size in fours and the role of each set');
   if (palette.roles.some(role => !TERRAIN_PALETTE_ROLES.includes(role)) || palette.roles.length > palette.size) throw Error('Terrain palette roles must be palette roles, at most one per weight');
   if (palette.means !== undefined && (!Array.isArray(palette.means) || palette.means.length < palette.roles.length || palette.means.some(mean => !mean?.isColor))) throw Error('Terrain palette means must be one colour per set');
-  for (const key of ['dryTint', 'lushTint', 'climateTint', 'macroVariation', 'harmony', 'roleTints', 'edgeFade']) if (!appearance[key]) throw Error(`Terrain appearance needs ${key}: build it with createTerrainAppearance()`);
+  for (const key of ['dryTint', 'lushTint', 'climateTint', 'macroVariation', 'harmony', 'roleTints', 'edgeFade', 'detailFade']) if (!appearance[key]) throw Error(`Terrain appearance needs ${key}: build it with createTerrainAppearance()`);
   if (!field?.paletteMap?.isDataArrayTexture || field.paletteMap.image.depth !== palette.size / 4) throw Error('Terrain palette needs the field palette map: four weights per slice');
   if (!layerArray?.isDataArrayTexture || layerArray.image.depth < palette.roles.length) throw Error('Terrain palette needs one layer array slice per set');
   if (snowMaterial) throw Error('Terrain palette does not take snow detail');
@@ -606,7 +614,7 @@ export function createTerrainMaterial(parameters = {}, {
   terrainCutout: cutout ?? {value: new THREE.Vector4()},
   terrainLayerArray: {value: layerArray ?? null},
   ...(palette && {terrainPaletteWeights: {value: field.paletteMap}, terrainPaletteRole: {value: paletteRoles}, terrainPaletteSnow: {value: palette.roles.indexOf('snow')},
-   terrainHarmony: appearance.harmony, terrainRoleTint: appearance.roleTints, terrainEdgeFade: appearance.edgeFade,
+   terrainHarmony: appearance.harmony, terrainRoleTint: appearance.roleTints, terrainEdgeFade: appearance.edgeFade, terrainDetailFade: appearance.detailFade,
    // A set without a known average is left as it is: its average counts as the colour of its role.
    terrainPaletteMean: {value: Array.from({length: palette.size}, (_, index) => palette.means?.[index] ?? appearance.roleTints.value[paletteRoles[index]])},
    terrainMacroVariation: appearance.macroVariation, terrainClimate: {value: field.climateMap ?? null},

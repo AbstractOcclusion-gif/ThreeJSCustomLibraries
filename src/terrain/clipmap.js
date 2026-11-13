@@ -9,14 +9,19 @@ export const CLIPMAP_DEFAULTS = Object.freeze({
   levels: 7,       // rings
   cells: 256,      // cells per side of a ring: a multiple of 4
   cellSize: .25,   // m, cell of the innermost ring
+  // snapCells: a ring moves by this many of its cells at a time (even, at most a quarter of `cells`): larger steps
+  // mean fewer, larger updates. Default: a thirty-second of `cells`, between 2 and 8.
 });
+const SNAP = Object.freeze({share: 32, min: 2, max: 8});
+const CHUNKS = 4;   // a ring is drawn as CHUNKS x CHUNKS meshes, so the parts outside the view are not drawn
 export const CLIPMAP_LIMITS = Object.freeze({levels: [1, 10], cells: [8, 512], cellSize: [.05, 8]});
 const BYTE = 255, LAYER_CHANNELS = 4, FOREST_LAYER = 4;
 const PALETTE_GROUP = 4;   // palette weights per slice of the palette map
 // Hollows change slowly: rings with cells under maxCell read them from a lattice of world points `spacing` m apart
 // (kept up to `keep` points per ring), the coarser rings from their own heights.
 const HOLLOW_LATTICE = Object.freeze({spacing: 6, maxCell: 2, keep: 20000});
-const SNAP_CELLS = 2;   // a ring moves by this many of its cells, so it stays aligned with the cells of the ring outside
+
+const defaultSnap = cells => Math.min(SNAP.max, Math.max(SNAP.min, Math.floor(cells / SNAP.share / 2) * 2));
 
 // world: {heightAt(x, z), paintAt({x, z, height, slope, curvature}) -> {layers, sand, palette}} (createTerrainWorld).
 // With world.palette, each ring also carries paletteMap: the weight of every palette set, four per slice.
@@ -24,11 +29,13 @@ const SNAP_CELLS = 2;   // a ring moves by this many of its cells, so it stays a
 // hollow measured over those distances, whatever the cell of the ring, and each ring carries climateMap (moisture).
 // createMaterial(field, level) returns the material of a ring; tint(x, z, paint, color) writes an optional vertex colour.
 export function createTerrainClipmap({world, createMaterial, tint, ...overrides} = {}) {
-  const {levels, cells, cellSize} = {...CLIPMAP_DEFAULTS, ...overrides};
+  const {levels, cells, cellSize, snapCells = defaultSnap(overrides.cells ?? CLIPMAP_DEFAULTS.cells)} = {...CLIPMAP_DEFAULTS, ...overrides};
   const within = (value, [min, max]) => Number.isFinite(value) && value >= min && value <= max;
   if (!Number.isInteger(levels) || !within(levels, CLIPMAP_LIMITS.levels)) throw new RangeError('Invalid clipmap levels');
   if (!Number.isInteger(cells) || cells % 4 || !within(cells, CLIPMAP_LIMITS.cells)) throw new RangeError('Clipmap cells must be a multiple of 4 in range');
   if (!within(cellSize, CLIPMAP_LIMITS.cellSize)) throw new RangeError('Invalid clipmap cell size');
+  // Even, so a ring stays on the cells of the ring outside; small enough for the inner ring to stay inside it.
+  if (!Number.isInteger(snapCells) || snapCells < 2 || snapCells % 2 || snapCells > cells / 4) throw new RangeError('Clipmap snap must be an even number of cells, at most a quarter of the ring');
   if (typeof world?.heightAt !== 'function' || typeof world.paintAt !== 'function' || typeof createMaterial !== 'function') {
     throw new TypeError('A clipmap needs a world with heightAt and paintAt, and a material factory');
   }
@@ -39,44 +46,49 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
   const group = new THREE.Group();
   const color = new THREE.Color();
 
-  // Index buffers, shared by the rings: every cell except the square hole the inner ring fills (hole: [x, z] in cells).
+  // Index buffers, shared by the rings: the cells of one chunk, except those in the square hole the inner ring
+  // fills (hole: [x, z] in cells). A ring's hole takes few places, so few buffers are ever built.
+  const chunkCells = cells / CHUNKS;
   const indexCache = new Map();
-  function indexFor(hole) {
-    const key = hole ? hole.join() : 'full';
+  function indexFor(hole, chunkX, chunkZ) {
+    const key = (hole ? hole.join() : 'full') + '/' + chunkX + ',' + chunkZ;
     if (!indexCache.has(key)) {
-      const indices = new Uint32Array((cells * cells - (hole ? (cells / 2) ** 2 : 0)) * 6);
-      let offset = 0;
-      for (let z = 0; z < cells; z++) for (let x = 0; x < cells; x++) {
+      const indices = [];
+      for (let z = chunkZ * chunkCells; z < (chunkZ + 1) * chunkCells; z++) for (let x = chunkX * chunkCells; x < (chunkX + 1) * chunkCells; x++) {
         if (hole && x >= hole[0] && x < hole[0] + cells / 2 && z >= hole[1] && z < hole[1] + cells / 2) continue;
         const a = z * n + x, b = a + 1, c = a + n, d = c + 1;
-        indices.set([a, c, b, b, c, d], offset);
-        offset += 6;
+        indices.push(a, c, b, b, c, d);
       }
-      indexCache.set(key, new THREE.BufferAttribute(indices, 1));
+      indexCache.set(key, new THREE.BufferAttribute(new Uint32Array(indices), 1));
     }
     return indexCache.get(key);
   }
 
+  // Gives a ring its vertex colours, the first time a tint asks for them.
+  function colour(ring) {
+    if (ring.colors) return;
+    ring.colors = new Float32Array(count * 3);
+    ring.attributes.color = new THREE.BufferAttribute(ring.colors, 3);
+    for (const {geometry} of ring.chunks) geometry.setAttribute('color', ring.attributes.color);
+  }
+
   const rings = Array.from({length: levels}, (_, level) => {
     const cell = cellSize * 2 ** level, size = cells * cell;
-    const heights = new Float32Array(count), weights = new Uint8Array(count * LAYER_CHANNELS);
-    const forest = new Uint8Array(count), sand = new Uint8Array(count);
+    // With a palette the material reads the palette map: the layer and forest maps are not kept.
+    const heights = new Float32Array(count), weights = paletteSize ? null : new Uint8Array(count * LAYER_CHANNELS);
+    const forest = paletteSize ? null : new Uint8Array(count), sand = new Uint8Array(count);
     const palette = paletteSize ? new Uint8Array(count * paletteSize) : null;
     const climate = reach ? new Uint8Array(count) : null;
     const positions = new Float32Array(count * 3), normals = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) { positions[i * 3] = (i % n) * cell; positions[i * 3 + 2] = Math.floor(i / n) * cell; }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    const colors = tint ? new Float32Array(count * 3) : null;
-    if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const attributes = {position: new THREE.BufferAttribute(positions, 3), normal: new THREE.BufferAttribute(normals, 3)};
     const field = {
       bounds: new THREE.Vector4(0, 0, size, size),
       heightMap: createDataTexture(heights, n, n, {format: THREE.RedFormat, type: THREE.FloatType}),
-      weightMap: createDataTexture(weights, n, n, {filter: 'linear'}),
-      forestMap: createDataTexture(forest, n, n, {format: THREE.RedFormat, filter: 'linear'}),
       sandMap: createDataTexture(sand, n, n, {format: THREE.RedFormat, filter: 'linear'}),
     };
+    if (weights) field.weightMap = createDataTexture(weights, n, n, {filter: 'linear'});
+    if (forest) field.forestMap = createDataTexture(forest, n, n, {format: THREE.RedFormat, filter: 'linear'});
     if (palette) {
       field.paletteMap = new THREE.DataArrayTexture(palette, n, n, paletteGroups);
       field.paletteMap.minFilter = field.paletteMap.magFilter = THREE.LinearFilter;
@@ -84,15 +96,26 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     }
     if (climate) field.climateMap = createDataTexture(climate, n, n, {format: THREE.RedFormat, filter: 'linear'});
     const material = createMaterial(field, level);
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.frustumCulled = false;   // the ring surrounds the camera
-    mesh.receiveShadow = true;
-    group.add(mesh);
+    // The chunks share the vertices of the ring; each has its own index and bounds.
+    const ringGroup = new THREE.Group();
+    const chunks = [];
+    for (let chunkZ = 0; chunkZ < CHUNKS; chunkZ++) for (let chunkX = 0; chunkX < CHUNKS; chunkX++) {
+      const geometry = new THREE.BufferGeometry();
+      for (const [name, attribute] of Object.entries(attributes)) geometry.setAttribute(name, attribute);
+      geometry.boundingSphere = new THREE.Sphere();
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.receiveShadow = true;
+      ringGroup.add(mesh);
+      chunks.push({chunkX, chunkZ, geometry, mesh});
+    }
+    group.add(ringGroup);
     const signals = reach && {
       slopeStride: Math.max(1, Math.round(reach.slope / cell)), hollowStride: Math.max(1, Math.round(reach.hollow / cell)),
       lattice: cell < HOLLOW_LATTICE.maxCell ? new Map() : null,
     };
-    return {level, cell, size, heights, weights, forest, sand, palette, climate, signals, positions, normals, colors, geometry, field, material, mesh, origin: null, hole: undefined};
+    const ring = {level, cell, size, heights, weights, forest, sand, palette, climate, signals, positions, normals, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
+    if (tint) colour(ring);
+    return ring;
   });
 
   // Moves what a ring keeps when its origin shifts by (dx, dz) cells: the new [i, j] is the old [i + dx, j + dz].
@@ -152,8 +175,10 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
         : (heightOf(ring, i - h, j) + heightOf(ring, i + h, j) + heightOf(ring, i, j - h) + heightOf(ring, i, j + h)) / 4 - height;
     }
     const paint = world.paintAt(sample);
-    for (let layer = 0; layer < LAYER_CHANNELS; layer++) ring.weights[index * LAYER_CHANNELS + layer] = Math.round(paint.layers[layer] * BYTE);
-    ring.forest[index] = Math.round((paint.layers[FOREST_LAYER] ?? 0) * BYTE);
+    if (ring.weights) {
+      for (let layer = 0; layer < LAYER_CHANNELS; layer++) ring.weights[index * LAYER_CHANNELS + layer] = Math.round(paint.layers[layer] * BYTE);
+      ring.forest[index] = Math.round((paint.layers[FOREST_LAYER] ?? 0) * BYTE);
+    }
     ring.sand[index] = Math.round(paint.sand * BYTE);
     if (ring.climate) ring.climate[index] = Math.round((paint.moisture ?? 0) * BYTE);
     // Slice `group` of the palette map holds weights group x 4 .. group x 4 + 3 of every sample.
@@ -180,7 +205,13 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
   // straight line between their neighbours, so the two rings meet without a crack.
   function lift(ring) {
     const {positions, heights} = ring;
-    for (let i = 0; i < count; i++) positions[i * 3 + 1] = heights[i];
+    let low = Infinity, high = -Infinity;
+    for (let i = 0; i < count; i++) {
+      const height = positions[i * 3 + 1] = heights[i];
+      if (height < low) low = height;
+      if (height > high) high = height;
+    }
+    ring.low = low; ring.high = high;
     if (ring.level === levels - 1) return;
     for (let k = 1; k < cells; k += 2) {
       for (const [index, step] of [[k, 1], [cells * n + k, 1], [k * n, n], [k * n + cells, n]]) {
@@ -190,29 +221,40 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
   }
 
   function upload(ring) {
-    const {geometry, field, mesh, origin} = ring;
+    const {field, origin, cell, low, high} = ring;
     field.bounds.set(origin[0], origin[1], ring.size, ring.size);
-    mesh.position.set(origin[0], 0, origin[1]);
+    ring.group.position.set(origin[0], 0, origin[1]);
     for (const texture of Object.values(field)) if (texture.isTexture) texture.needsUpdate = true;
-    for (const attribute of Object.values(geometry.attributes)) attribute.needsUpdate = true;
+    for (const attribute of Object.values(ring.attributes)) attribute.needsUpdate = true;
+    // Bounds of each chunk, for the renderer to skip the ones out of view: its square, over the heights of the ring.
+    const span = chunkCells * cell, radius = Math.hypot(span, span, high - low) / 2;
+    for (const {chunkX, chunkZ, geometry} of ring.chunks) {
+      geometry.boundingSphere.center.set((chunkX + .5) * span, (low + high) / 2, (chunkZ + .5) * span);
+      geometry.boundingSphere.radius = radius;
+    }
   }
 
   let samplesGenerated = 0;
   return {
     group, levels, cells, cellSize,
-    rings: rings.map(({level, cell, size, mesh, material, field}) => ({level, cell, size, mesh, material, field})),
+    snapCells,
+    // meshes: the chunks a ring is drawn as, all with its material.
+    rings: rings.map(({level, cell, size, chunks, material, field}) => ({level, cell, size, material, field, meshes: chunks.map(chunk => chunk.mesh)})),
     get extent() { return rings.at(-1).size; },
     // Samples generated by the last update: a measure of its cost.
     get samplesGenerated() { return samplesGenerated; },
     originOf: level => rings[level].origin,
     heightAt: (x, z) => world.heightAt(x, z),
-    // Centres the rings on a point. Returns true when a ring moved.
-    update(x, z) {
+    // Centres the rings on a point. Returns true when a ring moved. maxRings spreads the work: at most that many
+    // rings move in one call, the outer ones first, and the others follow on the next calls.
+    update(x, z, maxRings = levels) {
+      if (!(maxRings >= 1)) throw new RangeError('A clipmap update moves at least one ring');
       if (!Number.isFinite(x) || !Number.isFinite(z)) throw new RangeError('Clipmap focus must be finite');
       samplesGenerated = 0;
-      let moved = false;
-      for (const ring of rings) {
-        const snap = ring.cell * SNAP_CELLS, half = ring.size / 2;
+      let moved = false, budget = rings[0].origin ? maxRings : levels;   // the first update places every ring
+      for (let level = levels - 1; level >= 0 && budget > 0; level--) {
+        const ring = rings[level];
+        const snap = ring.cell * snapCells, half = ring.size / 2;
         const next = [Math.round(x / snap) * snap - half, Math.round(z / snap) * snap - half];
         const previous = ring.origin;
         if (previous && previous[0] === next[0] && previous[1] === next[1]) continue;
@@ -233,6 +275,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
         lift(ring);
         upload(ring);
         moved = true;
+        budget--;
       }
       if (moved) {
         rings.forEach((ring, level) => {
@@ -241,7 +284,11 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
           const key = hole ? hole.join() : 'full';
           if (ring.hole === key) return;
           ring.hole = key;
-          ring.geometry.setIndex(indexFor(hole));
+          for (const {chunkX, chunkZ, geometry, mesh} of ring.chunks) {
+            const index = indexFor(hole, chunkX, chunkZ);
+            geometry.setIndex(index);
+            mesh.visible = index.count > 0;   // a chunk wholly inside the hole
+          }
         });
       }
       return moved;
@@ -250,15 +297,15 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     reshade(nextTint = tint) {
       tint = nextTint;
       for (const ring of rings) {
+        if (tint) colour(ring);
         if (!ring.origin) continue;
         for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) shade(ring, i, j);
         upload(ring);
       }
     },
     dispose() {
-      for (const {geometry, field, material} of rings) {
-        geometry.setIndex(null);
-        geometry.dispose();
+      for (const {chunks, field, material} of rings) {
+        for (const {geometry} of chunks) { geometry.setIndex(null); geometry.dispose(); }
         material.dispose();
         for (const texture of Object.values(field)) if (texture.isTexture) texture.dispose();
       }

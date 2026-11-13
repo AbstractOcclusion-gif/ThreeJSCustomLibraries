@@ -143,7 +143,7 @@ export function createTerrainWorld({seed, biomes, map, water = false, ...overrid
         layers[LEGACY_LAYER[role]] += weight * share;
         paletteWeights[slices[i][role]] += weight * share;
       });
-      sand += rules[i].sand(sample) * share;
+      sand += painted.sand * share;
       moisture += painted.moisture * share;
     }
     return {layers, sand, moisture, palette: paletteWeights};
