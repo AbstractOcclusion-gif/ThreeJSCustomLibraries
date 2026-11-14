@@ -17,6 +17,7 @@ import {createTerrainIce} from './ice.js';
 import {loadTerrainTextures, packTerrainLayers} from '../terrain/textures.js';
 import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from '../terrain/controls.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
+import {createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
 import {createCameraShots} from '../kit/shots.js';
 import {createDemoLife} from '../kit/life.js';
 import {createDemoStructures} from '../kit/structures.js';
@@ -28,7 +29,6 @@ import {aimRay} from '../kit/input.js';
 
 const renderer = benchRenderer();
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
-renderer.shadowMap.enabled = true;
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .2, 1800);
 camera.position.set(26, 15, 27);
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -37,12 +37,26 @@ controls.enableDamping = true;
 controls.update();
 const weather = await createBenchWeather({scene, renderer, camera, lightTarget: new THREE.Vector3(), initial: 'cloudy 1', hour: 14, precipitation: false});
 weather.view.configure({sky: {captureInterval: 1.25, lightingInterval: 8}});
-weather.view.sun.castShadow = true;
-weather.view.sun.shadow.autoUpdate = false;
-weather.view.sun.shadow.needsUpdate = true;
-weather.view.sun.shadow.mapSize.set(1024, 1024);
-Object.assign(weather.view.sun.shadow.camera, {left: -42, right: 42, top: 42, bottom: -42, far: 240});
-weather.view.sun.shadow.camera.updateProjectionMatrix();
+// The light of the demo: the kit's cascaded sun shadows, and the air lit by the sun through them and through the
+// weather's clouds (volumetric light). The weather's own pass then draws its fog bank and rainbow over that frame.
+const SHADOW_DISTANCE = 160;       // m from the camera where the sun shadows end
+const AIR = {density: .0015, sun: 1.5};   // thin air: shafts under the clouds and between the trees, not a fog
+const RECEIVER_SCAN_SECONDS = 2;   // how often the scene is searched for new materials that receive shadows
+const sunShadows = createSunShadows({renderer, distance: SHADOW_DISTANCE});
+const sunCover = [sunShadows.sun, weather.view.sunCover];
+const volumetric = createVolumetricLight({renderer, sun: sunCover, ...AIR});
+const lightSettings = {volumetric: true};
+// Every lit Three material on a mesh that receives shadows takes the cascades (as Three's own shadow map did).
+const shadowReceivers = new WeakSet();
+function receiveSunShadows() {
+ scene.traverse(object => {
+  if (!object.isMesh || !object.receiveShadow) return;
+  for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+   if (shadowReceivers.has(material) || !(material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial)) continue;
+   sunShadows.applyTo(material); shadowReceivers.add(material);
+  }
+ });
+}
 
 // Free repeatable diagnostic swatches. Alpha is micro-height, never transparency.
 const textureSize = 96;
@@ -150,7 +164,7 @@ const ice = createTerrainIce(field, freezeMap, scene, icePattern);
 weather.view.addCloudShadowReceiver(ice.material);
 const lightOccluders = [ground, ...rocks];
 const pond = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view, {water: true}), ripples, flow, obstacles,
- freezeMap, iceDamage: ice, iceLook: icePattern, foamLayer, captureScale: .4, causticSegments: 280, clipToBed: true, pondOptics: true, lightOccluders});
+ freezeMap, iceDamage: ice, iceLook: icePattern, foamLayer, captureScale: .4, causticSegments: 280, clipToBed: true, pondOptics: true, sun: sunShadows.sun});
 const waterline = createWaterlineComposite(renderer, {caustics: pond.lighting});
 const sprayScene = new THREE.Scene();
 const waterPlane = new THREE.Vector4(0, 1, 0, 0);
@@ -254,7 +268,7 @@ function rebuildGrass() {
 rebuildGrass();
 // One environment for everything: the weather fills it; plants, fire, smoke, rope and grass read it.
 const environment = weather.view.environment; environment.wind.gust = .4;
-const demoLighting = createLighting();   // hook for the leaved trees and hedges, synced from the weather lights each frame
+const demoLighting = createLighting({sun: sunCover});   // hook for the leaved trees and hedges, synced from the weather lights each frame; shaded by the cascades and the clouds
 const groundAt = (x, z) => field.heightAt(x, z) ?? 0;
 // Demo layout, metres: the pond lies around (-8, 2), the camp on the east bank; the bridge runs along the west edge from
 // the south bank up to the cliff, turned so its shots fly in from over the pond.
@@ -265,7 +279,6 @@ const life = await createDemoLife({scene, ground: groundAt, centre: [0, 0], envi
   fish: {bounds: new THREE.Box3(new THREE.Vector3(-15, -2.3, -3), new THREE.Vector3(-1, -.2, 7)), counts: {roach: 10, rudd: 6, perch: 3}, size: .3,
     surfaceHeight: () => appearance.waterLevel.value - FISH_DEPTH}});
 const structures = createDemoStructures({scene, ground: groundAt, camp: life.camp, bridge: [BRIDGE.x, BRIDGE.ground, BRIDGE.z, BRIDGE.yaw], environment, lighting: demoLighting});
-weather.view.sun.shadow.needsUpdate = true;
 const shots = createCameraShots({camera, controls, canFree: () => !diving, shots: {
   scene: {radius: 50, height: 24, speed: .1, target: new THREE.Vector3(0, 2, 0)},
   camp: {radius: 17, height: 7, speed: .22, target: new THREE.Vector3(life.camp.x + 2, groundAt(life.camp.x, life.camp.z) + 1, life.camp.z)},
@@ -298,7 +311,6 @@ const impactControls = gui.addFolder('Rolling and impact');
 impactControls.add(impactSettings, 'surface', ['mud', 'snow']).name('Impact surface').onChange(surface => {
  impactSettings.preview = true;
  if (impacts.setSurface(surface)) { bedHeight.needsUpdate = true; rebuildGrass(); }
- weather.view.sun.shadow.needsUpdate = true;
 });
 function launch(kind) {
  impactSettings.preview = true;
@@ -311,7 +323,6 @@ impactControls.add({reset: () => {
  spray.clear();
  splash.clear();
  foamLayer.clear();
- weather.view.sun.shadow.needsUpdate = true;
 }}, 'reset').name('Reset impacts and tracks');
 gui.add(controlsState, 'blendObjects').name('Blend boulder bases').onChange(value => rocks.forEach(rock => { rock.material = value ? rockMaterial : plainRock; }));
 gui.add(controlsState, 'wetPreview').name('Rain wetness preview');
@@ -352,6 +363,14 @@ gui.add({stampDemo}, 'stampDemo').name('Lay tracks');
 gui.add(tracks, 'clear').name('Clear tracks');
 const weatherUI = mountWeatherControls(weather);
 gui.add({weather: () => weatherUI.open()}, 'weather').name('Open weather controls');
+const lightControls = gui.addFolder('Light');
+lightControls.add(sunShadows.settings, 'distance', 40, 400, 5).name('Sun shadows · m');
+lightControls.add(sunShadows.settings, 'softness', 0, 4, .1).name('Shadow soft edge');
+lightControls.add(sunShadows.settings, 'debug').name('Show cascades');
+lightControls.add(lightSettings, 'volumetric').name('Volumetric light');
+lightControls.add(volumetric.settings, 'density', 0, .02, .0005).name('Air density · 1/m');
+lightControls.add(volumetric.settings, 'sun', 0, 6, .1).name('Sun in the air');
+lightControls.add(volumetric.settings, 'anisotropy', 0, .9, .01).name('Forward scatter');
 const profiling = gui.addFolder('Performance');
 const performanceSettings = {skyInterval: 1.25, pixelRatio: renderer.getPixelRatio(), cloudShadows: true};
 profiling.add(performanceSettings, 'skyInterval', [.35, 1.25, 8]).name('Sky refresh · s').onChange(value => weather.view.configure({sky: {captureInterval: value}}));
@@ -371,8 +390,8 @@ const FPS_WINDOW_MS = 1000, BENCHMARK_MS = 5000, BENCHMARK_PERCENTILE = .95;
 const unbindResize = bindResize(renderer, camera);
 const frameRate = document.getElementById('frame-rate');
 let previousNow, measuredSince, frames = 0;   // previousNow: raw frame time for the benchmark
-const lastSun = new THREE.Vector3(Infinity, Infinity, Infinity);
-let wasMoving = false;
+let receiverScan = RECEIVER_SCAN_SECONDS;
+const keyLight = new THREE.Vector3();
 startFrameLoop(renderer, (dt, now) => {
  measuredSince ??= now;
  if (now - measuredSince >= FPS_WINDOW_MS) {
@@ -416,10 +435,8 @@ startFrameLoop(renderer, (dt, now) => {
  terrainGrass.update(dt, {camera, environment, transmission: grassSettings.transmission * weather.system.day.daylight,
   lodDistance: grassSettings.lodDistance, farDensity: grassSettings.farDensity,
   shadowDistance: grassSettings.shadowDistance, density: grassSettings.density});
- const moving = impacts.moving, sun = weather.view.sun;
- if (moving || wasMoving || !lastSun.equals(sun.position)) sun.shadow.needsUpdate = true;
- wasMoving = moving;
- lastSun.copy(sun.position);
+ receiverScan += dt;
+ if (receiverScan >= RECEIVER_SCAN_SECONDS) { receiverScan = 0; receiveSunShadows(); }
  if (ripples.active && (bedChanged || pond.surface.position.y !== appearance.waterLevel.value)) ripples.mask(wetAt);
  pond.surface.position.y = appearance.waterLevel.value;
  pond.surface.visible = controlsState.water;
@@ -454,10 +471,16 @@ startFrameLoop(renderer, (dt, now) => {
  }
  splash.update(dt);
  foamLayer.update(dt);
+ // The cascades follow the weather's own light (the sun, the moon at night): the one Three lights the scene with.
+ camera.updateMatrixWorld();
+ sunShadows.render(scene, camera, keyLight.copy(weather.view.sun.position).sub(weather.view.sun.target.position).normalize());
  if (diving) {
   waterline.render(scene, camera, {height: waterLevel, clarity: pondSettings.clarity, godRays: pondSettings.godRays,
    sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
- } else weather.view.render();
+ } else {
+  // The volumetric pass hands its frame to the weather's, which leaves the sun's shafts to it.
+  weather.view.render(lightSettings.volumetric ? volumetric.capture(scene, camera, environment) : undefined);
+ }
  const {droplets, mist} = spray.active;
  if (pond.surface.visible && (droplets > 0 || mist > 0 || splash.active > 0)) {
   const autoClear = renderer.autoClear;
@@ -487,6 +510,7 @@ onLeave(() => {
  foamLayer.dispose();
  pond.dispose();
  waterline.dispose();
+ sunShadows.dispose(); volumetric.dispose();
  ice.dispose();
  freezeMap.dispose();
  ripples.dispose();
