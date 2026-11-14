@@ -51,23 +51,30 @@ const CAMP = {
   along: 260, beside: 38, radius: 26, trees: 6, bushes: 10, dryAbove: 1.5,
   bridgeAlong: 340, pool: [235, 295], poolHalf: 5, fishDepth: .15, fish: {roach: 10, rudd: 6, perch: 3}, fishSize: .3,
   shot: {radius: 19, height: 8, speed: .2}, bridgeShot: {radius: 46, height: 14, speed: .14},
+  shadowWithin: 110,   // m from the view within which the camp and the bridge (some 200 small meshes) cast shadows
 };
 // Ambience: the rain and wind recordings of the sound bench, at the level of the weather. fullWind: m/s of full volume.
 const SOUND = {fullWind: 18, gain: {rain: .9, wind: .6}};
 const PLAY_SNOW_FROM = .5;   // snow cover of the ground from which the play area lies under real snow
 // The light, as the All tools demo: the kit's cascaded sun shadows, and thin air lit by the sun through them and
 // through the weather's clouds. The weather's own pass then draws its fog bank and rainbow over that frame.
-const LIGHT = {shadowDistance: 220, airDensity: .0012, sunInAir: 1.5, scanSeconds: 2};   // scan: how often new materials are looked for
+const LIGHT = {shadowDistance: 160, airDensity: .0012, sunInAir: 1.5, scanSeconds: 2};   // scan: how often new materials are looked for
+// What the page costs: the sky is captured and its light refreshed at these intervals (s), as the All tools demo;
+// one canvas pixel per screen pixel unless chosen otherwise.
+const COST = {skyCapture: 1.25, skyLighting: 8, pixelRatio: 1, pixelRatios: [.75, 1, 1.25, 1.5], fpsSmoothing: .1};
 const WEATHER = {initial: 'cloudy 1', hour: 14, rain: {count: 360, radius: 32, height: 34, floorHeight: 0}};
 
 const $error = document.getElementById('error'), $status = document.getElementById('status');
 const report = error => { $error.hidden = !error; $error.textContent = error?.message ?? ''; if (error) console.error(error); };
 const renderer = benchRenderer();
+renderer.setPixelRatio(Math.min(devicePixelRatio, COST.pixelRatio));
+renderer.info.autoReset = false;   // draw calls are counted over every pass of a frame
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(VIEW.fov, innerWidth / innerHeight, VIEW.near, VIEW.far);
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
 const focus = new THREE.Vector3();
-const settings = {shot: 'free', speed: VIEW.speed, followWeather: true, wetness: 0, snow: 0, volumetric: true, ballRadius: PLAY.ball.radius};
+const settings = {shot: 'free', speed: VIEW.speed, followWeather: true, wetness: 0, snow: 0, volumetric: true, ballRadius: PLAY.ball.radius,
+  sunShadows: true, cloudShadows: true, camp: true, pixelRatio: renderer.getPixelRatio()};
 
 const {stretch, ...corridorShape} = CORRIDOR;
 const world = createTerrainWorld({seed: SEED, biomes: BIOMES.map(cloneBiome), water: true, corridor: {
@@ -84,6 +91,7 @@ const route = world.corridor;
 }
 
 const weather = await createBenchWeather({scene, renderer, camera, lightTarget: focus, initial: WEATHER.initial, hour: WEATHER.hour, precipitation: WEATHER.rain});
+weather.view.configure({sky: {captureInterval: COST.skyCapture, lightingInterval: COST.skyLighting}});
 const {textures, missing} = await loadTerrainPalette(renderer, world.palette);
 const appearance = createTerrainAppearance(), sandLook = createSandLook(), surfaceWeather = createSurfaceWeather();
 for (const [key, value] of Object.entries(APPEARANCE)) appearance[key].value = value;
@@ -139,14 +147,27 @@ function findReceivers() {
 // The camp. Its trees and hedge are the kit's leaved trees, on the lighting hook; the fire lights the rig.
 const campZ = CAMP.along, campX = route.routeX(campZ) + CAMP.beside, bridgeX = route.routeX(CAMP.bridgeAlong);
 const poolX = route.routeX((CAMP.pool[0] + CAMP.pool[1]) / 2), ground = (x, z) => world.heightAt(x, z);
-const life = await createDemoLife({scene, ground, centre: [campX, campZ], environment, lighting, lightRig,
+const campGroup = new THREE.Group();   // everything of the camp and the bridge, so it can be switched off as one
+campGroup.name = 'camp';
+scene.add(campGroup);
+const life = await createDemoLife({scene: campGroup, ground, centre: [campX, campZ], environment, lighting, lightRig,
   plants: {radius: CAMP.radius, treeLine: world.waterLevel + CAMP.dryAbove, bushLine: world.waterLevel + CAMP.dryAbove, trees: CAMP.trees, bushes: CAMP.bushes, grass: 0},
   camp: [campX, campZ],
   fish: {bounds: new THREE.Box3(new THREE.Vector3(poolX - CAMP.poolHalf, world.heightAt(poolX, CAMP.pool[0]), CAMP.pool[0]), new THREE.Vector3(poolX + CAMP.poolHalf, world.waterLevel - CAMP.fishDepth, CAMP.pool[1])),
     counts: CAMP.fish, size: CAMP.fishSize, surfaceHeight: () => world.waterLevel - CAMP.fishDepth}});
 // The bridge stands on the river bed, its deck across the river.
-const structures = createDemoStructures({scene, ground, camp: life.camp, bridge: [bridgeX, world.heightAt(bridgeX, CAMP.bridgeAlong), CAMP.bridgeAlong, 0], environment, lighting});
+const structures = createDemoStructures({scene: campGroup, ground, camp: life.camp, bridge: [bridgeX, world.heightAt(bridgeX, CAMP.bridgeAlong), CAMP.bridgeAlong, 0], environment, lighting});
 const campTarget = new THREE.Vector3(campX, world.heightAt(campX, campZ) + 1, campZ);
+// Far from the view the camp and the bridge stop casting: their shadows are too small to see and each mesh is a draw
+// call in every cascade.
+let campCasts = true;
+const campCasters = new Set();
+function setCampShadows(on) {
+  if (on === campCasts) return;
+  campCasts = on;
+  if (!on) { campCasters.clear(); campGroup.traverse(object => { if (object.castShadow) { campCasters.add(object); object.castShadow = false; } }); }
+  else for (const object of campCasters) object.castShadow = true;
+}
 
 // The play area: test balls leave ruts in the ground and pack the snow (the terrain pages' play.js).
 const play = createTerrainPlay({scene, appearance, sandLook, weather: surfaceWeather, cutout, world: () => world, textures: () => textures,
@@ -218,6 +239,16 @@ lightFolder.add(volumetric.settings, 'density', 0, .02, .0005).name('Air density
 lightFolder.add(probes.strength, 'value', 0, 1, .01).name('Light probes on rocks and trees');
 lightFolder.add(appearance.skyOcclusion, 'value', 0, 1, .01).name('Sky occlusion on the ground');
 // The ground follows the weather (rain wets it, snow covers it, both fade); or set by hand.
+// Every costly part can be switched off here, to find what a machine spends its frame on.
+const costFolder = gui.addFolder('Performance');
+costFolder.add(settings, 'pixelRatio', COST.pixelRatios).name('Render pixel ratio').onChange(value => renderer.setPixelRatio(value));
+costFolder.add(settings, 'sunShadows').name('Sun shadows').onChange(on => sunShadows.set('strength', on ? 1 : 0));
+costFolder.add(settings, 'cloudShadows').name('Cloud shadows').onChange(on => weather.view.configure({appearance: {cloudShadowStrength: on ? 1 : 0}}));
+costFolder.add(settings, 'volumetric').name('Volumetric light');
+costFolder.add(volumetric.settings, 'steps', 4, 48, 1).name('Volumetric steps');
+costFolder.add(settings, 'camp').name('Camp, bridge, fish');
+costFolder.add(appearance.layerDetail, 'value', 0, 1, .01).name('Terrain close-up detail');
+costFolder.add({sky: COST.skyCapture}, 'sky', [.35, 1.25, 8]).name('Sky refresh · s').onChange(value => weather.view.configure({sky: {captureInterval: value}}));
 const groundFolder = gui.addFolder('Ground');
 groundFolder.add(settings, 'followWeather').name('Follows the weather');
 groundFolder.add(settings, 'wetness', 0, 1, .01).name('Wetness (by hand)').listen();
@@ -231,8 +262,12 @@ dressingFolder.add(dressing.settings, 'treeImpostor', 40, 400, 1).name('Trees: f
 const weatherUI = mountWeatherControls(weather);
 
 const unbindResize = bindResize(renderer, camera);
-let lastStatus = -Infinity, lastScan = -Infinity;
+let lastStatus = -Infinity, lastScan = -Infinity, lastFrame = 0, frameMs = 0;
 startFrameLoop(renderer, (dt, now) => {
+  if (lastFrame) frameMs += (now - lastFrame - frameMs) * (frameMs ? COST.fpsSmoothing : 1);
+  lastFrame = now;
+  const drawn = {calls: renderer.info.render.calls, triangles: renderer.info.render.triangles};
+  renderer.info.reset();
   if (settings.shot === 'free') { orbit.update(); focus.copy(orbit.target); }
   else { director.update(dt, {target: shotTarget}); focus.copy(settings.shot === 'fly' ? camera.position : shotTarget); }
   camera.updateProjectionMatrix();   // a shot may change the field of view
@@ -252,8 +287,9 @@ startFrameLoop(renderer, (dt, now) => {
   const terrainMs = performance.now() - started;
   waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
   dressing.update(dt, camera, focus);
-  life.update(dt, camera);
-  structures.update(dt, camera);
+  campGroup.visible = settings.camp;
+  if (settings.camp) { life.update(dt, camera); structures.update(dt, camera); }
+  setCampShadows(Math.min(camera.position.distanceTo(campTarget), camera.position.distanceTo(structures.bridgeCentre)) < CAMP.shadowWithin);
   // Real snow on the play area once the ground is mostly covered.
   play.setSnow(surfaceWeather.levels.value.y > PLAY_SNOW_FROM);
   play.update(dt);
@@ -264,13 +300,14 @@ startFrameLoop(renderer, (dt, now) => {
   camera.updateMatrixWorld();
   lightRig.update(camera.position);
   lightRig.renderShadows(scene);
-  sunShadows.render(scene, camera, environment.sun.direction);
+  if (settings.sunShadows) sunShadows.render(scene, camera, environment.sun.direction);
   weather.view.render(settings.volumetric ? volumetric.capture(scene, camera, environment) : undefined);
   weatherUI.sync();
   if (now - lastStatus >= STATUS_REFRESH_MS) {
     lastStatus = now;
     const z = THREE.MathUtils.clamp(focus.z, 0, route.length), section = route.sectionAt(z);
-    $status.textContent = `${world.biomes[section.biome].label} · ${Math.round(z)} m of ${route.length} m`
+    $status.textContent = `${frameMs ? Math.round(1000 / frameMs) : 0} fps · ${frameMs.toFixed(1)} ms · ${drawn.calls} draw calls · ${(drawn.triangles / 1e6).toFixed(2)} M triangles`
+      + `\n${world.biomes[section.biome].label} · ${Math.round(z)} m of ${route.length} m`
       + `\nwetness ${settings.wetness.toFixed(2)} · snow ${settings.snow.toFixed(2)} · terrain ${terrainMs.toFixed(1)} ms`
       + `\n${dressing.stats.rockTiles} rock tiles · ${dressing.stats.grassClumps} grass clumps · ${dressing.stats.trees} trees`
       + (dressing.stats.treesLoading ? ` (${dressing.stats.treesLoading} species loading)` : '')
@@ -287,4 +324,4 @@ onLeave(() => {
   for (const texture of Object.values(textures)) texture?.dispose?.();
   renderer.dispose();
 });
-window.worldDemo = {world, clipmap, dressing, life, structures, play, lightRig, sunShadows, volumetric, probes, selectShot, weather, surfaceWeather, settings, focus, camera, orbit, scene};
+window.worldDemo = {renderer, world, clipmap, dressing, life, structures, play, lightRig, sunShadows, volumetric, probes, selectShot, weather, surfaceWeather, settings, focus, camera, orbit, scene};

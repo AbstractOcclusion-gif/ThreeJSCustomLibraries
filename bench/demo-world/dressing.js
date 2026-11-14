@@ -2,6 +2,7 @@
 // vegetation bench's instanced EZ-Tree models), all placed from the world's own paint so they follow its biomes.
 // Rocks and grass come and go around the focus; trees are laid once for the whole corridor and drawn by distance.
 import * as THREE from 'three';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {createRocks} from '../../src/rocks/index.js';
 import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
 import {TERRAIN_LAYERS} from '../../src/terrain/index.js';
@@ -20,20 +21,21 @@ const ROCKS = {
   cliffs: {every: 46, span: 15, inset: .55, size: 1.5},
   profile: {valley: 'woodland', dry: 'desert', alpine: 'alpine', mountains: 'alpine'}, fallbackProfile: 'alpine',
   repeat: .35, color: 0x8a8782, roughness: .92,   // texture repeats per metre of rock; plain colour without textures
+  shadowTiles: 2,   // tiles from the focus within which the rocks cast shadows
 };
 // Grass, in chunks of `chunk` m along the corridor and `half` m to each side of the route: the chunk under the focus
 // and `keep` chunks each way. Candidates lie `spacing` m apart, `perFrame` of them weighed a frame.
 const GRASS = {
   chunk: 48, half: 64, keep: 1, spacing: 1.15, perFrame: 450, seed: 947,
   from: .12, underTrees: .6, fill: 1.7,   // least cover that grows grass; share of the forest floor that counts; clumps per unit of cover
-  waterMargin: .08, sink: .02, size: [.7, 1.6], tileSize: 8, flatColorMix: .75,
+  waterMargin: .08, sink: .02, size: [.7, 1.6], tileSize: 16, flatColorMix: .75,
   green: '#50762e', dry: '#c2aa61',
 };
 // Trees: candidates `spacing` m apart within `band` m of the route, kept by the forest paint, `clearance` m off the
 // route. Each biome has its density and its mix of species; a species has its range of heights (m).
 const TREES = {
   spacing: 8.5, band: 150, clearance: 8, seed: 389, maxSlope: .75, waterMargin: .3, grassShare: .25,
-  lod: 60, impostor: 130,
+  lod: 60, impostor: 130, refreshStep: .75,   // m the camera moves between two sorts of the trees into their tiers
   heights: {'ez-oak': [9, 14], 'ez-birch': [8, 12], 'ez-spruce': [10, 17], 'ez-bush': [1.3, 2.6]},
   biomes: {
     valley: {density: 1, mix: {'ez-oak': .5, 'ez-birch': .3, 'ez-bush': .2}},
@@ -82,7 +84,12 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
     const {tile, scatter, cliffs} = ROCKS, x0 = column * tile, z0 = row * tile, cx = x0 + tile / 2, cz = z0 + tile / 2;
     const biome = biomeAt(cz), material = rockMaterial(biome), profile = ROCKS.profile[biome.id] ?? ROCKS.fallbackProfile;
     const seed = Math.floor(hash2(column, row, ROCKS.seed) * 1e6) + 1, parts = [];
-    const add = (rocks, x, z, yaw = 0) => { rocks.group.position.set(x, 0, z); rocks.group.rotation.y = yaw; rockGroup.add(rocks.group); parts.push(rocks); };
+    // Every rock of the tile goes into one mesh: one draw call for the tile, and one per shadow cascade.
+    const add = (rocks, x, z, yaw = 0) => {
+      rocks.group.position.set(x, 0, z); rocks.group.rotation.y = yaw; rocks.group.updateMatrixWorld(true);
+      for (const mesh of rocks.group.children) parts.push(mesh.geometry.clone().applyMatrix4(mesh.matrixWorld));
+      rocks.dispose();
+    };
     const {paint} = paintAt(cx, cz), rocky = Math.min(1, paint.layers[LAYER.rock] * 1.5);
     add(createRocks({mode: 'scatter', environment: profile, seed, material, span: tile, size: ROCKS.scatterSize,
       count: Math.round(THREE.MathUtils.lerp(scatter[0], scatter[1], rocky)), heightAt: (x, z) => world.heightAt(cx + x, cz + z)}), cx, cz);
@@ -100,14 +107,21 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
       add(createRocks({mode: 'cliff', environment: profile, seed: seed + 2 + k * 2 + (side > 0), material, span: cliffs.span, size: cliffs.size,
         heightAt: () => world.heightAt(x, z)}), x, z, along - Math.PI / 2);
     }
-    return parts;
+    const geometry = mergeGeometries(parts);
+    for (const part of parts) part.dispose();
+    if (!geometry) throw Error('The rocks of a tile could not be merged');
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.receiveShadow = true;
+    rockGroup.add(mesh);
+    return mesh;
   }
   function updateRocks(focus) {
     const {tile, reach} = ROCKS, column0 = Math.floor(focus.x / tile), row0 = Math.floor(focus.z / tile);
-    for (const [key, parts] of rockTiles) {
-      const [column, row] = key.split(',').map(Number);
-      if (Math.abs(column - column0) <= reach + 1 && Math.abs(row - row0) <= reach + 1) continue;
-      for (const rocks of parts) rocks.dispose();
+    for (const [key, mesh] of rockTiles) {
+      const [column, row] = key.split(',').map(Number), away = Math.max(Math.abs(column - column0), Math.abs(row - row0));
+      mesh.castShadow = away <= ROCKS.shadowTiles;
+      if (away <= reach + 1) continue;
+      rockGroup.remove(mesh); mesh.geometry.dispose();
       rockTiles.delete(key);
     }
     let built = 0;
@@ -199,7 +213,8 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
     }
   }
 
-  let disposed = false;
+  let disposed = false, sortedTrees = false;
+  const sortedAt = new THREE.Vector3(Infinity, Infinity, Infinity), sortedFor = {lod: 0, impostor: 0};
   return {
     settings, stats,
     probed: [rockGroup, treeGroup],   // what the light probes are meant for: the things that stand on the ground
@@ -207,14 +222,19 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
       rockGroup.visible = settings.rocks; grassGroup.visible = settings.grass; treeGroup.visible = settings.trees;
       if (settings.rocks) updateRocks(focus);
       if (settings.grass) updateGrass(dt, camera, focus);
-      if (settings.trees) for (const {plants, count} of species) {
-        plants.update(dt);
-        plants.updateDistance(camera, settings.treeLod, count, Math.max(settings.treeLod, settings.treeImpostor));
+      if (settings.trees) {
+        // The trees are sorted into their tiers again only once the camera has moved, or a species has come in.
+        const moved = camera.position.distanceTo(sortedAt) >= TREES.refreshStep || sortedFor.lod !== settings.treeLod || sortedFor.impostor !== settings.treeImpostor || sortedTrees !== species.length;
+        for (const {plants, count} of species) {
+          plants.update(dt);
+          if (moved) plants.updateDistance(camera, settings.treeLod, count, Math.max(settings.treeLod, settings.treeImpostor));
+        }
+        if (moved) { sortedAt.copy(camera.position); sortedFor.lod = settings.treeLod; sortedFor.impostor = settings.treeImpostor; sortedTrees = species.length; }
       }
     },
     dispose() {
       disposed = true;
-      for (const parts of rockTiles.values()) for (const rocks of parts) rocks.dispose();
+      for (const mesh of rockTiles.values()) mesh.geometry.dispose();
       for (const material of rockMaterials.values()) material.dispose();
       for (const texture of rockTextures) texture.dispose();
       for (const {field} of grassChunks.values()) field?.dispose();
