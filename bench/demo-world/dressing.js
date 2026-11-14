@@ -35,7 +35,7 @@ const GRASS = {
 // route. Each biome has its density and its mix of species; a species has its range of heights (m).
 const TREES = {
   spacing: 8.5, band: 150, clearance: 8, seed: 389, maxSlope: .75, waterMargin: .3, grassShare: .25,
-  lod: 60, impostor: 130, refreshStep: .75,   // m the camera moves between two sorts of the trees into their tiers
+  lod: 32, impostor: 75, refreshStep: .75,   // m the camera moves between two sorts of the trees into their tiers
   heights: {'ez-oak': [9, 14], 'ez-birch': [8, 12], 'ez-spruce': [10, 17], 'ez-bush': [1.3, 2.6]},
   biomes: {
     valley: {density: 1, mix: {'ez-oak': .5, 'ez-birch': .3, 'ez-bush': .2}},
@@ -53,7 +53,7 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
   const biomeAt = z => world.biomes[route.sectionAt(THREE.MathUtils.clamp(z, 0, route.length - 1e-3)).biome];
   const paintAt = (x, z) => { const sample = world.sampleAt(x, z); return {sample, paint: world.paintAt(sample)}; };
   const settings = {rocks: true, grass: true, trees: true, treeLod: TREES.lod, treeImpostor: TREES.impostor};
-  const stats = {rockTiles: 0, grassClumps: 0, trees: 0, treesLoading: 0};
+  const stats = {rockTiles: 0, grassClumps: 0, trees: 0, treesLoading: 0, treeTiers: [0, 0, 0]};   // tiers: full models, far models, flat cards
 
   // ---- Rocks
   const rockGroup = new THREE.Group(), rockMaterials = new Map(), rockTextures = [];
@@ -228,6 +228,9 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
         for (const {plants, count} of species) {
           plants.update(dt);
           if (moved) plants.updateDistance(camera, settings.treeLod, count, Math.max(settings.treeLod, settings.treeImpostor));
+        }
+        if (moved) {
+          stats.treeTiers = species.reduce(([near, far, cards], {plants}) => [near + plants.nearCount + plants.transitionCount, far + plants.farCount, cards + plants.impostorCount], [0, 0, 0]);
         }
         if (moved) { sortedAt.copy(camera.position); sortedFor.lod = settings.treeLod; sortedFor.impostor = settings.treeImpostor; sortedTrees = species.length; }
       }

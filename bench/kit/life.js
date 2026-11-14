@@ -46,7 +46,8 @@ export async function createDemoLife({scene, ground, centre: [centreX, centreZ],
   const crates = await Promise.all(CRATES.layout.map(async ([dx, dz, burnSeconds]) => {
     const x = camp.x + dx, z = camp.z + dz, y = ground(x, z), material = new THREE.MeshStandardMaterial({color: WOOD, roughness: .9});
     const mesh = new THREE.Mesh(crateGeometry, material); mesh.position.set(x, y + CRATES.size[1] / 2, z); mesh.castShadow = true; mesh.rotation.y = dx; scene.add(mesh);
-    const glow = new THREE.PointLight(GLOW.color, 0, GLOW.distance, 2); glow.position.set(x, y + GLOW.lift, z); scene.add(glow);
+    // Hidden until its crate burns: a visible light, even a dark one, is worked out in every lit shader of the scene.
+    const glow = new THREE.PointLight(GLOW.color, 0, GLOW.distance, 2); glow.position.set(x, y + GLOW.lift, z); glow.visible = false; scene.add(glow);
     const detachGlow = lightRig?.add(glow, {shadow: Boolean(lightRig.shadows) && dx === CRATES.layout[0][0]});
     const flames = await createParticlePrefab(scene, 'fire', {position: new THREE.Vector3(x, y + FLAME_HEIGHT, z), size: FLAME_SIZE, pool: 30});
     flames.stop(); flames.setEnvironment(environment);
@@ -61,14 +62,14 @@ export async function createDemoLife({scene, ground, centre: [centreX, centreZ],
     camp, trees, bushes, grass, fish, fire,
     get burning() { return crates.filter(crate => crate.burning).length; },
     ignite() { crates[0].state.ignite(); },
-    resetFire() { fire.reset(); for (const crate of crates) { crate.burning = false; crate.glow.intensity = 0; crate.flames.stop(); crate.flames.clear(); } },
+    resetFire() { fire.reset(); for (const crate of crates) { crate.burning = false; crate.glow.intensity = 0; crate.glow.visible = false; crate.flames.stop(); crate.flames.clear(); } },
     update(dt, camera) {
       if (disposed) return;
       time += dt;
       trees.update(dt); bushes.update(dt); if (grass) grass.update(dt, {camera, environment}); fish.update(dt); fire.update(dt);
       crates.forEach((crate, index) => {
         const burning = crate.state.phase === 'burning';
-        if (crate.burning !== burning) { crate.burning = burning; if (burning) crate.flames.start(); else crate.flames.stop(); }
+        if (crate.burning !== burning) { crate.burning = burning; crate.glow.visible = burning; if (burning) crate.flames.start(); else crate.flames.stop(); }
         crate.flames.update(dt);
         crate.material.color.copy(WOOD).lerp(CHAR, 1 - crate.state.fuel);
         crate.glow.intensity = burning ? GLOW.intensity * Math.min(1, crate.state.fuel * 3) * (.9 + .1 * Math.sin(time * 17 + index)) : 0;

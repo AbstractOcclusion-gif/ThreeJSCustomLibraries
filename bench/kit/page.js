@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import '../ui-demo.js';
 
 export function benchRenderer() {
-  const renderer = new THREE.WebGLRenderer({antialias: true});
+  // high-performance: on a machine with two GPUs, ask for the discrete one.
+  const renderer = new THREE.WebGLRenderer({antialias: true, powerPreference: 'high-performance'});
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25)); renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   document.body.prepend(renderer.domElement);

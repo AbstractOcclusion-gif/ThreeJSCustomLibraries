@@ -18,7 +18,7 @@ export const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, skyTexel: 2, tra
 // cutout: the {value: Vector4} the ring materials were built with. weather: the surface weather of the ground.
 // Returns {area (the laid area: {field, tracks, material, mesh, impacts, origin, sky}, or undefined), lay(x, z),
 // clear(), roll({focus, camera, radius}), setSnow(on), update(dt), reset(), dispose()}.
-export function createTerrainPlay({scene, world, textures, seed, rules, appearance, sandLook, weather, cutout}) {
+export function createTerrainPlay({scene, world, textures, seed, rules, appearance, sandLook, weather, cutout, cells = PLAY.cells, reliefCellSize = PLAY.size / cells, prepare}) {
   const ballMaterial = new THREE.MeshStandardMaterial({color: PLAY.ball.color, roughness: PLAY.ball.roughness});
   let area, snow = false;
 
@@ -26,7 +26,10 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     if (!area) return;
     area.impacts.dispose();
     scene.remove(area.mesh);
-    area.material.dispose(); area.field.dispose(); area.tracks.dispose(); area.sky.map.dispose();
+    const {material, ready} = area;
+    if (ready) ready.then(() => material.dispose(), () => material.dispose());
+    else material.dispose();
+    area.field.dispose(); area.tracks.dispose(); area.sky.map.dispose();
     area = undefined;
     cutout.value.set(0, 0, 0, 0);
   }
@@ -39,12 +42,12 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
   function lay(x, z) {
     clear();
     const ground = world(), loaded = textures();
-    const {size, cells, snap, margin} = PLAY, n = cells + 1, step = size / cells;
+    const {size, snap, margin} = PLAY, n = cells + 1, step = size / cells;
     const origin = [Math.round((x - size / 2) / snap) * snap, Math.round((z - size / 2) / snap) * snap];
     let lowest = Infinity;
     const heights = Float32Array.from({length: n * n}, (_, index) => {
       // Asked with the cell of the innermost ring, so the area carries the same fine relief as the ground around it.
-      const height = ground.heightAt(origin[0] + index % n * step, origin[1] + Math.floor(index / n) * step, step);
+      const height = ground.heightAt(origin[0] + index % n * step, origin[1] + Math.floor(index / n) * step, reliefCellSize);
       lowest = Math.min(lowest, height);
       return height;
     });
@@ -59,12 +62,23 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
       detailNormal: loaded.detail, appearance, sandLook, weather, tracks, trackContrast: PLAY.trackContrast, sky});
     const mesh = new THREE.Mesh(field.geometry, material);
     mesh.receiveShadow = true;
+    mesh.visible = !prepare;
     scene.add(mesh);
-    cutout.value.set(origin[0] + margin, origin[1] + margin, size - 2 * margin, size - 2 * margin);
     const impacts = createTerrainImpacts({scene, field, tracks, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow,
       surround: {heightAt: ground.heightAt, lift: () => snow ? SNOW_DEFAULTS.driftDepth : 0}});
-    area = {field, tracks, material, mesh, impacts, origin, sky};
+    const laid = area = {field, tracks, material, mesh, impacts, origin, sky};
     setSnow(snow);
+    const reveal = () => {
+      if (area !== laid) return;
+      mesh.visible = true;
+      cutout.value.set(origin[0] + margin, origin[1] + margin, size - 2 * margin, size - 2 * margin);
+    };
+    if (prepare) {
+      laid.ready = Promise.resolve().then(() => area === laid && prepare(mesh)).then(reveal, error => {
+        if (area === laid) clear();
+        throw error;
+      });
+    } else reveal();
   }
 
   return {
@@ -78,7 +92,13 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
       const x = focus.x + heading.x * PLAY.ahead, z = focus.z + heading.z * PLAY.ahead;
       const inside = area && [x - area.origin[0], z - area.origin[1]].every(offset => offset > PLAY.edge && offset < PLAY.size - PLAY.edge);
       if (!inside) lay(x, z);
-      area.impacts.launch('sphere', snow ? 'snow' : 'mud', undefined, {position: [x, z], velocity: [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale: radius / PLAY.ball.baseRadius});
+      const laid = area;
+      const launch = () => {
+        if (area !== laid) return;
+        laid.impacts.launch('sphere', snow ? 'snow' : 'mud', undefined, {position: [x, z], velocity: [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale: radius / PLAY.ball.baseRadius});
+      };
+      if (laid.ready) return laid.ready.then(launch);
+      launch();
     },
     update(dt) { area?.impacts.update(dt); },
     reset() { area?.impacts.reset(); },

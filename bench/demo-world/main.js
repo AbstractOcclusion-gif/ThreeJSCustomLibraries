@@ -26,8 +26,12 @@ import '../bench.css';
 
 const query = new URLSearchParams(location.search);
 // ?cells= and ?levels= size the rings down for a slow machine or a test; ?trees=0 leaves the tree models out.
-const CLIP = {...CLIPMAP_DEFAULTS, ...Object.fromEntries(['cells', 'levels'].filter(key => query.has(key)).map(key => [key, Number(query.get(key))]))};
+const CLIP = {...CLIPMAP_DEFAULTS, cells: 128, cellSize: .5,
+  ...Object.fromEntries(['cells', 'levels'].filter(key => query.has(key)).map(key => [key, Number(query.get(key))]))};
 const RINGS_PER_FRAME = 1;
+// Relief samples the rings may spend per frame on their background bakes (far normals, sky map): a third of the
+// library defaults, so a moving view does not pay for them every frame.
+const BAKE = {normalSamples: 1600, skySamples: 1300};
 const SEED = 17;
 // The corridor: stretches of biome in this order from its start, each `stretch` m long, between walls.
 const BIOMES = ['valley', 'dry', 'alpine', 'mountains'];
@@ -35,7 +39,7 @@ const BIOMES = ['valley', 'dry', 'alpine', 'mountains'];
 const CORRIDOR = {stretch: 620, width: 44, shoulder: 150, wall: 26, floor: 4, floorRelief: .4, bend: 34, bendScale: 170, endRamp: 90, sectionBlend: 90};
 const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
 // As the terrain tool: soft junctions and rock drawn large, for a landscape rather than a close-up.
-const APPEARANCE = {edgeSharpness: .25, rockScale: .18};
+const APPEARANCE = {edgeSharpness: .25, rockScale: .18, antiTiling: 0, layerDetail: 0};
 const VIEW = {
   fov: 50, near: .5, far: 6000, start: 140,                // m along the corridor the view opens on
   offset: [-38, 26, -64],                                   // camera from its target, when the page opens
@@ -52,6 +56,7 @@ const CAMP = {
   bridgeAlong: 340, pool: [235, 295], poolHalf: 5, fishDepth: .15, fish: {roach: 10, rudd: 6, perch: 3}, fishSize: .3,
   shot: {radius: 19, height: 8, speed: .2}, bridgeShot: {radius: 46, height: 14, speed: .14},
   shadowWithin: 110,   // m from the view within which the camp and the bridge (some 200 small meshes) cast shadows
+  awakeWithin: 170,    // m within which they move (fire, rope, hedge, fish): beyond, they stand still and cost no update
 };
 // Ambience: the rain and wind recordings of the sound bench, at the level of the weather. fullWind: m/s of full volume.
 const SOUND = {fullWind: 18, gain: {rain: .9, wind: .6}};
@@ -65,6 +70,11 @@ const COST = {skyCapture: 1.25, skyLighting: 8, pixelRatio: 1, pixelRatios: [.75
 const WEATHER = {initial: 'cloudy 1', hour: 14, rain: {count: 360, radius: 32, height: 34, floorHeight: 0}};
 
 const $error = document.getElementById('error'), $status = document.getElementById('status');
+// The graphics card the browser gave the page, when it says so.
+function gpuName(gl) {
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : 'GPU not named by the browser';
+}
 const report = error => { $error.hidden = !error; $error.textContent = error?.message ?? ''; if (error) console.error(error); };
 const renderer = benchRenderer();
 renderer.setPixelRatio(Math.min(devicePixelRatio, COST.pixelRatio));
@@ -98,7 +108,7 @@ for (const [key, value] of Object.entries(APPEARANCE)) appearance[key].value = v
 appearance.shoreWidth.value = WATER.shoreWidth;
 appearance.waterLevel.value = world.waterLevel;
 const cutout = {value: new THREE.Vector4()};   // the square of ground the play area draws in place of the rings
-const clipmap = createTerrainClipmap({world, ...CLIP, createMaterial: field => {
+const clipmap = createTerrainClipmap({world, ...CLIP, ...BAKE, createMaterial: field => {
   // The shadows of the sun and of the clouds reach the rings with every other receiver (shadowReceivers).
   return createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray,
     layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook, weather: surfaceWeather, cutout});
@@ -170,8 +180,22 @@ function setCampShadows(on) {
 }
 
 // The play area: test balls leave ruts in the ground and pack the snow (the terrain pages' play.js).
+// Warm the default linear capture variant with its shadow hooks before the play area replaces the rings.
+const playCompileTarget = new THREE.WebGLRenderTarget(1, 1);
 const play = createTerrainPlay({scene, appearance, sandLook, weather: surfaceWeather, cutout, world: () => world, textures: () => textures,
-  seed: () => SEED, rules: () => world.biomes[0].paint});
+  seed: () => SEED, rules: () => world.biomes[0].paint, cells: CLIP.cells, reliefCellSize: CLIP.cellSize,
+  async prepare(mesh) {
+    shadowReceivers.update();
+    const previous = renderer.getRenderTarget();
+    let compiling;
+    try {
+      renderer.setRenderTarget(playCompileTarget);
+      compiling = renderer.compileAsync(mesh, camera, scene);
+    } finally {
+      renderer.setRenderTarget(previous);
+    }
+    await compiling;
+  }});
 
 // Ambience (sound module). A browser only plays sound after a click: the Sound button starts it.
 let sound = null, ambience = null;
@@ -262,6 +286,7 @@ dressingFolder.add(dressing.settings, 'treeImpostor', 40, 400, 1).name('Trees: f
 const weatherUI = mountWeatherControls(weather);
 
 const unbindResize = bindResize(renderer, camera);
+const gpu = gpuName(renderer.getContext());
 let lastStatus = -Infinity, lastScan = -Infinity, lastFrame = 0, frameMs = 0;
 startFrameLoop(renderer, (dt, now) => {
   if (lastFrame) frameMs += (now - lastFrame - frameMs) * (frameMs ? COST.fpsSmoothing : 1);
@@ -288,8 +313,9 @@ startFrameLoop(renderer, (dt, now) => {
   waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
   dressing.update(dt, camera, focus);
   campGroup.visible = settings.camp;
-  if (settings.camp) { life.update(dt, camera); structures.update(dt, camera); }
-  setCampShadows(Math.min(camera.position.distanceTo(campTarget), camera.position.distanceTo(structures.bridgeCentre)) < CAMP.shadowWithin);
+  const campAway = Math.min(camera.position.distanceTo(campTarget), camera.position.distanceTo(structures.bridgeCentre));
+  if (settings.camp && campAway < CAMP.awakeWithin) { life.update(dt, camera); structures.update(dt, camera); }
+  setCampShadows(campAway < CAMP.shadowWithin);
   // Real snow on the play area once the ground is mostly covered.
   play.setSnow(surfaceWeather.levels.value.y > PLAY_SNOW_FROM);
   play.update(dt);
@@ -310,8 +336,10 @@ startFrameLoop(renderer, (dt, now) => {
       + `\n${world.biomes[section.biome].label} · ${Math.round(z)} m of ${route.length} m`
       + `\nwetness ${settings.wetness.toFixed(2)} · snow ${settings.snow.toFixed(2)} · terrain ${terrainMs.toFixed(1)} ms`
       + `\n${dressing.stats.rockTiles} rock tiles · ${dressing.stats.grassClumps} grass clumps · ${dressing.stats.trees} trees`
+      + ` (${dressing.stats.treeTiers[0]} full, ${dressing.stats.treeTiers[1]} far, ${dressing.stats.treeTiers[2]} cards)`
       + (dressing.stats.treesLoading ? ` (${dressing.stats.treesLoading} species loading)` : '')
       + (probes.pending ? `\n${probes.pending} light probe columns to measure` : '')
+      + `\n${gpu}`
       + (missing.length ? '\nTexture sets not bundled, default used · ' + missing.join(', ') + ' · run npm run textures:fetch' : '');
   }
 });
@@ -322,6 +350,6 @@ onLeave(() => {
   sunShadows.dispose(); volumetric.dispose(); lightRig.dispose(); probes.dispose(); weather.view.dispose(); orbit.dispose(); gui.destroy();
   scene.remove(clipmap.group, waterSheet); clipmap.dispose(); waterSheet.geometry.dispose(); waterSheet.material.dispose();
   for (const texture of Object.values(textures)) texture?.dispose?.();
-  renderer.dispose();
+  playCompileTarget.dispose(); renderer.dispose();
 });
 window.worldDemo = {renderer, world, clipmap, dressing, life, structures, play, lightRig, sunShadows, volumetric, probes, selectShot, weather, surfaceWeather, settings, focus, camera, orbit, scene};
