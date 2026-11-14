@@ -44,7 +44,8 @@ const TREES = {
 };
 
 // world: a corridor world. environment: the core environment (wind). report(error): where a failed load goes.
-export function createWorldDressing({scene, world, renderer, environment, report = console.error}) {
+// trees: false leaves the tree models out (they are the long download of the page).
+export function createWorldDressing({scene, world, renderer, environment, trees = true, report = console.error}) {
   const route = world.corridor;
   if (!route?.length) throw Error('World dressing needs a corridor world with a length');
   const biomeAt = z => world.biomes[route.sectionAt(THREE.MathUtils.clamp(z, 0, route.length - 1e-3)).biome];
@@ -169,7 +170,7 @@ export function createWorldDressing({scene, world, renderer, environment, report
   const treeGroup = new THREE.Group(), species = [];
   treeGroup.name = 'trees';
   scene.add(treeGroup);
-  {
+  if (trees) {
     const {spacing, band, clearance} = TREES, items = Object.fromEntries(Object.keys(TREES.heights).map(name => [name, []]));
     for (let j = 0; j * spacing < route.length; j++) for (let i = 0; i * spacing < band * 2; i++) {
       const z = (j + hash2(i, j, TREES.seed)) * spacing, x = route.routeX(z) - band + (i + hash2(j, i, TREES.seed + 1)) * spacing;
@@ -190,6 +191,8 @@ export function createWorldDressing({scene, world, renderer, environment, report
       stats.treesLoading++;
       loadTreeModels({scene: treeGroup, profile, items: list, environment, renderer, distanceTest: true, lights: scene}).then(plants => {
         if (disposed) { plants.dispose(); return; }
+        // The modelled tiers cast shadows; the flat cards do not.
+        plants.group.traverse(mesh => { if (mesh.isInstancedMesh && !mesh.material.isMeshBasicMaterial) mesh.castShadow = true; });
         species.push({plants, count: list.length});
         stats.trees += list.length;
       }).catch(error => report(new Error(`Could not load the ${profile} trees: ${error.message}`))).finally(() => { stats.treesLoading--; });
@@ -199,6 +202,7 @@ export function createWorldDressing({scene, world, renderer, environment, report
   let disposed = false;
   return {
     settings, stats,
+    probed: [rockGroup, treeGroup],   // what the light probes are meant for: the things that stand on the ground
     update(dt, camera, focus) {
       rockGroup.visible = settings.rocks; grassGroup.visible = settings.grass; treeGroup.visible = settings.trees;
       if (settings.rocks) updateRocks(focus);
