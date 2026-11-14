@@ -2,12 +2,13 @@
 // from it, a point light and a spot light in a light rig with their shadows, the kit's cascaded sun shadows, and pairs of white objects:
 // one on Three's standard material, one on the lighting hook. Each light stands midway between the two objects of a
 // pair, and both cast and receive the same shadows, so they must match. A third light circles the scene to judge
-// moving shadows, and panes of coloured glass tint the light that goes through them.
+// moving shadows, panes of coloured glass tint the light that goes through them, and the air itself is lit
+// (volumetric light): shafts of sun between the shadows, cones and halos around the lights.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {createLightProbes, createLightRig, createSunShadows, LIGHT_PROBE_DEFAULTS, SUN_SHADOW_LIMITS, LIGHT_SHADOW_LIMITS} from '../../src/lighting/index.js';
+import {createLightProbes, createLightRig, createSunShadows, createVolumetricLight, LIGHT_PROBE_DEFAULTS, SUN_SHADOW_LIMITS, LIGHT_SHADOW_LIMITS, VOLUMETRIC_LIMITS} from '../../src/lighting/index.js';
 import {benchRenderer, onLeave, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import '../bench.css';
@@ -43,6 +44,7 @@ const ground = {
 };
 const probes = createLightProbes({ground}), rig = createLightRig({shadows: {renderer, translucent: true}}), shadows = createSunShadows({renderer, translucent: true});
 const stage = createBasicStage({scene, ground: false, ambient: probes.ambient, lights: rig.lights, sun: shadows.sun});
+const volumetric = createVolumetricLight({renderer, sunShadows: shadows, rig}), air = {on: true};
 
 const groundGeometry = new THREE.PlaneGeometry(GROUND.size, GROUND.size, GROUND.cells, GROUND.cells).rotateX(-Math.PI / 2);
 const position = groundGeometry.attributes.position;
@@ -183,6 +185,20 @@ lightShadowSlider('softness', .1, 'soft edge · texels');
 lightShadowSlider('normalOffset', .1, 'normal offset · texels');
 lightShadowSlider('depthBias', .1, 'depth bias · texels');
 lightShadowSlider('perFrame', 1, 'lights redrawn per frame');
+const airFolder = gui.addFolder('Volumetric light');
+const airSlider = (name, step, label, max = VOLUMETRIC_LIMITS[name][1]) => airFolder.add(volumetric.settings, name, VOLUMETRIC_LIMITS[name][0], max, step).name(label);
+airFolder.add(air, 'on').name('on');
+airSlider('density', .0005, 'density · 1/m', .08);
+airSlider('anisotropy', .01, 'forward scatter');
+airSlider('sun', .05, 'sun', 8);
+airSlider('lights', .05, 'lights', 8);
+airSlider('ambient', .05, 'sky', 8);
+airSlider('heightFalloff', .5, 'thins over · m (0 = even)', 60);
+airFolder.add(volumetric.settings, 'heightBase', GROUND.trench.depth * -1, 30, .5).name('full up to · m');
+airSlider('distance', 1, 'distance · m', VIEW.far);
+airSlider('steps', 1, 'steps');
+airSlider('scale', .05, 'resolution share');
+airFolder.addColor(volumetric.settings, 'color').name('air colour');
 const groundFolder = gui.addFolder('Ground');
 groundFolder.addColor(settings, 'colorA').name('colour, near side').onChange(applyGround);
 groundFolder.addColor(settings, 'colorB').name('colour, far side').onChange(applyGround);
@@ -199,7 +215,7 @@ startFrameLoop(renderer, (dt, now) => {
   camera.updateMatrixWorld();
   const drawn = shadows.render(scene, camera, stage.environment.sun.direction);
   const lightsDrawn = rig.renderShadows(scene);
-  renderer.render(scene, camera);
+  if (air.on) volumetric.render(scene, camera, stage.environment); else renderer.render(scene, camera);
   if (now - lastStatus > STATUS_REFRESH_MS) {
     lastStatus = now;
     const {columns, spacing, layers} = LIGHT_PROBE_DEFAULTS;
@@ -207,5 +223,5 @@ startFrameLoop(renderer, (dt, now) => {
   }
 });
 document.body.dataset.ready = 'true';
-onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); stage.dispose(); probes.dispose(); rig.dispose(); shadows.dispose(); scene.remove(point, spot, spot.target, moving, ...panes); point.dispose(); spot.dispose(); moving.dispose(); for (const item of [...glassMaterials, spotGlass, paneGeometry, spotPaneGeometry]) item.dispose(); for (const item of [standard, hooked, groundMaterial, groundGeometry, sphere, pillar]) item.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });
-window.lightingBench = {stage, probes, rig, shadows, point, spot, moving, panes, settings, applyGround, scene, camera, controls, renderer};
+onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); stage.dispose(); probes.dispose(); rig.dispose(); shadows.dispose(); volumetric.dispose(); scene.remove(point, spot, spot.target, moving, ...panes); point.dispose(); spot.dispose(); moving.dispose(); for (const item of [...glassMaterials, spotGlass, paneGeometry, spotPaneGeometry]) item.dispose(); for (const item of [standard, hooked, groundMaterial, groundGeometry, sphere, pillar]) item.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });
+window.lightingBench = {stage, probes, rig, shadows, volumetric, point, spot, moving, panes, settings, applyGround, scene, camera, controls, renderer};

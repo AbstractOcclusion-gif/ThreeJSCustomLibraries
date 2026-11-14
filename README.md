@@ -104,7 +104,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | rocks (seeded stones, boulders, scatter and cliff runs) | `three-kit/rocks` | `bench/rocks/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
-| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials, with their shadows; cascaded sun shadows for both paths; light tinted through transparent meshes) | `three-kit/lighting` | `bench/lighting/` | ✓ |
+| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials, with their shadows; cascaded sun shadows for both paths; light tinted through transparent meshes; volumetric light) | `three-kit/lighting` | `bench/lighting/` | ✓ |
 | cable (articulated rope on cannon-es, tube view) | `three-kit/cable` | `bench/cable/` | ✓ |
 | destruction (rigid structures, impact fracture, overload detachment) | `three-kit/destruction`, `/destruction/three` | `bench/destruction/` | ✓ |
 | camera (director, rigs, bullet time, replay, collision, post, panel) | `three-kit/camera` | `bench/camera/` | ✓ |
@@ -275,6 +275,25 @@ atlas is drawn a second time, behind the opaque depth: every pane multiplies wha
 of the nearest pane. A surface behind that depth takes the tint with its shadow, on both lighting paths, with no pass of
 its own. The atlas then holds half-float colour, so it is off by default. A surface between two panes takes the tint of
 both.
+
+### Volumetric light
+
+`createVolumetricLight({renderer, sunShadows, rig, ...VOLUMETRIC_DEFAULTS})` lights the air. One pass marches each view
+ray through a thin fog (`density` per metre, optionally thinning with height) and adds up what the air sends toward the
+camera: the sun through the cascades (shafts between the shadows, tinted by glass), the rig's point and spot lights
+(cones and halos, with their shadows) and the sky. `anisotropy` is how much the air scatters onward: bright looking
+into a light. The march runs at `scale` (0.5) of the screen with `steps` (24) samples to `distance` (150 m), and is laid
+back over the scene along its depth edges. `sunShadows` and `rig` are both optional.
+
+```js
+const volumetric = createVolumetricLight({renderer, sunShadows: shadows, rig});
+// each frame, after the shadows, in place of renderer.render(scene, camera):
+volumetric.render(scene, camera, environment);   // core environment: stage.environment, view.environment
+```
+
+It draws the scene into its own target first, so the canvas antialiasing does not apply to that frame; a pass that
+already holds the scene hands it over instead: `render(scene, camera, environment, {color, depth})`. Every setting is
+live in `volumetric.settings`.
 
 ### Light slots
 

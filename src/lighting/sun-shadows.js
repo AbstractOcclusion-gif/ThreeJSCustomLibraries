@@ -35,7 +35,8 @@ const ATLAS_COLUMNS = 2;                 // tiles per row of the atlas, when the
 const SLOT = 'sun-shadows';
 const TO_UV = new THREE.Matrix4().set(.5, 0, 0, .5, 0, .5, 0, .5, 0, 0, .5, .5, 0, 0, 0, 1);   // clip space -> 0..1
 
-// `vec3 sunShadowAt(vec3 worldPosition, vec3 n)`: the share of the sunlight that reaches a surface facing n.
+// `vec3 sunShadowAt(vec3 worldPosition, vec3 n)`: the share of the sunlight that reaches a surface facing n, and
+// `vec3 sunShadowInAir(vec3 worldPosition)`: the same for a point of the air, read with a single tap (light shafts).
 // Written once per shader, whoever brings it (the hook, a light slot). translucent: the light is also tinted by the
 // transparent casters it went through.
 export const sunShadowGLSL = (cascades, translucent = false) => /* glsl */`
@@ -59,15 +60,17 @@ uniform vec3 uSunShadowDir;       // toward the sun
 vec3 sunShadowTint(int cascade) {
   return cascade == 0 ? vec3(1.0, 0.4, 0.4) : cascade == 1 ? vec3(0.4, 1.0, 0.4) : cascade == 2 ? vec3(0.4, 0.55, 1.0) : vec3(1.0, 1.0, 0.4);
 }
-float sunShadowTaps(vec2 uv, float depth, vec4 tile) {
+// kernel: taps on each side of the centre (1 = 3 x 3, 0 = one tap).
+float sunShadowTaps(vec2 uv, float depth, vec4 tile, int kernel) {
   float lit = 0.0;
-  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+  for (int y = -kernel; y <= kernel; y++) for (int x = -kernel; x <= kernel; x++) {
     vec2 tap = clamp(uv + vec2(float(x), float(y)) * uSunShadowLook.z * uSunShadowAtlasTexel.xy, tile.xy, tile.zw);
     lit += step(depth, textureLod(uSunShadowAtlas, tap, 0.0).r);
   }
-  return lit / 9.0;
+  float side = float(2 * kernel + 1);
+  return lit / (side * side);
 }
-vec3 sunShadowAt(vec3 worldPosition, vec3 n) {
+vec3 sunShadowRead(vec3 worldPosition, vec3 n, int kernel) {
   float lit = 0.0, left = 1.0;
   vec3 tint = vec3(0.0), through = vec3(0.0);
   for (int i = 0; i < SUN_SHADOW_CASCADES; i++) {
@@ -79,7 +82,7 @@ vec3 sunShadowAt(vec3 worldPosition, vec3 n) {
     float edge = min(border.x, border.y);
     if (edge <= 0.0 || coord.z <= 0.0 || coord.z >= 1.0) continue;
     float share = left * smoothstep(0.0, uSunShadowLook.w, edge);
-    lit += share * sunShadowTaps(coord.xy, coord.z - uSunShadowBias[i], tile);
+    lit += share * sunShadowTaps(coord.xy, coord.z - uSunShadowBias[i], tile, kernel);
     #ifdef SUN_SHADOW_GLASS
     vec4 glass = textureLod(uSunShadowGlass, clamp(coord.xy, tile.xy, tile.zw), 0.0);
     through += share * (coord.z - SUN_SHADOW_GLASS_BIAS > glass.a ? glass.rgb : vec3(1.0));
@@ -94,6 +97,8 @@ vec3 sunShadowAt(vec3 worldPosition, vec3 n) {
   vec3 visibility = mix(vec3(1.0), (lit + left) * (through + left), uSunShadowLook.x);
   return visibility * mix(vec3(1.0), tint + left, uSunShadowAtlasTexel.z);
 }
+vec3 sunShadowAt(vec3 worldPosition, vec3 n) { return sunShadowRead(worldPosition, n, 1); }
+vec3 sunShadowInAir(vec3 worldPosition) { return sunShadowRead(worldPosition, vec3(0.0), 0); }
 #endif`;
 
 function validate(settings) {

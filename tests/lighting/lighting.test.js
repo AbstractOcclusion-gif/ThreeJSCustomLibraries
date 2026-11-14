@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {createLightProbes, createLightRig, createSunShadows, cascadeSplits, createCascadeFitter, LIGHT_PROBE_DEFAULTS} from '../../src/lighting/index.js';
-import {createLighting, createSkyVisibility, addLightSlot} from '../../src/core/index.js';
+import {createLightProbes, createLightRig, createSunShadows, createVolumetricLight, cascadeSplits, createCascadeFitter, LIGHT_PROBE_DEFAULTS} from '../../src/lighting/index.js';
+import {createLighting, createSkyVisibility, createEnvironment, addLightSlot} from '../../src/core/index.js';
 
 // A 45 degree pit around the origin on green ground, red beyond x = 40.
 const ground = {heightAt: (x, z) => Math.min(Math.hypot(x, z), 8), colorAt: (x, z, target) => x > 40 ? target.setRGB(1, 0, 0) : target.setRGB(0, .5, 0)};
@@ -204,7 +204,7 @@ function recordingRenderer() {
  return {calls, autoClear: true, capabilities: {}, render: (scene, camera) => calls.push(['render', camera.layers.mask]), clear: () => calls.push(['clear']),
   setRenderTarget: target => calls.push(['target', target ? target.viewport.toArray() : null]), getRenderTarget: () => null, getActiveCubeFace: () => 0,
   getActiveMipmapLevel: () => 0, getScissorTest: () => false, getViewport: v => v, getScissor: v => v, getClearColor: c => c, getClearAlpha: () => 1,
-  setScissorTest() {}, setViewport() {}, setScissor() {}, setClearColor: color => calls.push(['clearColor', color?.isColor ? color.toArray() : null]),
+  getDrawingBufferSize: size => size.set(800, 600), setScissorTest() {}, setViewport() {}, setScissor() {}, setClearColor: color => calls.push(['clearColor', color?.isColor ? color.toArray() : null]),
   state: {buffers: {color: {setMask: mask => calls.push(['colorMask', mask]), setLocked: locked => calls.push(['colorLock', locked])}}}};
 }
 
@@ -336,5 +336,36 @@ test('with translucent shadows a transparent caster tints the light: a second dr
  const lightShader = {uniforms: {}, vertexShader: THREE.ShaderLib.basic.vertexShader, fragmentShader: THREE.ShaderLib.basic.fragmentShader};
  seen[1].pane.onBeforeCompile(lightShader);
  assert.equal(lightShader.uniforms.uGlassFar.value, 25); assert.equal(shader.uniforms.uGlassFar.value, 0);
+ shadows.dispose(); rig.dispose();
+});
+
+test('volumetric light marches the air with the parts it is given and lays it over the scene', () => {
+ const renderer = recordingRenderer(), shadows = createSunShadows({renderer, translucent: true}), rig = createLightRig({shadows: {renderer}});
+ assert.throws(() => createVolumetricLight(), TypeError);
+ assert.throws(() => createVolumetricLight({renderer, rig: {}}), TypeError); assert.throws(() => createVolumetricLight({renderer, sunShadows: {}}), TypeError);
+ for (const bad of [{steps: 65}, {steps: 2.5}, {scale: 0}, {anisotropy: 1}, {density: -1}]) assert.throws(() => createVolumetricLight({renderer, ...bad}), RangeError);
+ const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(45, 4 / 3, .1, 400), environment = createEnvironment();
+ const drawn = [];
+ renderer.render = (what, view) => drawn.push({scene: what === scene, material: what.children[0]?.material});
+ // Each part is optional: the march reads the sun shadows and the rig only when it has them.
+ const plain = createVolumetricLight({renderer}), full = createVolumetricLight({renderer, sunShadows: shadows, rig, density: .01, steps: 16, scale: .25});
+ plain.render(scene, camera, environment); full.render(scene, camera, environment);
+ const [plainMarch, fullMarch, composite] = [drawn[1].material, drawn[4].material, drawn[5].material];
+ assert.deepEqual(drawn.map(draw => draw.scene), [true, false, false, true, false, false]);   // the scene, the march, the composite
+ assert.ok(!plainMarch.fragmentShader.includes('sunShadowInAir(p)') && !plainMarch.fragmentShader.includes('volumeRigLight'));
+ assert.ok(fullMarch.fragmentShader.includes('light += sunInAir * sunShadowInAir(p);') && fullMarch.fragmentShader.includes('lightShadowRead(uRigCaster[i], p, vec3(0.0), 0)'));
+ assert.equal(fullMarch.uniforms.uSunShadowAtlas, shadows.sun.uniforms.uSunShadowAtlas); assert.equal(fullMarch.uniforms.uRigCount, rig.lights.uniforms.uRigCount);
+ // The air takes the sun and the sky of the environment, and the march runs at its share of the screen.
+ assert.deepEqual(fullMarch.uniforms.uVolumeSun.value.toArray(), environment.sun.color.toArray());
+ assert.deepEqual(fullMarch.uniforms.uVolumeMedium.value.toArray(), [.01, 0, 0, .6]); assert.deepEqual(fullMarch.uniforms.uVolumeMarch.value.toArray(), [150, 16, 1]);
+ assert.deepEqual(composite.uniforms.uVolumeSize.value.toArray(), [200, 150]);
+ assert.ok(composite.fragmentShader.includes('#include <tonemapping_fragment>') && composite.uniforms.tVolume.value.isTexture);
+ // A pass that already holds the scene hands it over: the scene is not drawn again.
+ const held = {color: new THREE.Texture(), depth: new THREE.DepthTexture(800, 600)}; drawn.length = 0;
+ full.render(scene, camera, environment, held);
+ assert.deepEqual(drawn.map(draw => draw.scene), [false, false]); assert.equal(composite.uniforms.tScene.value, held.color); assert.equal(fullMarch.uniforms.tDepth.value, held.depth);
+ assert.throws(() => full.set('steps', 0), RangeError); assert.equal(full.set('density', .02).settings.density, .02);
+ assert.throws(() => full.render(scene, camera, {}), TypeError); assert.throws(() => full.render(scene, new THREE.OrthographicCamera(), environment), TypeError);
+ plain.dispose(); full.dispose(); drawn.length = 0; full.render(scene, camera, environment); assert.equal(drawn.length, 0);
  shadows.dispose(); rig.dispose();
 });

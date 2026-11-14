@@ -28,25 +28,28 @@ uniform vec3 uRigPosition[LIGHT_RIG_CAPACITY];    // world position
 uniform vec3 uRigColor[LIGHT_RIG_CAPACITY];       // colour x intensity
 uniform vec3 uRigDirection[LIGHT_RIG_CAPACITY];   // from the target of a spot light toward the light
 uniform vec4 uRigShape[LIGHT_RIG_CAPACITY];       // cutoff distance (0 = none), decay, cos(cone), cos(inner cone)
+// The light of rig light i at a place, before any shadow: colour x distance falloff x cone. direction: toward the light.
+vec3 lightRigAt(int i, vec3 worldPosition, out vec3 direction) {
+  vec3 toLight = uRigPosition[i] - worldPosition;
+  float lightDistance = length(toLight);
+  direction = toLight / max(lightDistance, 0.0001);
+  vec4 shape = uRigShape[i];
+  float falloff = 1.0 / max(pow(lightDistance, shape.y), 0.01);
+  if (shape.x > 0.0) {
+    float edge = lightDistance / shape.x;
+    float inside = clamp(1.0 - edge * edge * edge * edge, 0.0, 1.0);
+    falloff *= inside * inside;
+  }
+  return uRigColor[i] * (falloff * smoothstep(shape.z, shape.w, dot(direction, uRigDirection[i])));
+}
 vec3 lightLocal(vec3 n, vec3 worldPosition, float wrap) {
   vec3 sum = vec3(0.0);
   for (int i = 0; i < LIGHT_RIG_CAPACITY; i++) {
     if (i >= uRigCount) break;
-    vec3 toLight = uRigPosition[i] - worldPosition;
-    float lightDistance = length(toLight);
-    vec3 direction = toLight / max(lightDistance, 0.0001);
-    vec4 shape = uRigShape[i];
-    float falloff = 1.0 / max(pow(lightDistance, shape.y), 0.01);
-    if (shape.x > 0.0) {
-      float edge = lightDistance / shape.x;
-      float inside = clamp(1.0 - edge * edge * edge * edge, 0.0, 1.0);
-      falloff *= inside * inside;
-    }
-    float cone = smoothstep(shape.z, shape.w, dot(direction, uRigDirection[i]));
-    float facing = max((dot(n, direction) + wrap) / (1.0 + wrap), 0.0);
-    vec3 reach = vec3(falloff * cone * facing);
-    ${shadowGLSL ? 'if (reach.x > 0.0 && uRigCaster[i] >= 0) reach *= lightShadowOf(uRigCaster[i], worldPosition, n);' : ''}
-    sum += uRigColor[i] * reach;
+    vec3 direction;
+    vec3 reach = lightRigAt(i, worldPosition, direction) * max((dot(n, direction) + wrap) / (1.0 + wrap), 0.0);
+    ${shadowGLSL ? 'if (reach != vec3(0.0) && uRigCaster[i] >= 0) reach *= lightShadowOf(uRigCaster[i], worldPosition, n);' : ''}
+    sum += reach;
   }
   return sum;
 }`;

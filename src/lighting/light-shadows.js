@@ -33,7 +33,8 @@ const FACES = Object.freeze([[1, 0, 0, UP], [-1, 0, 0, UP], [0, 1, 0, SIDE], [0,
 
 // `vec3 lightShadowOf(int caster, vec3 worldPosition, vec3 n)`: the share of a casting light that reaches a surface
 // facing n, per colour, and `vec3 lightShadowNear(vec3 lightViewPosition, ...)`: the same for the light standing at a
-// place, for Three's own light loop. Written once per shader, whoever brings it. translucent: the light is also
+// place, for Three's own light loop; `vec3 lightShadowRead(caster, worldPosition, n, kernel)` is the read itself, with
+// `kernel` taps on each side of the centre (0 = one tap, for the air). Written once per shader, whoever brings it. translucent: the light is also
 // tinted by the transparent casters it went through.
 export const lightShadowGLSL = (casters, translucent = false) => /* glsl */`
 #ifndef LIGHT_SHADOWS
@@ -53,7 +54,7 @@ uniform vec4 uLightShadowBlock[LIGHT_SHADOW_CASTERS];      // first tile of the 
 uniform vec2 uLightShadowKind[LIGHT_SHADOW_CASTERS];       // 1 = point light (six tiles), 0 = spot; tangent of half the view of a tile
 uniform vec4 uLightShadowLook;       // strength, normal offset (texels), softness (texels), depth bias (texels)
 uniform vec3 uLightShadowTexel;      // 1 / atlas width, 1 / atlas height, texels across a tile
-vec3 lightShadowOf(int caster, vec3 worldPosition, vec3 n) {
+vec3 lightShadowRead(int caster, vec3 worldPosition, vec3 n, int kernel) {
   vec4 place = uLightShadowPlace[caster];
   if (place.w <= 0.0) return vec3(1.0);
   vec3 toLight = place.xyz - worldPosition;
@@ -90,7 +91,7 @@ vec3 lightShadowOf(int caster, vec3 worldPosition, vec3 n) {
   vec2 inset = 0.5 * uLightShadowTexel.xy, low = tile + inset, high = tile + block.zw - inset;
   vec2 uv = tile + inTile * block.zw;
   float lit = 0.0;
-  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+  for (int y = -kernel; y <= kernel; y++) for (int x = -kernel; x <= kernel; x++) {
     vec2 tap = clamp(uv + vec2(float(x), float(y)) * uLightShadowLook.z * uLightShadowTexel.xy, low, high);
     lit += step(depth, textureLod(uLightShadowAtlas, tap, 0.0).r);
   }
@@ -99,8 +100,10 @@ vec3 lightShadowOf(int caster, vec3 worldPosition, vec3 n) {
   vec4 glass = textureLod(uLightShadowGlass, clamp(uv, low, high), 0.0);
   if (away - LIGHT_SHADOW_GLASS_BIAS > glass.a) through = glass.rgb;
   #endif
-  return mix(vec3(1.0), through * (lit / 9.0), uLightShadowLook.x);
+  float side = float(2 * kernel + 1);
+  return mix(vec3(1.0), through * (lit / (side * side)), uLightShadowLook.x);
 }
+vec3 lightShadowOf(int caster, vec3 worldPosition, vec3 n) { return lightShadowRead(caster, worldPosition, n, 1); }
 vec3 lightShadowNear(vec3 lightViewPosition, mat4 view, vec3 worldPosition, vec3 n) {
   for (int caster = 0; caster < LIGHT_SHADOW_CASTERS; caster++) {
     vec4 place = uLightShadowPlace[caster];
