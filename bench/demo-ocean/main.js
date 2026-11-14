@@ -3,9 +3,10 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {BOAT_DEFAULTS, BUOYANCY_DEFAULTS, FoamTrail, createOceanSurface, createWaterlineComposite, SurfaceProbes, skyFromWeather} from '../../src/water/index.js';
 import {OceanCoastTerrain} from '../../src/terrain/index.js';
-import {createLighting, syncLighting} from '../../src/core/lighting.js';
+import {createLighting} from '../../src/core/lighting.js';
 import {createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
 import {createShadowReceivers} from '../kit/shadow-receivers.js';
+import {createSceneFogScope} from '../kit/scene-fog.js';
 import {createParticleDepthBinding, createWaterSpray, Motes} from '../../src/particles/water/index.js';
 import {createOceanFloat} from './float.js';
 import {createDemoLife} from '../kit/life.js';
@@ -43,6 +44,7 @@ const ocean = createOceanSurface({renderer, sky: skyFromWeather(weather.view), c
 const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);
 const terrainLighting = createLighting({sun: sunCover, environment});
+const withSceneFog = createSceneFogScope(scene, camera, terrainLighting);
 const ISLAND_CENTRE = [0, -220], PLANT_GUST = .4;
 const coast = new OceanCoastTerrain({scene, settings: {centerX: ISLAND_CENTRE[0], centerZ: ISLAND_CENTRE[1]}, water: ocean.shoreBinding, onHeightField: ocean.setShore, lighting: terrainLighting});
 // One environment for everything: the weather fills it, the ocean, plants, fire, smoke and spray read it.
@@ -168,7 +170,6 @@ startFrameLoop(renderer, (dt, now) => {
     camera.lookAt(controls.target.x, view.eyeHeight, controls.target.z);
   } else if (!shots.update(dt)) controls.update();
   weather.system.update(dt); weather.view.update(dt);
-  syncLighting(terrainLighting.uniforms, {fog: scene.fog});
   island.update(dt, camera);
   structures.update(dt, camera);
   float.step(dt);
@@ -191,14 +192,15 @@ startFrameLoop(renderer, (dt, now) => {
   const slopeX = valid ? (b.height - a.height) / probeStep : 0;
   const slopeZ = valid ? (c.height - a.height) / probeStep : 0;
   const height = valid ? a.height + slopeX * (x - a.x) + slopeZ * (z - a.z) : 0;
+  const submerged = camera.position.y < height;
   motes.update(dt, {cameraPosition: camera.position, height, viewportHeight: Math.max(1, ocean.viewport.y)});
   receiverScan += dt;
   if (receiverScan >= OCEAN_LIGHT.receiverScanSeconds) { receiverScan = 0; shadowReceivers.update(); }
   camera.updateMatrixWorld();
   shadows.render(scene, camera, environment.sun.direction);
-  const opaque = ocean.captureScene(scene, camera, {waterType: view.waterType, excludeHulls: boatSettings.excludeHulls});
+  const opaque = withSceneFog(submerged, () => ocean.captureScene(scene, camera, {waterType: view.waterType, excludeHulls: boatSettings.excludeHulls}));
   const water = ocean.captureWater(waterScene, camera);
-  const useWeatherPost = lightSettings.volumetric || weather.view.postEnabled;
+  const useWeatherPost = !submerged && (lightSettings.volumetric || weather.view.postEnabled);
   if (useWeatherPost) {
     postColor.setSize(opaque.width, opaque.height);
     renderer.setRenderTarget(postColor);

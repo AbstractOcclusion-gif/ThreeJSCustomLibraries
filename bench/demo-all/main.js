@@ -16,12 +16,13 @@ import {createTerrainImpacts} from './impacts.js';
 import {createTerrainIce} from './ice.js';
 import {loadTerrainTextures, packTerrainLayers} from '../terrain/textures.js';
 import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from '../terrain/controls.js';
-import {createLighting, syncLighting} from '../../src/core/lighting.js';
+import {createLighting} from '../../src/core/lighting.js';
 import {createLightRig, createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
 import {createCameraShots} from '../kit/shots.js';
 import {createDemoLife} from '../kit/life.js';
 import {createDemoStructures} from '../kit/structures.js';
 import {createShadowReceivers} from '../kit/shadow-receivers.js';
+import {createSceneFogScope} from '../kit/scene-fog.js';
 import {grassControls} from '../vegetation/controls.js';
 import {splashControls, sprayControls} from '../particles/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -266,6 +267,7 @@ rebuildGrass();
 // One environment for everything: the weather fills it; plants, fire, smoke, rope and grass read it.
 const environment = weather.view.environment; environment.wind.gust = .4;
 const demoLighting = createLighting({sun: sunCover, lights: lightRig.lights, environment});
+const withSceneFog = createSceneFogScope(scene, camera, demoLighting);
 const groundAt = (x, z) => field.heightAt(x, z) ?? 0;
 // Demo layout, metres: the pond lies around (-8, 2), the camp on the east bank; the bridge runs along the west edge from
 // the south bank up to the cliff, turned so its shots fly in from over the pond.
@@ -440,7 +442,6 @@ startFrameLoop(renderer, (dt, now) => {
  const bedChanged = impacts.update(dt, controlsState.water ? freeze.progress : 0, appearance.waterLevel.value);
  if (bedChanged) { bedHeight.needsUpdate = true; grassDirty = true; }
  if (grassDirty && !impacts.moving) rebuildGrass();
- syncLighting(demoLighting.uniforms, {fog: scene.fog});
  life.update(dt, camera);
  structures.update(dt, camera);
  terrainGrass.update(dt, {camera, environment, transmission: grassSettings.transmission * weather.system.day.daylight,
@@ -461,6 +462,7 @@ startFrameLoop(renderer, (dt, now) => {
   camera.position.set(diveX, eye, diveZ);
   camera.lookAt(diveTargetX, Math.min(waterLevel - DIVE.targetBelowSurface, field.heightAt(diveTargetX, diveTargetZ) + DIVE.targetAboveBed), diveTargetZ);
  }
+ const submerged = pond.surface.visible && camera.position.y < waterLevel && wetAt(camera.position.x, camera.position.z);
  if (!pond.surface.visible || freeze.progress >= 1) rippleGesture.cancel();
  rippleGesture.update(dt);
  if (freeze.progress < 1 || ice.active.value) {
@@ -475,7 +477,7 @@ startFrameLoop(renderer, (dt, now) => {
  lightRig.update(camera.position);
  lightRig.renderShadows(scene);
  sunShadows.render(scene, camera, environment.sun.direction);
- pond.render(pondSettings.waveTime, pondSettings);
+ withSceneFog(submerged, () => pond.render(pondSettings.waveTime, pondSettings));
  spray.update(dt);
  // Rain pocks the pond: a few drops a frame, wherever a random point of the ripple area is water.
  rainDue += weather.system.weather.rain * POND_SPLASH.rain.perSecond * dt;
@@ -489,8 +491,8 @@ startFrameLoop(renderer, (dt, now) => {
  }
  splash.update(dt);
  foamLayer.update(dt);
- if (diving) {
-  waterline.render(scene, camera, {height: waterLevel, clarity: pondSettings.clarity, godRays: pondSettings.godRays});
+ if (submerged) {
+  withSceneFog(true, () => waterline.render(scene, camera, {height: waterLevel, clarity: pondSettings.clarity, godRays: pondSettings.godRays}));
  } else {
   // The opaque pond surface supplies the stop depth for rays over the basin. Dry rays keep the scene depth.
   // Underwater, the separate waterline pass above owns the light transport.
