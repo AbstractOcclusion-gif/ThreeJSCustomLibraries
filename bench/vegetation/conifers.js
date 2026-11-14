@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {bakeTreeImpostor, VIEW_STEP} from './tree-impostors.js';
 const models = {
   pine: new URL('../../assets/trees/pine.glb', import.meta.url).href,
   spruce: new URL('../../assets/trees/spruce.glb', import.meta.url).href,
@@ -18,15 +19,24 @@ const distantModels = {
 };
 const FADE_HALF_WIDTH = .1; // fraction of the switch distance on either side
 
-function addDistanceFade(shader, far) {
-  shader.vertexShader = `attribute float treeBlend; varying float vTreeBlend;\n${shader.vertexShader}`
+function addDistanceFade(shader) {
+  shader.vertexShader = `attribute vec2 treeBlend; varying vec2 vTreeBlend;\n${shader.vertexShader}`
     .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTreeBlend = treeBlend;');
   shader.fragmentShader = `varying float vTreeBlend;\n${shader.fragmentShader}`
     .replace('#include <alphatest_fragment>', `
       #include <alphatest_fragment>
       // Both levels use the same screen-space threshold and complementary masks.
       float threshold = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))));
-      if (${far ? 'threshold >= vTreeBlend' : 'threshold < vTreeBlend'}) discard;
+      if (threshold < vTreeBlend.x || threshold >= vTreeBlend.y) discard;
+    `);
+}
+
+function addImpostorShader(shader, viewCount) {
+  addDistanceFade(shader);
+  shader.vertexShader = `attribute float treeView;\n${shader.vertexShader}`
+    .replace('#include <uv_vertex>', `
+      #include <uv_vertex>
+      vMapUv.x = (vMapUv.x + treeView) / ${viewCount.toFixed(1)};
     `);
 }
 
@@ -39,7 +49,7 @@ function collectResources(model, geometries, materials, textures) {
   });
 }
 
-export async function loadTreeModels({scene, profile, items, environment, distanceTest = false}) {
+export async function loadTreeModels({scene, profile, items, environment, renderer, distanceTest = false}) {
   const loader = new GLTFLoader();
   const {scene: model} = await loader.loadAsync(models[profile]);
   const bounds = new THREE.Box3().setFromObject(model);
@@ -76,12 +86,12 @@ export async function loadTreeModels({scene, profile, items, environment, distan
         #endif
         vec3 treeWorld = (modelMatrix * treePosition).xyz;
         float weight = smoothstep(0.0, 5.0, treeWorld.y);
-        ${distanceTest ? 'weight *= 1.0 - treeBlend;' : ''}
+        ${distanceTest ? 'weight *= 1.0 - treeBlend.x;' : ''}
         float wave = sin(treeTime * 1.4 + dot(treeWorld.xz, vec2(.27, .19)));
         mvPosition.xyz += (viewMatrix * vec4(treeWind.x * wave * weight, 0.0, treeWind.y * wave * weight, 0.0)).xyz;
         gl_Position = projectionMatrix * mvPosition;
       `);
-      if (distanceTest) addDistanceFade(shader, false);
+      if (distanceTest) addDistanceFade(shader);
     };
     material.customProgramCacheKey = () => distanceTest ? 'tree-wind-and-fade' : 'tree-wind';
   }
@@ -97,85 +107,124 @@ export async function loadTreeModels({scene, profile, items, environment, distan
     placements.push(placement);
     if (!distanceTest) group.add(placement);
   }
-  function addBatches(sourceModel, far) {
+  function addBatches(sourceModel, tier) {
     sourceModel.updateMatrixWorld(true);
     sourceModel.traverse(source => {
       if (!source.isMesh) return;
       const mesh = new THREE.InstancedMesh(source.geometry, source.material, placements.length);
-      const blend = new THREE.InstancedBufferAttribute(new Float32Array(placements.length), 1).setUsage(THREE.DynamicDrawUsage);
+      const blend = new THREE.InstancedBufferAttribute(new Float32Array(placements.length * 2), 2).setUsage(THREE.DynamicDrawUsage);
       mesh.geometry.setAttribute('treeBlend', blend);
+      let views;
+      if (tier === 2) {
+        views = new THREE.InstancedBufferAttribute(new Float32Array(placements.length), 1).setUsage(THREE.DynamicDrawUsage);
+        mesh.geometry.setAttribute('treeView', views);
+      }
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.visible = false;
       mesh.count = 0;
-      mesh.receiveShadow = !far;
+      mesh.receiveShadow = tier === 0;
       group.add(mesh);
-      batches.push({mesh, blend, local: source.matrixWorld.clone(), far});
+      batches.push({mesh, blend, local: source.matrixWorld.clone(), tier, views});
     });
   }
   if (distanceTest) {
     let far;
     try {
       ({scene: far} = await loader.loadAsync(distantModels[profile]));
+      collectResources(far, geometries, materials, textures);
+      // Bake before attaching the instanced fade shader to the source.
+      far.position.copy(model.position);
+      const {atlas, geometry, material, viewCount} = bakeTreeImpostor(renderer, scene, far, bounds);
+      textures.add(atlas);
+      geometries.add(geometry);
+      materials.add(material);
+      material.onBeforeCompile = shader => addImpostorShader(shader, viewCount);
+      material.customProgramCacheKey = () => 'tree-impostor';
+      addBatches(new THREE.Mesh(geometry, material), 2);
     } catch (error) {
       dispose();
       throw error;
     }
-    collectResources(far, geometries, materials, textures);
-    // Anchor both levels in the full model's coordinate system.
-    far.position.copy(model.position);
     far.traverse(source => {
       if (!source.isMesh) return;
-      source.material.onBeforeCompile = shader => addDistanceFade(shader, true);
+      source.material.onBeforeCompile = addDistanceFade;
       source.material.customProgramCacheKey = () => 'static-tree-fade';
     });
-    addBatches(model, false);
-    addBatches(far, true);
+    addBatches(model, 0);
+    addBatches(far, 1);
   }
   const blendValues = new Float32Array(placements.length);
+  const impostorValues = new Float32Array(placements.length);
   const matrix = new THREE.Matrix4();
+  const billboard = new THREE.Object3D();
+  const lastCamera = new THREE.Vector3(Infinity, Infinity, Infinity);
   let lastCount = -1;
   let farCount = 0;
+  let impostorCount = 0;
   let transitionCount = 0;
+  let animateNear = true;
   let nearCount = placements.length;
   scene.add(group);
   return {
     group,
     get nearCount() { return nearCount; },
     get farCount() { return farCount; },
+    get impostorCount() { return impostorCount; },
     get transitionCount() { return transitionCount; },
-    updateDistance(camera, threshold, count) {
+    updateDistance(camera, threshold, count, impostorDistance = Infinity) {
       let changed = count !== lastCount;
+      const cameraMoved = !lastCamera.equals(camera.position);
+      lastCamera.copy(camera.position);
       lastCount = count;
       nearCount = 0;
       farCount = 0;
+      impostorCount = 0;
       transitionCount = 0;
+      animateNear = false;
       for (let index = 0; index < count; index++) {
         const distance = camera.position.distanceTo(placements[index].position);
         const blend = Math.fround(THREE.MathUtils.smoothstep(distance, threshold * (1 - FADE_HALF_WIDTH), threshold * (1 + FADE_HALF_WIDTH)));
-        changed ||= blendValues[index] !== blend;
+        const impostor = Math.fround(Math.min(blend, THREE.MathUtils.smoothstep(distance, impostorDistance * (1 - FADE_HALF_WIDTH), impostorDistance * (1 + FADE_HALF_WIDTH))));
+        changed ||= blendValues[index] !== blend || impostorValues[index] !== impostor;
         blendValues[index] = blend;
-        if (blend === 0) nearCount++;
-        else if (blend === 1) farCount++;
+        impostorValues[index] = impostor;
+        animateNear ||= blend < 1;
+        if (impostor === 1) impostorCount++;
+        else if (blend === 0) nearCount++;
+        else if (blend === 1 && impostor === 0) farCount++;
         else transitionCount++;
       }
-      if (!changed) return;
-      for (const {mesh, blend, local, far} of batches) {
+      for (const {mesh, blend, local, tier, views} of batches) {
+        if (!changed && !(views && cameraMoved && mesh.count)) continue;
         let slot = 0;
         for (let index = 0; index < count; index++) {
-          const value = blendValues[index];
-          if (far ? value === 0 : value === 1) continue;
-          mesh.setMatrixAt(slot, matrix.multiplyMatrices(placements[index].matrix, local));
-          blend.setX(slot++, value);
+          const middle = blendValues[index], far = impostorValues[index];
+          const low = tier === 0 ? middle : tier === 1 ? far : 0;
+          const high = tier === 0 ? 1 : tier === 1 ? middle : far;
+          if (low >= high) continue;
+          const placement = placements[index];
+          if (views) {
+            const angle = Math.atan2(camera.position.x - placement.position.x, camera.position.z - placement.position.z);
+            const localAngle = angle - placement.rotation.y;
+            views.setX(slot, Math.round(THREE.MathUtils.euclideanModulo(localAngle, TURN) / VIEW_STEP) % Math.round(TURN / VIEW_STEP));
+            billboard.position.copy(placement.position);
+            billboard.scale.copy(placement.scale);
+            billboard.rotation.y = angle;
+            billboard.updateMatrix();
+            mesh.setMatrixAt(slot, billboard.matrix);
+          } else mesh.setMatrixAt(slot, matrix.multiplyMatrices(placement.matrix, local));
+          blend.setXY(slot++, low, high);
         }
         mesh.count = slot;
         mesh.visible = slot > 0;
         mesh.instanceMatrix.needsUpdate = true;
         blend.needsUpdate = true;
+        if (views) views.needsUpdate = true;
         if (slot) mesh.computeBoundingSphere();
       }
     },
     update(dt) {
-      if (!nearCount && !transitionCount) return;
+      if (distanceTest && !animateNear) return;
       time.value += dt;
       const {speed, gust, x, z} = environment.wind;
       const strength = Math.min(WIND.maximum, speed * (WIND.perSpeed + gust * WIND.perGust));

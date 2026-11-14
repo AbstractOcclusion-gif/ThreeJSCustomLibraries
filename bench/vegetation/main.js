@@ -74,7 +74,7 @@ const DISTANCE_VIEW = 'Distance test';
 const DISTANCE_CAPACITY = 48;
 const DISTANCE_COLUMN_SPACING = 20;
 const DISTANCE_GROUND_SCALE = 1.5;
-const distanceSettings = {cameraDistance: 26, switchDistance: 48, perSpecies: 6};
+const distanceSettings = {cameraDistance: 26, switchDistance: 48, impostors: true, impostorDistance: 76, perSpecies: 6};
 const DISTANCE_ROWS = [0, -12, -24, -36, -48, -60];
 const distanceItems = authoredItems.map(({profile, items: [item]}) => ({
   profile, items: Array.from({length: DISTANCE_CAPACITY}, (_, variant) => {
@@ -196,7 +196,7 @@ function applyView() {
     const key = distance ? `distance:${profile}` : profile;
     if (imported.has(key) || loading.has(key)) continue;
     loadFailures.delete(key);
-    const pending = loadTreeModels({scene, profile, items, environment: stage.environment, distanceTest: distance}).then(plants => {
+    const pending = loadTreeModels({scene, profile, items, environment: stage.environment, renderer, distanceTest: distance}).then(plants => {
       if (leaving) plants.dispose();
       else imported.set(key, plants);
     }).catch(error => {
@@ -221,6 +221,8 @@ distanceControls.add(distanceSettings, 'cameraDistance', 16, 100, 1).name('Camer
   controls.update();
 });
 distanceControls.add(distanceSettings, 'switchDistance', 18, 100, 1).name('LOD2 switch · m');
+distanceControls.add(distanceSettings, 'impostors').name('Impostors');
+distanceControls.add(distanceSettings, 'impostorDistance', 24, 180, 1).name('Impostor switch · m');
 const countControl = distanceControls.add(distanceSettings, 'perSpecies', 1, DISTANCE_CAPACITY, 1).name('Specimens per species');
 distanceControls.add({
   stress() {
@@ -262,12 +264,14 @@ startFrameLoop(renderer, (dt, now) => {
   trees.setEnvironment(environment); bushes.setEnvironment(environment);
   trees.update(dt); bushes.update(dt);
   for (const plants of specimens) if (plants.group.visible) plants.update(dt);
-  let nearTrees = 0, farTrees = 0, fadingTrees = 0;
+  let nearTrees = 0, farTrees = 0, impostorTrees = 0, fadingTrees = 0;
   for (const [key, plants] of imported) if (plants.group.visible) {
     if (key.startsWith('distance:')) {
-      plants.updateDistance(camera, distanceSettings.switchDistance, distanceSettings.perSpecies);
+      const {switchDistance, perSpecies, impostors, impostorDistance} = distanceSettings;
+      plants.updateDistance(camera, switchDistance, perSpecies, impostors ? Math.max(switchDistance, impostorDistance) : Infinity);
       nearTrees += plants.nearCount;
       farTrees += plants.farCount;
+      impostorTrees += plants.impostorCount;
       fadingTrees += plants.transitionCount;
     }
     plants.update(dt);
@@ -281,7 +285,7 @@ startFrameLoop(renderer, (dt, now) => {
     $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\nwind ${stageUI.state.windSpeed.toFixed(1)} m/s`;
     if (view.layout === DISTANCE_VIEW) {
       const {calls, triangles} = renderer.info.render;
-      $('distance-status').textContent = `${nearTrees} animated · ${fadingTrees} fading · ${farTrees} static LOD2\nScene: ${calls} draws · ${triangles.toLocaleString()} triangles · ${frameMs.toFixed(1)} ms/frame`;
+      $('distance-status').textContent = `${nearTrees} animated · ${fadingTrees} fading · ${farTrees} static LOD2 · ${impostorTrees} impostors\nScene: ${calls} draws · ${triangles.toLocaleString()} triangles · ${frameMs.toFixed(1)} ms/frame`;
     }
   }
 });
