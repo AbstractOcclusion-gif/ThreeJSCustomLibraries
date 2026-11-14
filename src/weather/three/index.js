@@ -80,10 +80,11 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  const flashPosition=new THREE.Vector2();
  let untilFlash=1,flashRemaining=0,flashStrength=0;
  let bolt,pendingHit,groundStrike=false;
- const strikeStart=new THREE.Vector3();
+ const strikeStart=new THREE.Vector3(),strikeHit=new THREE.Vector3();
  const finitePoint=point=>[point?.x,point?.y,point?.z].every(Number.isFinite);
  function startStrike(hit){
   const point=new THREE.Vector3(hit.x,hit.y,hit.z);
+  strikeHit.copy(point);
   const weather=system.weather;
   const thickness=settings.thickness*(weather.on?weather.cloudProfile[2]:1);
   strikeStart.set(point.x,Math.max(point.y+LIGHTNING.strikeAbove,settings.bottom+thickness*LIGHTNING.cloudShare),point.z);
@@ -95,6 +96,8 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  }
  const view={group,settings,uniforms,sun,hemi,environment:shared,sky:dynamic,ready:dynamic.readyPromise,get precipitationCount(){return rain?.instanceCount??0;},
   get lightningFlash(){return flashStrength;},
+  // Copies the active ground hit into a caller-owned vector. Distant sky flashes have no ground hit.
+  getLightningHit(target){return groundStrike&&flashStrength>0?target.copy(strikeHit):undefined;},
   // The clouds as a sun cover (core/lighting.js): createLighting({sun:[...,view.sunCover]}) shades the hook's materials
   // under them, createVolumetricLight({sun:[...,view.sunCover]}) cuts the sun's shafts with them.
   get sunCover(){

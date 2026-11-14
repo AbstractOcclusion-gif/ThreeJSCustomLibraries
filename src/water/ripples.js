@@ -45,6 +45,13 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = .4
   active = ACTIVE_SECONDS;
  }
 
+ function clear() {
+  heights.fill(0);
+  velocity.fill(0);
+  active = accumulator = 0;
+  texture.needsUpdate = true;
+ }
+
  function update(dt) {
   if (active <= 0) return;
   active -= dt;
@@ -62,14 +69,10 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = .4
    }
    for (let i = 0; i < heights.length; i++) heights[i] = wet[i] ? next[i] : 0;
   }
-  if (active <= 0) {
-   heights.fill(0);
-   velocity.fill(0);
-   accumulator = 0;
-  }
+  if (active <= 0) { clear(); return; }
   texture.needsUpdate = true;
  }
 
- return {texture, bounds, cell, mask, splash, update, get active() { return active > 0; },
+ return {texture, bounds, cell, mask, splash, update, clear, get active() { return active > 0; },
   dispose: () => texture.dispose()};
 }

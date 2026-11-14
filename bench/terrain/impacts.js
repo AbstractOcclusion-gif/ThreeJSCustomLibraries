@@ -28,7 +28,7 @@ const MAX_SUBSTEPS = 6;
 // the latest body when it comes within `margin` m of the edge. Bodies it leaves behind are removed. Under the field
 // it is sunk by `sink` m.
 const SURROUND = Object.freeze({size: 192, cell: 1, margin: 40, sink: 60});
-export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, chips, surfaces = CONTACT_SURFACES, trackRadius = TRACK_RADIUS, fallOutHeight = FALL_OUT_HEIGHT, surround}) {
+export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, onSphereStep, chips, surfaces = CONTACT_SURFACES, trackRadius = TRACK_RADIUS, fallOutHeight = FALL_OUT_HEIGHT, surround}) {
  const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
  world.defaultContactMaterial.friction = .52;
  world.defaultContactMaterial.restitution = .12;
@@ -89,6 +89,11 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    if (entry && contact.enabled && contact.multiplier > (strongest.get(entry)?.multiplier ?? 0)) strongest.set(entry, contact);
   }
   for (const entry of active.values()) {
+   if (onSphereStep && entry.kind === 'sphere') {
+    const {position, previousPosition, velocity, shapes} = entry.body;
+    // Only read the live vectors during this callback. The host decides what counts as a contact with its scene.
+    onSphereStep(position, previousPosition, velocity, shapes[0].radius);
+   }
    const contact = strongest.get(entry);
    if (!contact) continue;
    const offset = contact.bi === ground ? contact.ri : contact.rj;

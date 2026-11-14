@@ -34,6 +34,11 @@ export function createTerrainIce(field, freezeMap, scene, look) {
  return {
   texture, bounds: field.bounds, active, solidSurface, material: slab.material,
   owns(body) { return body.material === material; },
+  supportsAt(x, z) {
+   const column = Math.floor((x - field.bounds.x) / width);
+   const row = Math.floor((z - field.bounds.y) / depth);
+   return column >= 0 && column < columns && row >= 0 && row < rows && support[row * columns + column] !== 0;
+  },
   addContactMaterial(world, blockMaterial) {
    world.addContactMaterial(new ContactMaterial(material, blockMaterial, {friction: SLIDE_FRICTION, restitution: 0}));
   },

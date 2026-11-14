@@ -18,7 +18,7 @@ const FLAME_HEIGHT = .58, FLAME_SIZE = 1.16, GLOW = Object.freeze({color: 0xff8f
 // plants: {radius, treeLine, bushLine, grassLine, trees, bushes, grass, ceiling?} - lines are the lowest ground heights each
 //   kind grows on (metres), ceiling the highest; grass 0 = the demo has its own grass. blocked(x, z): extra no-plant areas.
 // camp: [x, z]. fish: {bounds: Box3, counts, size, surfaceHeight()}.
-export async function createDemoLife({scene, ground, centre: [centreX, centreZ], plants, camp: [campX, campZ], fish: school, blocked = () => false, environment, lighting}) {
+export async function createDemoLife({scene, ground, centre: [centreX, centreZ], plants, camp: [campX, campZ], fish: school, blocked = () => false, environment, lighting, lightRig}) {
   const random = seededRandom(29), PLANTS = {ceiling: Infinity, ...plants};
   const camp = {x: campX, z: campZ};
   // Rejection-sample dry ground above `line`, outside the camp clearing.
@@ -47,9 +47,10 @@ export async function createDemoLife({scene, ground, centre: [centreX, centreZ],
     const x = camp.x + dx, z = camp.z + dz, y = ground(x, z), material = new THREE.MeshStandardMaterial({color: WOOD, roughness: .9});
     const mesh = new THREE.Mesh(crateGeometry, material); mesh.position.set(x, y + CRATES.size[1] / 2, z); mesh.castShadow = true; mesh.rotation.y = dx; scene.add(mesh);
     const glow = new THREE.PointLight(GLOW.color, 0, GLOW.distance, 2); glow.position.set(x, y + GLOW.lift, z); scene.add(glow);
+    const detachGlow = lightRig?.add(glow, {shadow: Boolean(lightRig.shadows) && dx === CRATES.layout[0][0]});
     const flames = await createParticlePrefab(scene, 'fire', {position: new THREE.Vector3(x, y + FLAME_HEIGHT, z), size: FLAME_SIZE, pool: 30});
     flames.stop(); flames.setEnvironment(environment);
-    return {state: fire.add({position: mesh.position, burnSeconds}), mesh, material, glow, flames, burning: false};
+    return {state: fire.add({position: mesh.position, burnSeconds}), mesh, material, glow, detachGlow, flames, burning: false};
   }));
 
   const fish = await createFishFlock({bounds: school.bounds, counts: school.counts, size: school.size, floorHeight: ground, surfaceHeight: school.surfaceHeight, random});
@@ -60,7 +61,7 @@ export async function createDemoLife({scene, ground, centre: [centreX, centreZ],
     camp, trees, bushes, grass, fish, fire,
     get burning() { return crates.filter(crate => crate.burning).length; },
     ignite() { crates[0].state.ignite(); },
-    resetFire() { fire.reset(); for (const crate of crates) { crate.burning = false; crate.flames.stop(); crate.flames.clear(); } },
+    resetFire() { fire.reset(); for (const crate of crates) { crate.burning = false; crate.glow.intensity = 0; crate.flames.stop(); crate.flames.clear(); } },
     update(dt, camera) {
       if (disposed) return;
       time += dt;
@@ -76,7 +77,7 @@ export async function createDemoLife({scene, ground, centre: [centreX, centreZ],
     dispose() {
       if (disposed) return; disposed = true;
       trees.dispose(); bushes.dispose(); if (grass) grass.dispose(); meadow.grassGeometries.forEach(geometry => geometry.dispose()); meadow.dispose(); fish.dispose();
-      for (const {mesh, material, glow, flames} of crates) { scene.remove(mesh, glow); material.dispose(); glow.dispose(); flames.dispose(); }
+      for (const {mesh, material, glow, detachGlow, flames} of crates) { detachGlow?.(); scene.remove(mesh, glow); material.dispose(); glow.dispose(); flames.dispose(); }
       crateGeometry.dispose();
     },
   };
