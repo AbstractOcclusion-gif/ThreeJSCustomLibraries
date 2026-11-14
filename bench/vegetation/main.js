@@ -70,6 +70,12 @@ const authoredItems = [
   {profile: 'ez-spruce', items: [{x: 7.5, z: 0, h: 6, variant: 0}]},
 ];
 const view = {layout: 'EZ-Tree comparison'};
+const DISTANCE_VIEW = 'Distance test';
+const distanceSettings = {cameraDistance: 26, switchDistance: 48};
+const DISTANCE_ROWS = [0, -12, -24, -36, -48, -60];
+const distanceItems = authoredItems.map(({profile, items: [item]}) => ({
+  profile, items: DISTANCE_ROWS.map((z, variant) => ({...item, z, variant})),
+}));
 const meadowNoise = valueNoise(23);
 function placements() {
   const random = seededRandom(7), out = [];
@@ -156,41 +162,56 @@ const gui = createBenchPanel('Vegetation');
 function syncVisibility() {
   const meadow = view.layout === 'Meadow';
   const authored = view.layout === 'EZ-Tree comparison';
+  const distance = view.layout === DISTANCE_VIEW;
   const showImported = view.layout === 'Imported conifers';
   trees.group.visible = bushes.group.visible = meadow;
-  for (const plants of specimens) plants.group.visible = !meadow && !authored && !(showImported && imported.has(plants.profile.name));
-  for (const [profile, plants] of imported) plants.group.visible = profile.startsWith('ez-') ? authored : showImported;
-  $('species-order').hidden = meadow || authored;
-  $('authored-order').hidden = !authored;
-  $('authored-loading').hidden = !authored || authoredItems.every(({profile}) => imported.has(profile));
-  $('authored-loading').textContent = authoredItems.some(({profile}) => loadFailures.has(profile))
+  for (const plants of specimens) plants.group.visible = !meadow && !authored && !distance && !(showImported && imported.has(plants.profile.name));
+  for (const [key, plants] of imported) {
+    plants.group.visible = key.startsWith('distance:') ? distance : key.startsWith('ez-') ? authored : showImported;
+  }
+  $('species-order').hidden = meadow || authored || distance;
+  $('authored-order').hidden = !authored && !distance;
+  $('distance-status').hidden = !distance;
+  distanceControls.show(distance);
+  const keys = authoredItems.map(({profile}) => distance ? `distance:${profile}` : profile);
+  $('authored-loading').hidden = !(authored || distance) || keys.every(key => imported.has(key));
+  $('authored-loading').textContent = keys.some(key => loadFailures.has(key))
     ? 'A tree could not load. Reopen this view to retry.' : 'Loading EZ-Tree models…';
 }
 function applyView() {
   const compare = view.layout !== 'Meadow';
   const authored = view.layout === 'EZ-Tree comparison';
-  const itemsToLoad = authored ? authoredItems : view.layout === 'Imported conifers' ? comparisonItems.slice(-2) : [];
+  const distance = view.layout === DISTANCE_VIEW;
+  const itemsToLoad = distance ? distanceItems : authored ? authoredItems : view.layout === 'Imported conifers' ? comparisonItems.slice(-2) : [];
   for (const {profile, items} of itemsToLoad) {
-    if (imported.has(profile) || loading.has(profile)) continue;
-    loadFailures.delete(profile);
-    const pending = loadTreeModels({scene, profile, items, environment: stage.environment}).then(plants => {
+    const key = distance ? `distance:${profile}` : profile;
+    if (imported.has(key) || loading.has(key)) continue;
+    loadFailures.delete(key);
+    const pending = loadTreeModels({scene, profile, items, environment: stage.environment, distanceTest: distance}).then(plants => {
       if (leaving) plants.dispose();
-      else imported.set(profile, plants);
+      else imported.set(key, plants);
     }).catch(error => {
-      loadFailures.set(profile, error);
+      loadFailures.set(key, error);
       console.warn(`Could not load ${profile} model.`, error);
     }).finally(() => {
-      loading.delete(profile);
+      loading.delete(key);
       if (!leaving) syncVisibility();
     });
-    loading.set(profile, pending);
+    loading.set(key, pending);
   }
   syncVisibility();
-  camera.position.set(...(authored ? [0, 6.5, 26] : compare ? [4.5, 13, 50] : [13, 5.5, 16]));
-  controls.target.set(compare && !authored ? 4.5 : 0, compare ? 2.6 : 1, 0);
+  camera.position.set(...(distance ? [0, 6.5, distanceSettings.cameraDistance] : authored ? [0, 6.5, 26] : compare ? [4.5, 13, 50] : [13, 5.5, 16]));
+  controls.target.set(compare && !authored && !distance ? 4.5 : 0, compare ? 2.6 : 1, 0);
   controls.update();
 }
-const viewControl = gui.add(view, 'layout', ['EZ-Tree comparison', 'Species comparison', 'Imported conifers', 'Meadow']).name('View').onChange(applyView);
+const viewControl = gui.add(view, 'layout', ['EZ-Tree comparison', DISTANCE_VIEW, 'Species comparison', 'Imported conifers', 'Meadow']).name('View').onChange(applyView);
+const distanceControls = gui.addFolder('Distance test');
+distanceControls.add(distanceSettings, 'cameraDistance', 16, 100, 1).name('Camera distance · m').onChange(value => {
+  camera.position.set(0, 6.5, value);
+  controls.target.set(0, 2.6, 0);
+  controls.update();
+});
+distanceControls.add(distanceSettings, 'switchDistance', 18, 100, 1).name('LOD2 switch · m');
 applyView();
 const stageUI = stageControls(gui, stage);
 Object.assign(stageUI.state, {windSpeed: START_WIND, gust: P.plants.gust}); stageUI.apply();
@@ -221,11 +242,24 @@ startFrameLoop(renderer, (dt, now) => {
   trees.setEnvironment(environment); bushes.setEnvironment(environment);
   trees.update(dt); bushes.update(dt);
   for (const plants of specimens) if (plants.group.visible) plants.update(dt);
-  for (const plants of imported.values()) if (plants.group.visible) plants.update(dt);
+  let nearTrees = 0, farTrees = 0;
+  for (const [key, plants] of imported) if (plants.group.visible) {
+    if (key.startsWith('distance:')) {
+      plants.updateDistance(camera, distanceSettings.switchDistance);
+      nearTrees += plants.nearCount;
+      farTrees += plants.farCount;
+    }
+    plants.update(dt);
+  }
   balls.update(dt);
   grass.update(dt, {camera, environment, transmission: P.grass.transmission * environment.daylight, lodDistance: P.grass.lodDistance, farDensity: P.grass.farDensity, shadowDistance: P.grass.shadowDistance, density: P.grass.density, recoverySeconds: P.interact.recoverySeconds});
   renderer.render(scene, camera);
-  if (now - lastUI > STATUS_REFRESH_MS) { lastUI = now; const s = grass.stats; $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\nwind ${stageUI.state.windSpeed.toFixed(1)} m/s`; }
+  if (now - lastUI > STATUS_REFRESH_MS) {
+    lastUI = now;
+    const s = grass.stats;
+    $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\nwind ${stageUI.state.windSpeed.toFixed(1)} m/s`;
+    if (view.layout === DISTANCE_VIEW) $('distance-status').textContent = `${nearTrees} animated · ${farTrees} static LOD2 instances`;
+  }
 });
 document.body.dataset.ready = 'true';
 onLeave(() => {
