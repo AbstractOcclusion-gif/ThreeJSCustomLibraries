@@ -40,11 +40,12 @@ weather.view.configure({sky: {captureInterval: 1.25, lightingInterval: 8}});
 // The light of the demo: the kit's cascaded sun shadows, and the air lit by the sun through them and through the
 // weather's clouds (volumetric light). The weather's own pass then draws its fog bank and rainbow over that frame.
 const SHADOW_DISTANCE = 160;       // m from the camera where the sun shadows end
-const AIR = {density: .0015, sun: 1.5};   // thin air: shafts under the clouds and between the trees, not a fog
+const AIR = {density: .0015, sunStrength: 1.5};   // thin air: shafts under the clouds and between the trees, not a fog
 const RECEIVER_SCAN_SECONDS = 2;   // how often the scene is searched for new materials that receive shadows
 const sunShadows = createSunShadows({renderer, distance: SHADOW_DISTANCE});
 const sunCover = [sunShadows.sun, weather.view.sunCover];
-const volumetric = createVolumetricLight({renderer, sun: sunCover, ...AIR});
+const volumetric = createVolumetricLight({renderer, sun: sunCover, density: AIR.density});
+volumetric.set('sun', AIR.sunStrength);
 const lightSettings = {volumetric: true};
 // Every lit Three material on a mesh that receives shadows takes the cascades (as Three's own shadow map did).
 const shadowReceivers = new WeakSet();
