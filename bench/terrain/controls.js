@@ -10,11 +10,14 @@ export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
     ['sandBelow', 'Sand below · m', -7, 22, .1],
   ];
   for (const [key, label, min, max, step] of primary) {
+    // The field only allocates a sand map when its initial rules opt in.
+    if (key === 'sandBelow' && rules.sandBelow === undefined) continue;
     automatic.add(rules, key, min, max, step).name(label).onFinishChange(onLayersChanged);
   }
   const detail = automatic.addFolder('Layer detail').close();
   for (const [key, spec] of Object.entries(TERRAIN_PAINT_FIELDS)) {
     if (primary.some(([name]) => key === name)) continue;
+    if (key === 'sandBlend' && rules.sandBelow === undefined) continue;
     rules[key] ??= TERRAIN_PAINT_DEFAULTS[key];
     detail.add(rules, key, spec.min, spec.max, spec.step).name(spec.label).onFinishChange(onLayersChanged);
   }
