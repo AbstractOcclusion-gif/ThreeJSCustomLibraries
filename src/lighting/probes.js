@@ -6,6 +6,7 @@
 // shading, so a change of light costs nothing. Only the ground blocks and returns light; objects receive it.
 import * as THREE from 'three';
 import {createSkyVisibility} from '../core/sky-visibility.js';
+import {addLightSlot} from '../core/light-slots.js';
 
 export const LIGHT_PROBE_DEFAULTS = Object.freeze({
   columns: 32,      // probe columns per side of the grid
@@ -156,29 +157,13 @@ export function createLightProbes({ground, sky, ...overrides} = {}) {
     applyTo(material, lighting) {
       if (!material?.isMaterial || typeof material.onBeforeCompile !== 'function') throw new TypeError('Light probes apply to a Three material');
       if (lighting?.uniforms?.uProbeVolume !== uniforms.uProbeVolume) throw Error('Light probes need the lighting hook built with their ambient');
-      const compile = material.onBeforeCompile, key = material.customProgramCacheKey.bind(material);
-      material.onBeforeCompile = (shader, renderer) => {
-        compile.call(material, shader, renderer);
-        if (!shader.fragmentShader.includes('#include <lights_fragment_begin>') || !shader.vertexShader.includes('#include <project_vertex>')) throw Error('Light probes need a lit Three material');
-        Object.assign(shader.uniforms, lighting.uniforms);
-        shader.vertexShader = 'varying vec3 vLightProbeWorld;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
-        {
-          vec4 probeWorld = vec4(transformed, 1.0);
-          #ifdef USE_INSTANCING
-          probeWorld = instanceMatrix * probeWorld;
-          #endif
-          vLightProbeWorld = (modelMatrix * probeWorld).xyz;
-        }`);
-        shader.fragmentShader = 'varying vec3 vLightProbeWorld;\n' + shader.fragmentShader.replace('void main() {', `${lighting.glsl}\nvoid main() {`)
-          .replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>
-        {
-          // The hemisphere light Three just added gives way to the ambient of the probes.
+      addLightSlot(material, {
+        key: 'light-probes', uniforms: lighting.uniforms, worldPosition: true, declarations: lighting.glsl,
+        // The hemisphere light Three just added gives way to the ambient of the probes.
+        after: /* glsl */`
           vec3 probeNormal = inverseTransformDirection(geometryNormal, viewMatrix);
-          irradiance = max(irradiance + lightAmbient(probeNormal, vLightProbeWorld) - mix(uHemiGround, uHemiSky, probeNormal.y * 0.5 + 0.5), vec3(0.0));
-        }`);
-      };
-      material.customProgramCacheKey = () => key() + '|light-probes';
-      material.needsUpdate = true;
+          irradiance = max(irradiance + lightAmbient(probeNormal, vLightWorld) - mix(uHemiGround, uHemiSky, probeNormal.y * 0.5 + 0.5), vec3(0.0));`,
+      });
       return material;
     },
     dispose() { if (disposed) return; disposed = true; volumeTexture.dispose(); groundTexture.dispose(); },

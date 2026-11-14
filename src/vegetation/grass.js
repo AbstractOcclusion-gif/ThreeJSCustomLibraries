@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {createTrackMask} from '../core/track-mask.js';
+import {addLightSlot} from '../core/light-slots.js';
 
 const RECOVERY_SECONDS = 0.9;
 const MAX_BEND = 0.38;
@@ -67,10 +68,7 @@ vec3 bendGrass(vec3 position) {
   return position + vec3(dot(x, offset), dot(y, offset), dot(z, offset)) / dot(x, x);
 }`;
 
-const directLights = THREE.ShaderChunk.lights_fragment_begin;
-const directionalEnd = directLights.indexOf('#if ( NUM_RECT_AREA_LIGHTS');
-const directionalCall = directLights.lastIndexOf('RE_Direct( directLight', directionalEnd);
-const callEnd = directLights.indexOf(';', directionalCall) + 1;
+// Light through the blade, added after each directional light is applied (core light slot).
 const backlight = `
   float grassBack = max(0.0, -dot(geometryNormal, directLight.direction));
   float grassForward = pow(max(0.0, dot(geometryViewDir, -directLight.direction)), 2.0);
@@ -94,22 +92,17 @@ function patchMaterial(material, uniforms, lit, flatColorMix) {
       ).replace('#include <color_fragment>', `#include <color_fragment>
         diffuseColor.rgb *= mix(0.64, 1.10, vGrassBlade.x);
         diffuseColor.rgb *= mix(vec3(1.0), vec3(0.63, 0.68, 0.51), vGrassBlade.y * 0.65);
-      `).replace(
-        '#include <lights_fragment_begin>',
-        directLights.slice(0, callEnd) + backlight + directLights.slice(callEnd),
-      );
+      `);
     }
   };
   material.customProgramCacheKey = () => lit ? `vegetation-grass-lit-${flatColorMix}` : 'vegetation-grass-depth';
+  if (lit) addLightSlot(material, {key: 'grass-backlight', directionalLit: backlight});
 }
 
 // Placements are world-space {x, y, z, yaw (radians), scale (>0), tint? [r, g, b] linear}.
 // LOD geometries and map are borrowed. With followTracks, the host paints and clears the supplied mask.
 const VIEW_DEFAULTS = Object.freeze({transmission: 1.45, lodDistance: 26, farDensity: .45, shadowDistance: 18, density: 1});
 export function createGrassField({scene, geometries, map, color, placements, tileSize = 5, flatColorMix = 0, contactTracks, followTracks = false}) {
-  if (directionalCall < 0 || directionalEnd < 0 || callEnd <= directionalCall) {
-    throw new Error('Unsupported Three.js directional lighting shader');
-  }
   const vectors = (length, Vector) => Array.from({length}, () => new Vector());
   const uniforms = {
     grassTime: {value: 0},

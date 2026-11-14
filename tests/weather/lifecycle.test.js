@@ -25,14 +25,14 @@ test('cloud shadow receivers compose with material hooks and restore them when d
  material.customProgramCacheKey=originalKey;
  const detach=shadows.add(material);
  assert.equal(shadows.add(material),detach);
- assert.match(material.customProgramCacheKey(),/^custom-material:weather-cloud-shadows$/);
+ assert.match(material.customProgramCacheKey(),/^custom-material\|light-slots:weather-cloud-shadows$/);
  const {vertexShader,fragmentShader}=THREE.ShaderLib.physical;
  const shader={uniforms:{},vertexShader,fragmentShader};
  material.onBeforeCompile(shader);
  assert.equal(shader.uniforms.custom.value,1);
  assert.equal(shader.uniforms.uCloudOffset,cloudUniforms.uCloudOffset);
- assert.match(shader.vertexShader,/vWeatherShadowPosition =/);
- assert.match(shader.fragmentShader,/getDirectionalLightInfo\( directionalLight, directLight \);\s*if \(uWeatherShadowStrength/);
+ assert.match(shader.vertexShader,/vLightWorld =/);
+ assert.match(shader.fragmentShader,/getDirectionalLightInfo\( directionalLight, directLight \);\s*\{[^\n]*\s*if \(uWeatherShadowStrength/);
  shadows.dispose();
  assert.equal(material.onBeforeCompile,originalCompile);
  assert.equal(material.customProgramCacheKey,originalKey);
