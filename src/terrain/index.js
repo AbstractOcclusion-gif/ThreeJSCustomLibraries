@@ -141,7 +141,9 @@ uniform vec3 terrainDryTint, terrainLushTint;
 uniform float terrainClimateTint;
 #endif
 #endif
-uniform sampler2D terrainSnowDepth;
+#ifdef TERRAIN_SNOW_MAP
+uniform sampler2D terrainSnowDepth;   // declared only for a field with a snow layer: a shader has few texture units
+#endif
 
 #ifdef TERRAIN_DRAINAGE
 uniform sampler2D terrainDrainage;
@@ -180,12 +182,16 @@ ${SKY_GLSL}
 #if defined(TERRAIN_SNOW_DETAIL) || defined(TERRAIN_SAND)
 // Change of the track mask per metre along world X and Z: points toward the inside of a track.
 vec2 terrainTrackSlope(vec3 world) {
+ #ifdef SURFACE_TRACKS
  if (!surfaceHasTracks) return vec2(0.0);
  vec2 uv = (world.xz - surfaceTrackBounds.xy) / surfaceTrackBounds.zw;
  vec2 texel = 1.0 / vec2(textureSize(surfaceTracks, 0));
  float east = texture2D(surfaceTracks, uv + vec2(texel.x, 0.0)).r, west = texture2D(surfaceTracks, uv - vec2(texel.x, 0.0)).r;
  float south = texture2D(surfaceTracks, uv + vec2(0.0, texel.y)).r, north = texture2D(surfaceTracks, uv - vec2(0.0, texel.y)).r;
  return vec2(east - west, south - north) / (2.0 * texel * surfaceTrackBounds.zw);
+ #else
+ return vec2(0.0);
+ #endif
 }
 
 // Ice crystals and mineral grains. Each cell holds one facet tilted at random around the surface normal; it flashes when it mirrors
@@ -668,6 +674,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (palette && field.climateMap) material.defines = {...material.defines, TERRAIN_CLIMATE: 1};
  const paletteRoles = palette ? Array.from({length: palette.size}, (_, index) => Math.max(0, TERRAIN_PALETTE_ROLES.indexOf(palette.roles[index]))) : [];
  if (field.sandMap) material.defines = {...material.defines, TERRAIN_SAND: 1};
+ if (field.snowMap) material.defines = {...material.defines, TERRAIN_SNOW_MAP: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  if (layerDetailArray) material.defines = {...material.defines, TERRAIN_LAYER_DETAIL: 1};
  const compileSurface = material.onBeforeCompile;
@@ -768,7 +775,9 @@ uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the n
    .replace('float up = inverseTransformDirection', `${TERRAIN_FRAGMENT}\nfloat up = inverseTransformDirection`)
    .replace('snowCoverage *= 1.0 - track * .92;', `
     if (terrainSnowCover && !terrainProp) {
+     #ifdef TERRAIN_SNOW_MAP
      snowCoverage = textureLod(terrainSnowDepth, (terrainGrid + .5) / terrainSize, 0.0).r;
+     #endif
      #ifdef TERRAIN_SNOW_DETAIL
      // Thin snow lies in the hollows of the ground texture and in patches before it covers the bumps.
      const float snowPatchFrequency = 2.3;

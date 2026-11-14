@@ -53,7 +53,9 @@ uniform vec3 surfaceSnowColor;
 uniform float surfacePuddles, surfaceAntiTile, surfaceRunoff, surfaceTime, surfaceTrackContrast;
 uniform float surfaceWetDarkening, surfaceWetRoughness, surfacePuddleDarkening;
 uniform float surfaceRippleSize, surfaceRippleRate, surfaceRippleStrength;
-uniform sampler2D surfaceTracks;
+#ifdef SURFACE_TRACKS
+uniform sampler2D surfaceTracks;   // declared only with a track mask: a shader has few texture units
+#endif
 uniform vec4 surfaceTrackBounds;
 uniform bool surfaceHasTracks;
 varying vec3 vSurfaceWorld;
@@ -63,10 +65,14 @@ ${RAIN_IMPACT_GLSL}
 #endif
 
 float surfaceTrack(vec3 world) {
+ #ifdef SURFACE_TRACKS
  if (!surfaceHasTracks) return 0.0;
  vec2 uv = (world.xz - surfaceTrackBounds.xy) / surfaceTrackBounds.zw;
  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
  return texture2D(surfaceTracks, uv).r;
+ #else
+ return 0.0;
+ #endif
 }
 
 float surfaceRainStreaks(vec3 world) {
@@ -106,6 +112,7 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
  if (!Number.isFinite(trackContrast) || trackContrast < 0 || trackContrast > 1) throw Error('Track contrast must be between zero and one');
  const material = new THREE.MeshStandardMaterial(parameters);
  if (rainAmount) material.defines = {...material.defines, SURFACE_RAIN_IMPACTS: 1};
+ if (tracks) material.defines = {...material.defines, SURFACE_TRACKS: 1};
  const uniforms = {
   surfaceRainAmount: rainAmount ?? {value: 0},
   surfaceWeather: weather.levels, surfaceSnowColor: {value: new THREE.Color(snowColor)},

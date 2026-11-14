@@ -115,7 +115,11 @@ const sunCover = [sunShadows.sun, weather.view.sunCover];
 const lightRig = createLightRig({shadows: {renderer, casters: 1}});   // the camp fire, with one shadow
 const volumetric = createVolumetricLight({renderer, sun: sunCover, rig: lightRig, density: LIGHT.airDensity});
 volumetric.set('sun', LIGHT.sunInAir);
-const shadowReceivers = createShadowReceivers(scene, sunShadows, weather.view, lightRig);
+// A shader has 16 texture units on many GPUs and the terrain material is close to that. The shadow of the camp fire
+// therefore goes to the rings only (the ground it falls on), not to every receiver: on the play area, which also
+// carries its tracks and its snow, it would be the seventeenth texture.
+const shadowReceivers = createShadowReceivers(scene, sunShadows, weather.view);
+for (const {material} of clipmap.rings) lightRig.applyTo(material);
 const probes = createLightProbes({ground: terrainLightGround({world, palette: {...world.palette, means: textures.means}, appearance, sandColor: sandLook.color.value})});
 // The hook of the custom shaders (the leaved trees and the hedge of the camp): same sun covers, lights and probes.
 const lighting = createLighting({ambient: probes.ambient, sun: sunCover, lights: lightRig.lights});
