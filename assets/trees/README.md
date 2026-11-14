@@ -11,8 +11,10 @@ See the [EZ-Tree source and license](https://github.com/dgreenheck/ez-tree).
 
 The `ez-*-lod2.glb` files are the editor's LOD2 exports from the same settings.
 The bench's **Distance test** switches each placement by camera distance and
-renders distant specimens in static instanced batches. The return threshold
-is 8% closer than the outgoing threshold to prevent flicker near the switch.
+renders distant specimens in static instanced batches. Both levels render
+with complementary dither masks within 10% of the switch distance, and wind
+eases out on the animated level across that band. The specimen count can be
+raised to 48 per species, or 192 total with the stress button.
 
 - **Oak** uses Oak Medium, seed 35729. The leader length is 27, the first branch length is 19, and first branches start at 0.31 with a 70° angle.
 - **Spruce-like conifer** uses Pine Medium, seed 13977. First branches start at 0.13, with length 20, a 97° angle and 0.13 gnarliness. Needle cards start at 0.02, with count 46, size 4.2 and a 59° angle.

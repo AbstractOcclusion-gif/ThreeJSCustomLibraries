@@ -71,10 +71,17 @@ const authoredItems = [
 ];
 const view = {layout: 'EZ-Tree comparison'};
 const DISTANCE_VIEW = 'Distance test';
-const distanceSettings = {cameraDistance: 26, switchDistance: 48};
+const DISTANCE_CAPACITY = 48;
+const DISTANCE_COLUMN_SPACING = 20;
+const DISTANCE_GROUND_SCALE = 1.5;
+const distanceSettings = {cameraDistance: 26, switchDistance: 48, perSpecies: 6};
 const DISTANCE_ROWS = [0, -12, -24, -36, -48, -60];
 const distanceItems = authoredItems.map(({profile, items: [item]}) => ({
-  profile, items: DISTANCE_ROWS.map((z, variant) => ({...item, z, variant})),
+  profile, items: Array.from({length: DISTANCE_CAPACITY}, (_, variant) => {
+    const column = Math.floor(variant / DISTANCE_ROWS.length);
+    const offset = Math.ceil(column / 2) * (column % 2 ? -1 : 1);
+    return {...item, x: item.x + offset * DISTANCE_COLUMN_SPACING, z: DISTANCE_ROWS[variant % DISTANCE_ROWS.length], variant};
+  }),
 }));
 const meadowNoise = valueNoise(23);
 function placements() {
@@ -164,6 +171,8 @@ function syncVisibility() {
   const authored = view.layout === 'EZ-Tree comparison';
   const distance = view.layout === DISTANCE_VIEW;
   const showImported = view.layout === 'Imported conifers';
+  const groundScale = distance ? DISTANCE_GROUND_SCALE : 1;
+  stage.ground.scale.set(groundScale, 1, groundScale);
   trees.group.visible = bushes.group.visible = meadow;
   for (const plants of specimens) plants.group.visible = !meadow && !authored && !distance && !(showImported && imported.has(plants.profile.name));
   for (const [key, plants] of imported) {
@@ -212,6 +221,13 @@ distanceControls.add(distanceSettings, 'cameraDistance', 16, 100, 1).name('Camer
   controls.update();
 });
 distanceControls.add(distanceSettings, 'switchDistance', 18, 100, 1).name('LOD2 switch · m');
+const countControl = distanceControls.add(distanceSettings, 'perSpecies', 1, DISTANCE_CAPACITY, 1).name('Specimens per species');
+distanceControls.add({
+  stress() {
+    distanceSettings.perSpecies = DISTANCE_CAPACITY;
+    countControl.updateDisplay();
+  },
+}, 'stress').name('Stress test · 192 specimens');
 applyView();
 const stageUI = stageControls(gui, stage);
 Object.assign(stageUI.state, {windSpeed: START_WIND, gust: P.plants.gust}); stageUI.apply();
@@ -236,18 +252,23 @@ presetsFolder(gui, {bundled: import.meta.glob('../../presets/vegetation/*.json')
 
 const unbindResize = bindResize(renderer, camera);
 let lastUI = 0;
+let frameMs = 0;
+let lastFrame;
 startFrameLoop(renderer, (dt, now) => {
+  if (dt > 0 && lastFrame !== undefined) frameMs = THREE.MathUtils.lerp(frameMs || now - lastFrame, now - lastFrame, .1);
+  lastFrame = now;
   controls.update(); stage.update(camera);
   const environment = stage.environment; environment.wind.gust = P.plants.gust;
   trees.setEnvironment(environment); bushes.setEnvironment(environment);
   trees.update(dt); bushes.update(dt);
   for (const plants of specimens) if (plants.group.visible) plants.update(dt);
-  let nearTrees = 0, farTrees = 0;
+  let nearTrees = 0, farTrees = 0, fadingTrees = 0;
   for (const [key, plants] of imported) if (plants.group.visible) {
     if (key.startsWith('distance:')) {
-      plants.updateDistance(camera, distanceSettings.switchDistance);
+      plants.updateDistance(camera, distanceSettings.switchDistance, distanceSettings.perSpecies);
       nearTrees += plants.nearCount;
       farTrees += plants.farCount;
+      fadingTrees += plants.transitionCount;
     }
     plants.update(dt);
   }
@@ -258,7 +279,10 @@ startFrameLoop(renderer, (dt, now) => {
     lastUI = now;
     const s = grass.stats;
     $('status').textContent = (pack ? 'Synty pack: private-assets' : 'Generated atlas & clumps') + `\n${s.visibleClumps.toLocaleString()} clumps in view · ${s.visibleTiles} tiles · ${s.shadowTiles} shadow tiles · ${s.activeSweeps} sweeps\nwind ${stageUI.state.windSpeed.toFixed(1)} m/s`;
-    if (view.layout === DISTANCE_VIEW) $('distance-status').textContent = `${nearTrees} animated · ${farTrees} static LOD2 instances`;
+    if (view.layout === DISTANCE_VIEW) {
+      const {calls, triangles} = renderer.info.render;
+      $('distance-status').textContent = `${nearTrees} animated · ${fadingTrees} fading · ${farTrees} static LOD2\nScene: ${calls} draws · ${triangles.toLocaleString()} triangles · ${frameMs.toFixed(1)} ms/frame`;
+    }
   }
 });
 document.body.dataset.ready = 'true';
