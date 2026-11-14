@@ -282,8 +282,10 @@ both.
 ray through a thin fog (`density` per metre, optionally thinning with height) and adds up what the air sends toward the
 camera: the sun through the cascades (shafts between the shadows, tinted by glass), the rig's point and spot lights
 (cones and halos, with their shadows) and the sky. `anisotropy` is how much the air scatters onward: bright looking
-into a light. The march runs at `scale` (0.5) of the screen with `steps` (24) samples to `distance` (150 m), and is laid
-back over the scene along its depth edges. `sunShadows` and `rig` are both optional.
+into a light. The march runs at `scale` (0.5) of the screen with `steps` (24) samples to `distance` (150 m) for the sun and
+the sky; each of the rig's lights gets `lightSteps` (8) samples of its own on the stretch of the ray within its cutoff
+distance, where it actually lights the air. The result is laid back over the scene along its depth edges, smoothed
+over the dither that hides the steps. `sunShadows` and `rig` are both optional.
 
 ```js
 const volumetric = createVolumetricLight({renderer, sunShadows: shadows, rig});

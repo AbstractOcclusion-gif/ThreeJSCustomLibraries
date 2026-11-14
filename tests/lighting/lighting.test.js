@@ -343,7 +343,7 @@ test('volumetric light marches the air with the parts it is given and lays it ov
  const renderer = recordingRenderer(), shadows = createSunShadows({renderer, translucent: true}), rig = createLightRig({shadows: {renderer}});
  assert.throws(() => createVolumetricLight(), TypeError);
  assert.throws(() => createVolumetricLight({renderer, rig: {}}), TypeError); assert.throws(() => createVolumetricLight({renderer, sunShadows: {}}), TypeError);
- for (const bad of [{steps: 65}, {steps: 2.5}, {scale: 0}, {anisotropy: 1}, {density: -1}]) assert.throws(() => createVolumetricLight({renderer, ...bad}), RangeError);
+ for (const bad of [{steps: 65}, {steps: 2.5}, {lightSteps: 0}, {scale: 0}, {anisotropy: 1}, {density: -1}]) assert.throws(() => createVolumetricLight({renderer, ...bad}), RangeError);
  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(45, 4 / 3, .1, 400), environment = createEnvironment();
  const drawn = [];
  renderer.render = (what, view) => drawn.push({scene: what === scene, material: what.children[0]?.material});
@@ -352,12 +352,12 @@ test('volumetric light marches the air with the parts it is given and lays it ov
  plain.render(scene, camera, environment); full.render(scene, camera, environment);
  const [plainMarch, fullMarch, composite] = [drawn[1].material, drawn[4].material, drawn[5].material];
  assert.deepEqual(drawn.map(draw => draw.scene), [true, false, false, true, false, false]);   // the scene, the march, the composite
- assert.ok(!plainMarch.fragmentShader.includes('sunShadowInAir(p)') && !plainMarch.fragmentShader.includes('volumeRigLight'));
+ assert.ok(!plainMarch.fragmentShader.includes('sunShadowInAir(p)') && !plainMarch.fragmentShader.includes('volumeRigLights(origin'));
  assert.ok(fullMarch.fragmentShader.includes('light += sunInAir * sunShadowInAir(p);') && fullMarch.fragmentShader.includes('lightShadowRead(uRigCaster[i], p, vec3(0.0), 0)'));
  assert.equal(fullMarch.uniforms.uSunShadowAtlas, shadows.sun.uniforms.uSunShadowAtlas); assert.equal(fullMarch.uniforms.uRigCount, rig.lights.uniforms.uRigCount);
  // The air takes the sun and the sky of the environment, and the march runs at its share of the screen.
  assert.deepEqual(fullMarch.uniforms.uVolumeSun.value.toArray(), environment.sun.color.toArray());
- assert.deepEqual(fullMarch.uniforms.uVolumeMedium.value.toArray(), [.01, 0, 0, .6]); assert.deepEqual(fullMarch.uniforms.uVolumeMarch.value.toArray(), [150, 16, 1]);
+ assert.deepEqual(fullMarch.uniforms.uVolumeMedium.value.toArray(), [.01, 0, 0, .6]); assert.deepEqual(fullMarch.uniforms.uVolumeMarch.value.toArray(), [150, 16, 1, 8]);
  assert.deepEqual(composite.uniforms.uVolumeSize.value.toArray(), [200, 150]);
  assert.ok(composite.fragmentShader.includes('#include <tonemapping_fragment>') && composite.uniforms.tVolume.value.isTexture);
  // A pass that already holds the scene hands it over: the scene is not drawn again.
