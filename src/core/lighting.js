@@ -4,7 +4,8 @@
 //   vec3 applyFog(vec3 color, float viewDistance)
 // It may also define LIGHT_SHADE_AT and
 //   vec3 shadeAt(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap, vec3 worldPosition)
-// for ambient light that changes from place to place; the lib's materials call it when it is there.
+// for light that changes from place to place (ambient by place, point and spot lights); the lib's materials call it
+// when it is there.
 // This file is the default implementation: sun + hemisphere + linear distance fog. A project may pass its own.
 // Light values are in Three's units (colour x intensity of a DirectionalLight / HemisphereLight) and shade() is the
 // diffuse term of Three's lit materials, so a hook surface and a MeshStandardMaterial of the same colour match under the
@@ -27,17 +28,24 @@ export const CLEAR_NOON_SUN = Object.freeze([1, 0.96, 0.9]);
 export const LIGHT_AMBIENT_GLSL = /* glsl */`
 vec3 lightAmbient(vec3 n, vec3 worldPosition) { return mix(uHemiGround, uHemiSky, n.y * 0.5 + 0.5); }`;
 
-export const lightingGLSL = (ambient = LIGHT_AMBIENT_GLSL) => /* glsl */`
+// The lights of a place in the default hook: `vec3 lightLocal(vec3 n, vec3 worldPosition, float wrap)`, the irradiance
+// that the point and spot lights give a surface facing n. Here none. createLighting({lights: {glsl, uniforms}}) swaps
+// it for real ones (the light rig of the lighting module).
+export const LIGHT_LOCAL_GLSL = /* glsl */`
+vec3 lightLocal(vec3 n, vec3 worldPosition, float wrap) { return vec3(0.0); }`;
+
+export const lightingGLSL = (ambient = LIGHT_AMBIENT_GLSL, lights = LIGHT_LOCAL_GLSL) => /* glsl */`
 uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uHemiSky; uniform vec3 uHemiGround;
 uniform vec3 uFogColor; uniform vec2 uFogRange;
 const float LIGHT_RECIPROCAL_PI = 0.3183098861837907;   // Lambert: a white surface returns irradiance / pi, as Three's BRDF
 ${ambient}
+${lights}
 #define LIGHT_SHADE_AT
 vec3 shadeAt(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap, vec3 worldPosition) {
   float ndl = max((dot(n, uSunDir) + wrap) / (1.0 + wrap), 0.0);
-  return albedo * LIGHT_RECIPROCAL_PI * (lightAmbient(n, worldPosition) * ao + uSunColor * ndl * sunVisibility);
+  return albedo * LIGHT_RECIPROCAL_PI * (lightAmbient(n, worldPosition) * ao + uSunColor * ndl * sunVisibility + lightLocal(n, worldPosition, wrap));
 }
-// Without a place: the hemisphere, whatever the ambient.
+// Without a place: the sun and the hemisphere, whatever the ambient and the lights.
 vec3 shade(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap) {
   float ndl = max((dot(n, uSunDir) + wrap) / (1.0 + wrap), 0.0);
   return albedo * LIGHT_RECIPROCAL_PI * (mix(uHemiGround, uHemiSky, n.y * 0.5 + 0.5) * ao + uSunColor * ndl * sunVisibility);
@@ -69,10 +77,13 @@ export function createLightingUniforms(options = {}) {
   };
 }
 
-// options: LIGHTING_DEFAULTS overrides, and `ambient: {glsl, uniforms}` (see LIGHT_AMBIENT_GLSL).
-export function createLighting({ambient, ...options} = {}) {
-  if (ambient !== undefined && (typeof ambient?.glsl !== 'string' || typeof ambient.uniforms !== 'object')) throw Error('Lighting ambient needs glsl and uniforms');
-  return {glsl: ambient ? lightingGLSL(ambient.glsl) : LIGHT_GLSL, uniforms: {...createLightingUniforms(options), ...ambient?.uniforms}};
+// options: LIGHTING_DEFAULTS overrides, `ambient: {glsl, uniforms}` (see LIGHT_AMBIENT_GLSL) and
+// `lights: {glsl, uniforms}` (see LIGHT_LOCAL_GLSL).
+export function createLighting({ambient, lights, ...options} = {}) {
+  for (const [name, part] of [['ambient', ambient], ['lights', lights]]) {
+    if (part !== undefined && (typeof part?.glsl !== 'string' || typeof part.uniforms !== 'object')) throw Error(`Lighting ${name} needs glsl and uniforms`);
+  }
+  return {glsl: ambient || lights ? lightingGLSL(ambient?.glsl, lights?.glsl) : LIGHT_GLSL, uniforms: {...createLightingUniforms(options), ...ambient?.uniforms, ...lights?.uniforms}};
 }
 
 // Drive the uniforms from ordinary Three lights (e.g. the ones the weather adapter animates) and the scene fog.

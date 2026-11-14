@@ -13,11 +13,12 @@ export const STAGE_DEFAULTS = Object.freeze({
 const SUN_DISTANCE = 100;          // metres from the light target, so the shadow camera sees the whole stage
 
 // sky / ground: false leaves that part out (the host has its own). shadows: the sun casts, the ground receives.
-// ambient: {glsl, uniforms} for the lighting hook (core createLighting), e.g. the light probes of the lighting module.
-export function createBasicStage({scene, sky = true, ground = true, shadows = false, ambient, ...options} = {}) {
+// ambient, lights: {glsl, uniforms} for the lighting hook (core createLighting), e.g. the light probes and the light rig
+// of the lighting module.
+export function createBasicStage({scene, sky = true, ground = true, shadows = false, ambient, lights, ...options} = {}) {
   if (!scene) throw Error('Basic stage needs a scene');
   const o = {...STAGE_DEFAULTS, ...options};
-  const environment = createEnvironment(), lighting = createLighting({ambient}), direction = environment.sun.direction;
+  const environment = createEnvironment(), lighting = createLighting({ambient, lights}), direction = environment.sun.direction;
   const sun = new THREE.DirectionalLight(LIGHTING_DEFAULTS.sunColor, o.sunIntensity);
   const hemi = new THREE.HemisphereLight(LIGHTING_DEFAULTS.hemiSky, LIGHTING_DEFAULTS.hemiGround, o.ambientIntensity);
   scene.add(sun, sun.target, hemi);

@@ -104,7 +104,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | rocks (seeded stones, boulders, scatter and cliff runs) | `three-kit/rocks` | `bench/rocks/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
-| lighting (light probes: ambient light that follows the ground, for standard and hook materials) | `three-kit/lighting` | `bench/lighting/` | ✓ |
+| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials) | `three-kit/lighting` | `bench/lighting/` | ✓ |
 | cable (articulated rope on cannon-es, tube view) | `three-kit/cable` | `bench/cable/` | ✓ |
 | destruction (rigid structures, impact fracture, overload detachment) | `three-kit/destruction`, `/destruction/three` | `bench/destruction/` | ✓ |
 | camera (director, rigs, bullet time, replay, collision, post, panel) | `three-kit/camera` | `bench/camera/` | ✓ |
@@ -193,9 +193,9 @@ Water materials take a `sky: {glsl, uniforms, defines}` hook the same way (`proc
 tone mapping and the scene's environment map. A custom ShaderMaterial cannot use those, so it takes the hook, which also
 carries a clear-noon sun and sky of its own: that is what lets a module run alone, with no stage and no lights. The hook
 speaks Three's units (colour x intensity) and its `shade()` is Three's diffuse term, so the same colour under the same
-lights looks the same on both paths. What the hook does not receive is shadow maps, the environment map (sky reflections,
-image-based ambient) and any light other than the sun and the hemisphere: a host that adds those lights only its standard
-materials with them.
+lights looks the same on both paths. What the hook does not receive is shadow maps and the environment map (sky
+reflections, image-based ambient). Point and spot lights reach it through the [light rig](#light-rig); without one, a
+host that adds those lights only its standard materials with them.
 
 **Ambient by place.** `createLighting({ambient: {glsl, uniforms}})` swaps the hook's ambient light (the hemisphere, the
 same everywhere) for one that depends on the position: the GLSL defines `vec3 lightAmbient(vec3 n, vec3 worldPosition)`.
@@ -220,6 +220,28 @@ probes.applyTo(standardMaterial, stage.lighting);                   // lit Three
 
 `probes.strength.value` (0..1) is their share in the ambient: 0 is the plain hemisphere. `probes.refresh()` measures
 everything again after the ground changed. The probes hold no light, so the sun and sky can change freely.
+
+### Light rig
+
+`createLightRig({capacity})` from `three-kit/lighting` gives the hook the point and spot lights of a scene. A light stays
+a Three `PointLight` or `SpotLight`: Three lights its own materials with it, the rig gives the same light (units, distance
+falloff, cone) to the hook through `shadeAt()`, so both paths match. Modules that own a light expose it (`fire.light`).
+
+```js
+const rig = createLightRig();
+const stage = createBasicStage({scene, lights: rig.lights});   // or createLighting({lights: rig.lights})
+const remove = rig.add(pointLight); rig.add(spotLight);
+// each frame, after the lights moved: rig.update(camera.position);
+```
+
+The hook reads `capacity` lights at once (8 by default). With more in the rig, `update(focus)` keeps the ones that count
+most at the focus (luminance over squared distance); hidden and dark lights are left out. No shadows yet.
+
+### Light slots
+
+A lit Three material has one light loop, so two features that each rewrite it cannot share a material.
+`addLightSlot(material, slot)` from `three-kit/core` is the one place that extends it: grass backlight, weather cloud
+shadows and the light probes each add a slot, in any order, and get it back out with the function it returns.
 
 ## Bench
 
