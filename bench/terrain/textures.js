@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {TERRAIN_LAYERS} from '../../src/terrain/terrain-rules.js';
-import {TERRAIN_PALETTE_ROUGHNESS} from '../../src/terrain/index.js';
+import {BIOME_TEXTURE_DEFAULTS, TERRAIN_PALETTE_ROUGHNESS} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS, getTerrainTextureMap} from '../../src/terrain/textures.js';
 import {configureTexture, createDataTexture} from '../../src/core/data-texture.js';
 
@@ -40,6 +40,16 @@ export function packTerrainLayers(layers, order = TERRAIN_LAYERS) {
 // True when every map of a catalogue set is bundled with the bench (a set added to the catalogue but not fetched is not).
 export function hasTerrainTextureSet(set) {
  return Object.values(TERRAIN_TEXTURE_SETS[set]?.maps ?? {}).every(map => files[`../../assets/terrain/${map.path}`]) && Boolean(TERRAIN_TEXTURE_SETS[set]);
+}
+
+// The textures of a world palette ({sets, roles}): one slice per set, keyed by its place in the palette. A catalogue
+// set whose files are not bundled gives way to the default set of its role and is named in `missing`.
+export async function loadTerrainPalette(renderer, {sets, roles}) {
+ const missing = [...new Set(sets.filter(set => !hasTerrainTextureSet(set)))];
+ const bundled = sets.map((set, slice) => hasTerrainTextureSet(set) ? set : BIOME_TEXTURE_DEFAULTS[roles[slice]]);
+ const textures = await loadTerrainTextures(renderer, {layerDetail: true, sets: Object.fromEntries(bundled.map((set, slice) => ['slice' + slice, set])),
+  roles: Object.fromEntries(roles.map((role, slice) => ['slice' + slice, role]))});
+ return {textures, missing};
 }
 
 export function terrainTextureUrl(set, role) {

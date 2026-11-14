@@ -35,7 +35,7 @@ const PAGES = {
   lighting: ['lighting'],
 };
 const EVERY_PAGE = ['core', 'stage', 'ui'];
-const MIXED_PAGES = ['demo-ocean', 'demo-all'];
+const MIXED_PAGES = ['demo-ocean', 'demo-all', 'demo-world'];
 
 const posix = file => file.split(path.sep).join('/');
 function jsFiles(dir) {

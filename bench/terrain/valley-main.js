@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {bakeSkyMap, terrainGroundColor, CORRIDOR_DEFAULTS, CORRIDOR_FIELDS, BIOME_CLIMATE_AXES, BIOME_TEXTURE_DEFAULTS, BIOME_WEIGHT_FIELD, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {bakeSkyMap, terrainGroundColor, CORRIDOR_DEFAULTS, CORRIDOR_FIELDS, BIOME_CLIMATE_AXES, BIOME_WEIGHT_FIELD, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createSkyVisibility, createTerrainAppearance, createTerrainField, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createDataTexture} from '../../src/core/data-texture.js';
@@ -9,7 +9,7 @@ import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js'
 import {createTerrainImpacts} from './impacts.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchPanel} from '../panel.js';
-import {hasTerrainTextureSet, loadTerrainTextures} from './textures.js';
+import {loadTerrainPalette} from './textures.js';
 import {appearanceControls, sandLookControls, textureSetControls} from './controls.js';
 import '../bench.css';
 
@@ -82,12 +82,10 @@ export async function mountValley() {
   orbit.update();
   // A catalogue set whose files are not bundled falls back to the layer's default set and is named in the status.
   let missingSets = [];
-  // Loads one slice per set of a world palette ({sets, roles}), keyed by its place in the palette.
-  function loadPalette({sets, roles}) {
-    missingSets = [...new Set(sets.filter(set => !hasTerrainTextureSet(set)))];
-    const bundled = sets.map((set, slice) => hasTerrainTextureSet(set) ? set : BIOME_TEXTURE_DEFAULTS[roles[slice]]);
-    return loadTerrainTextures(renderer, {layerDetail: true, sets: Object.fromEntries(bundled.map((set, slice) => ['slice' + slice, set])),
-      roles: Object.fromEntries(roles.map((role, slice) => ['slice' + slice, role]))});
+  async function loadPalette(palette) {
+    const {textures: loaded, missing} = await loadTerrainPalette(renderer, palette);
+    missingSets = missing;
+    return loaded;
   }
   const disposeTextures = set => { for (const texture of Object.values(set ?? {})) texture?.dispose?.(); };   // the entries that are textures
   let textures, texturesKey = '';
