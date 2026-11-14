@@ -34,18 +34,26 @@ vec3 lightAmbient(vec3 n, vec3 worldPosition) { return mix(uHemiGround, uHemiSky
 export const LIGHT_LOCAL_GLSL = /* glsl */`
 vec3 lightLocal(vec3 n, vec3 worldPosition, float wrap) { return vec3(0.0); }`;
 
-export const lightingGLSL = (ambient = LIGHT_AMBIENT_GLSL, lights = LIGHT_LOCAL_GLSL) => /* glsl */`
+// The sun at a place in the default hook: `vec3 lightSunVisibility(vec3 worldPosition, vec3 n)`, the share of the
+// sunlight that reaches a surface facing n (per colour: light through tinted glass). Here all of it.
+// createLighting({sun: {glsl, uniforms}}) swaps it for a real one (the sun shadows of the lighting module). It
+// multiplies the sunVisibility a material passes itself.
+export const LIGHT_SUN_GLSL = /* glsl */`
+vec3 lightSunVisibility(vec3 worldPosition, vec3 n) { return vec3(1.0); }`;
+
+export const lightingGLSL = (ambient = LIGHT_AMBIENT_GLSL, lights = LIGHT_LOCAL_GLSL, sun = LIGHT_SUN_GLSL) => /* glsl */`
 uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uHemiSky; uniform vec3 uHemiGround;
 uniform vec3 uFogColor; uniform vec2 uFogRange;
 const float LIGHT_RECIPROCAL_PI = 0.3183098861837907;   // Lambert: a white surface returns irradiance / pi, as Three's BRDF
 ${ambient}
 ${lights}
+${sun}
 #define LIGHT_SHADE_AT
 vec3 shadeAt(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap, vec3 worldPosition) {
   float ndl = max((dot(n, uSunDir) + wrap) / (1.0 + wrap), 0.0);
-  return albedo * LIGHT_RECIPROCAL_PI * (lightAmbient(n, worldPosition) * ao + uSunColor * ndl * sunVisibility + lightLocal(n, worldPosition, wrap));
+  return albedo * LIGHT_RECIPROCAL_PI * (lightAmbient(n, worldPosition) * ao + uSunColor * lightSunVisibility(worldPosition, n) * (ndl * sunVisibility) + lightLocal(n, worldPosition, wrap));
 }
-// Without a place: the sun and the hemisphere, whatever the ambient and the lights.
+// Without a place: the sun and the hemisphere, whatever the ambient, the lights and the shadows.
 vec3 shade(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap) {
   float ndl = max((dot(n, uSunDir) + wrap) / (1.0 + wrap), 0.0);
   return albedo * LIGHT_RECIPROCAL_PI * (mix(uHemiGround, uHemiSky, n.y * 0.5 + 0.5) * ao + uSunColor * ndl * sunVisibility);
@@ -77,13 +85,13 @@ export function createLightingUniforms(options = {}) {
   };
 }
 
-// options: LIGHTING_DEFAULTS overrides, `ambient: {glsl, uniforms}` (see LIGHT_AMBIENT_GLSL) and
-// `lights: {glsl, uniforms}` (see LIGHT_LOCAL_GLSL).
-export function createLighting({ambient, lights, ...options} = {}) {
-  for (const [name, part] of [['ambient', ambient], ['lights', lights]]) {
+// options: LIGHTING_DEFAULTS overrides, `ambient: {glsl, uniforms}` (see LIGHT_AMBIENT_GLSL),
+// `lights: {glsl, uniforms}` (see LIGHT_LOCAL_GLSL) and `sun: {glsl, uniforms}` (see LIGHT_SUN_GLSL).
+export function createLighting({ambient, lights, sun, ...options} = {}) {
+  for (const [name, part] of [['ambient', ambient], ['lights', lights], ['sun', sun]]) {
     if (part !== undefined && (typeof part?.glsl !== 'string' || typeof part.uniforms !== 'object')) throw Error(`Lighting ${name} needs glsl and uniforms`);
   }
-  return {glsl: ambient || lights ? lightingGLSL(ambient?.glsl, lights?.glsl) : LIGHT_GLSL, uniforms: {...createLightingUniforms(options), ...ambient?.uniforms, ...lights?.uniforms}};
+  return {glsl: ambient || lights || sun ? lightingGLSL(ambient?.glsl, lights?.glsl, sun?.glsl) : LIGHT_GLSL, uniforms: {...createLightingUniforms(options), ...ambient?.uniforms, ...lights?.uniforms, ...sun?.uniforms}};
 }
 
 // Drive the uniforms from ordinary Three lights (e.g. the ones the weather adapter animates) and the scene fog.

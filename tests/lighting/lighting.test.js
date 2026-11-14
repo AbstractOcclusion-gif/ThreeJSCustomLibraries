@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {createLightProbes, createLightRig, LIGHT_PROBE_DEFAULTS} from '../../src/lighting/index.js';
+import {createLightProbes, createLightRig, createSunShadows, cascadeSplits, createCascadeFitter, LIGHT_PROBE_DEFAULTS} from '../../src/lighting/index.js';
 import {createLighting, createSkyVisibility, addLightSlot} from '../../src/core/index.js';
 
 // A 45 degree pit around the origin on green ground, red beyond x = 40.
@@ -159,4 +159,92 @@ test('the light rig writes point and spot lights as Three reads them and keeps t
  assert.equal(rig.update(), 1);
  remove(); assert.equal(rig.has(point), false); assert.equal(rig.update(), 0);
  rig.dispose(); assert.equal(rig.count, 0);
+});
+
+test('cascade splits end at the shadow distance and go from an even to a logarithmic cut', () => {
+ assert.deepEqual(cascadeSplits(1, 101, 4, 0), [26, 51, 76, 101]);
+ const log = cascadeSplits(1, 81, 4, 1);
+ for (const [index, expected] of [3, 9, 27, 81].entries()) assert.ok(Math.abs(log[index] - expected) < 1e-9);
+ const mixed = cascadeSplits(.5, 150, 4, .75);
+ assert.ok(mixed.every((split, index) => split > (index ? mixed[index - 1] : .5)) && mixed[3] === 150);
+ for (const bad of [[0, 10, 4, .5], [5, 5, 4, .5], [1, 10, 0, .5], [1, 10, 4, 2]]) assert.throws(() => cascadeSplits(...bad), RangeError);
+});
+
+test('a cascade wraps its slice of the view whichever way the view turns, and moves by whole texels', () => {
+ const fitter = createCascadeFitter(), light = new THREE.OrthographicCamera(), sun = new THREE.Vector3(.3, .8, .5).normalize();
+ const camera = new THREE.PerspectiveCamera(50, 16 / 9, .1, 400), resolution = 512, reach = 100;
+ const fit = () => { camera.updateMatrixWorld(true); return fitter.fit(light, camera, 5, 30, sun, resolution, reach); };
+ camera.position.set(10, 4, -6); camera.lookAt(0, 0, 0);
+ const texel = fit(), radius = light.right;
+ assert.ok(Math.abs(texel - 2 * radius / resolution) < 1e-12 && light.far === reach + 2 * radius);
+ // Every corner of the slice falls inside the light camera.
+ const tangent = Math.tan(THREE.MathUtils.degToRad(25)), corner = new THREE.Vector3();
+ for (const distance of [5, 30]) for (const x of [-1, 1]) for (const y of [-1, 1]) {
+  corner.set(x * tangent * distance * camera.aspect, y * tangent * distance, -distance).applyMatrix4(camera.matrixWorld).project(light);
+  assert.ok(Math.abs(corner.x) <= 1 && Math.abs(corner.y) <= 1 && Math.abs(corner.z) < 1);
+ }
+ // The light camera looks along the sun, and its centre sits on a grid of whole texels in the light's own axes.
+ const along = new THREE.Vector3(); light.getWorldDirection(along);
+ assert.ok(along.dot(sun) < -.999999);
+ const centre = light.position.clone().addScaledVector(sun, -(reach + radius)).applyMatrix4(light.matrixWorldInverse.clone().setPosition(0, 0, 0));
+ for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(centre[axis] / texel - Math.round(centre[axis] / texel)) < 1e-6);
+ // Turning the view keeps the size; a move smaller than a texel leaves the cascade where it is or shifts it by whole texels.
+ const before = light.position.clone();
+ camera.position.x += texel * .2; fit();
+ const moved = light.position.clone().sub(before).applyMatrix4(light.matrixWorldInverse.clone().setPosition(0, 0, 0));
+ for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(moved[axis] / texel - Math.round(moved[axis] / texel)) < 1e-6);
+ camera.rotateY(1.1); fit();
+ assert.equal(light.right, radius);
+ assert.throws(() => fitter.fit(light, new THREE.OrthographicCamera(), 5, 30, sun, resolution, reach), TypeError);
+});
+
+// A renderer that only records what the shadows ask of it.
+function recordingRenderer() {
+ const calls = [];
+ return {calls, autoClear: true, capabilities: {}, render: (scene, camera) => calls.push(['render', camera.layers.mask]), clear: () => calls.push(['clear']),
+  setRenderTarget: target => calls.push(['target', target ? target.viewport.toArray() : null]), getRenderTarget: () => null, getActiveCubeFace: () => 0,
+  getActiveMipmapLevel: () => 0, getScissorTest: () => false, getViewport: v => v, getScissor: v => v, getClearColor: c => c, getClearAlpha: () => 1,
+  setScissorTest() {}, setViewport() {}, setScissor() {}, setClearColor() {}};
+}
+
+test('sun shadows draw their cascades into the tiles of one atlas and give both lighting paths the same read', () => {
+ const renderer = recordingRenderer(), shadows = createSunShadows({renderer, resolution: 256}), {uniforms} = shadows.sun;
+ assert.throws(() => createSunShadows(), TypeError);
+ for (const bad of [{cascades: 5}, {resolution: 100.5}, {lambda: 2}, {near: 200}, {every: [1, 1]}]) assert.throws(() => createSunShadows({renderer, ...bad}), RangeError);
+ assert.throws(() => shadows.set('cascades', 2), /fixed at creation/); assert.throws(() => shadows.set('strength', 2), RangeError);
+ assert.equal(shadows.set('strength', .5).settings.strength, .5);
+ assert.deepEqual([shadows.atlas.image.width, shadows.atlas.image.height], [512, 512]);
+ // The hook part and the slot of a lit material carry the same read, written once.
+ const lighting = createLighting({sun: shadows.sun});
+ assert.ok(lighting.glsl.includes('lightSunVisibility(worldPosition, n) * (ndl * sunVisibility)') && lighting.glsl.includes('#define SUN_SHADOW_CASCADES 4'));
+ assert.equal(lighting.uniforms.uSunShadowAtlas.value, shadows.atlas);
+ const material = new THREE.MeshStandardMaterial(), detach = shadows.applyTo(material);
+ const shader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
+ material.onBeforeCompile(shader);
+ assert.match(shader.fragmentShader, /getDirectionalLightInfo\( directionalLight, directLight \);\s*\{[^\n]*\s*if \(directLight\.visible && dot\(directLight\.direction, transformDirection\(uSunShadowDir/);
+ assert.equal(shader.uniforms.uSunShadowMatrix, uniforms.uSunShadowMatrix);
+ detach();
+
+ const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(45, 16 / 9, .1, 400), sun = new THREE.Vector3(.3, .8, .5).normalize();
+ const own = new THREE.MeshStandardMaterial(), glass = new THREE.MeshStandardMaterial({transparent: true});
+ const caster = new THREE.Mesh(new THREE.BoxGeometry(), own), still = new THREE.Mesh(new THREE.BoxGeometry(), own), pane = new THREE.Mesh(new THREE.BoxGeometry(), glass);
+ caster.castShadow = pane.castShadow = true; scene.add(caster, still, pane);
+ camera.position.set(22, 3, -27); camera.lookAt(4, -2, -3); camera.updateMatrixWorld(true);
+ const seen = [];
+ renderer.render = () => seen.push([caster.material.isMeshDepthMaterial, caster.material.side, caster.layers.mask !== 1, still.layers.mask, pane.material === glass && pane.layers.mask === 1]);
+ // First frame: every cascade; then the far ones wait (every: 1, 1, 2, 4).
+ assert.deepEqual([0, 1, 2, 3, 4].map(() => shadows.render(scene, camera, sun)), [4, 2, 3, 3, 3]);
+ // While a cascade is drawn the caster wears a depth material (back faces, as Three) on the shadow layer; then all is put back.
+ assert.deepEqual(seen[0], [true, THREE.BackSide, true, 1, true]);
+ assert.ok(caster.material === own && caster.layers.mask === 1 && renderer.autoClear === true && scene.background === null);
+ assert.deepEqual(renderer.calls.filter(call => call[0] === 'target').slice(0, 4).map(call => call[1]), [[0, 0, 256, 256], [256, 0, 256, 256], [0, 256, 256, 256], [256, 256, 256, 256]]);
+ // The point the camera looks at, 38 m away, lands inside the tile of a cascade, at a depth between the planes.
+ const target = new THREE.Vector3(4, -2, -3), inside = uniforms.uSunShadowMatrix.value.map((matrix, index) => {
+  const at = target.clone().applyMatrix4(matrix), tile = uniforms.uSunShadowTile.value[index];
+  return at.x > tile.x && at.x < tile.z && at.y > tile.y && at.y < tile.w && at.z > 0 && at.z < 1;
+ });
+ assert.ok(!inside[0] && inside.includes(true));
+ assert.ok(uniforms.uSunShadowTexel.value.x < uniforms.uSunShadowTexel.value.w && uniforms.uSunShadowLook.value.x === .5);
+ assert.throws(() => shadows.render(scene, camera, [0, 1, 0]), TypeError);
+ shadows.dispose(); assert.equal(shadows.render(scene, camera, sun), 0);
 });

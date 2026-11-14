@@ -1,4 +1,4 @@
-export {LIGHT_GLSL, LIGHT_AMBIENT_GLSL, LIGHT_LOCAL_GLSL, lightingGLSL, NOISE_GLSL, LIGHTING_DEFAULTS, DEFAULT_SUN_DIRECTION, CLEAR_NOON_SUN, createLighting, createLightingUniforms, groundBounce, syncLighting, syncLightingFromEnvironment} from './lighting.js';
+export {LIGHT_GLSL, LIGHT_AMBIENT_GLSL, LIGHT_LOCAL_GLSL, LIGHT_SUN_GLSL, lightingGLSL, NOISE_GLSL, LIGHTING_DEFAULTS, DEFAULT_SUN_DIRECTION, CLEAR_NOON_SUN, createLighting, createLightingUniforms, groundBounce, syncLighting, syncLightingFromEnvironment} from './lighting.js';
 export {addLightSlot} from './light-slots.js';
 export {createSkyVisibility, bakeSkyMap, SKY_VISIBILITY_DEFAULTS, SKY_VISIBILITY_LIMITS} from './sky-visibility.js';
 export {createEnvironment, setEnvironmentWind} from './environment.js';

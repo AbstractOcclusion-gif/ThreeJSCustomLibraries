@@ -104,7 +104,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | rocks (seeded stones, boulders, scatter and cliff runs) | `three-kit/rocks` | `bench/rocks/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
-| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials) | `three-kit/lighting` | `bench/lighting/` | ✓ |
+| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials; cascaded sun shadows for both paths) | `three-kit/lighting` | `bench/lighting/` | ✓ |
 | cable (articulated rope on cannon-es, tube view) | `three-kit/cable` | `bench/cable/` | ✓ |
 | destruction (rigid structures, impact fracture, overload detachment) | `three-kit/destruction`, `/destruction/three` | `bench/destruction/` | ✓ |
 | camera (director, rigs, bullet time, replay, collision, post, panel) | `three-kit/camera` | `bench/camera/` | ✓ |
@@ -193,9 +193,9 @@ Water materials take a `sky: {glsl, uniforms, defines}` hook the same way (`proc
 tone mapping and the scene's environment map. A custom ShaderMaterial cannot use those, so it takes the hook, which also
 carries a clear-noon sun and sky of its own: that is what lets a module run alone, with no stage and no lights. The hook
 speaks Three's units (colour x intensity) and its `shade()` is Three's diffuse term, so the same colour under the same
-lights looks the same on both paths. What the hook does not receive is shadow maps and the environment map (sky
-reflections, image-based ambient). Point and spot lights reach it through the [light rig](#light-rig); without one, a
-host that adds those lights only its standard materials with them.
+lights looks the same on both paths. What the hook does not receive is Three's shadow maps and the environment map (sky
+reflections, image-based ambient). Point and spot lights reach it through the [light rig](#light-rig), the shadow of the
+sun through the [sun shadows](#sun-shadows); without them, a host that adds those lights only its standard materials.
 
 **Ambient by place.** `createLighting({ambient: {glsl, uniforms}})` swaps the hook's ambient light (the hemisphere, the
 same everywhere) for one that depends on the position: the GLSL defines `vec3 lightAmbient(vec3 n, vec3 worldPosition)`.
@@ -235,13 +235,34 @@ const remove = rig.add(pointLight); rig.add(spotLight);
 ```
 
 The hook reads `capacity` lights at once (8 by default). With more in the rig, `update(focus)` keeps the ones that count
-most at the focus (luminance over squared distance); hidden and dark lights are left out. No shadows yet.
+most at the focus (luminance over squared distance); hidden and dark lights are left out. They cast no shadow yet.
+
+### Sun shadows
+
+`createSunShadows({renderer, ...SUN_SHADOW_DEFAULTS})` from `three-kit/lighting` is the kit's own cascaded shadow map,
+read the same way by both lighting paths. The view is cut into `cascades` slices (4), each drawn from the sun into one
+tile of a depth atlas (`resolution` 1024 texels a tile) out to `distance` (150 m). Each slice is wrapped in a sphere and
+its light camera moves by whole texels, so shadows neither change size when the view turns nor crawl when it moves. A
+surface reads the finest cascade that holds it and gives way to the next near the edge of its tile.
+
+```js
+const shadows = createSunShadows({renderer});
+const stage = createBasicStage({scene, sun: shadows.sun});   // hook materials; or createLighting({sun: shadows.sun})
+shadows.applyTo(standardMaterial);                           // lit Three materials
+// each frame, before the scene is drawn: shadows.render(scene, camera, environment.sun.direction);
+```
+
+Casters are the meshes with `castShadow`, drawn with their `customDepthMaterial` when they have one (cutout, wind). The
+sun is a direction: the Three directional light that points the same way is the one shadowed, and it must not cast
+Three's own shadow too (`castShadow = false`, the stage's default). `shadows.settings` is live (`strength`, `softness`,
+`distance`, `lambda`, `blend`, `normalOffset`, `depthBias`, `debug` to tint the cascades); `every` is how many frames each
+cascade waits between two draws (`[1, 1, 2, 4]`). A ground mesh casts with `shadowSide: THREE.FrontSide`.
 
 ### Light slots
 
 A lit Three material has one light loop, so two features that each rewrite it cannot share a material.
 `addLightSlot(material, slot)` from `three-kit/core` is the one place that extends it: grass backlight, weather cloud
-shadows and the light probes each add a slot, in any order, and get it back out with the function it returns.
+shadows, the light probes and the sun shadows each add a slot, in any order, and get it back out with the function it returns.
 
 ## Bench
 

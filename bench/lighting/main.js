@@ -1,11 +1,12 @@
 // Lighting bench: the kit's lights on the basic stage. A ground of two colours with a trench, light probes measured
-// from it, a point light and a spot light in a light rig, and pairs of white objects: one on Three's standard
-// material, one on the lighting hook. Each light stands midway between the two objects of a pair, so they must match.
+// from it, a point light and a spot light in a light rig, the kit's cascaded sun shadows, and pairs of white objects:
+// one on Three's standard material, one on the lighting hook. Each light stands midway between the two objects of a
+// pair, and both cast and receive the same shadows, so they must match.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {createLightProbes, createLightRig, LIGHT_PROBE_DEFAULTS} from '../../src/lighting/index.js';
+import {createLightProbes, createLightRig, createSunShadows, LIGHT_PROBE_DEFAULTS, SUN_SHADOW_LIMITS} from '../../src/lighting/index.js';
 import {benchRenderer, onLeave, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import '../bench.css';
@@ -19,7 +20,7 @@ const OBJECT = {color: 0xf2f2f2, radius: 1, lift: .3, pair: 1.3, side: 6, flat: 
 // intensity in candela, distance (cutoff) in m, angle in degrees.
 const POINT = {color: 0xffa040, intensity: 12, distance: 20, decay: 2, lift: 3.5};
 const SPOT = {color: 0x80b0ff, intensity: 150, distance: 30, decay: 2, height: 8, angle: 25, penumbra: .4};
-const renderer = benchRenderer(); renderer.shadowMap.enabled = true;
+const renderer = benchRenderer();
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(VIEW.fov, innerWidth / innerHeight, VIEW.near, VIEW.far);
 camera.position.set(...VIEW.position);
 const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(...VIEW.target); controls.enableDamping = true;
@@ -34,8 +35,8 @@ const ground = {
   },
   colorAt: (x, z, target) => target.copy(groundColors[z < 0 ? 0 : 1]),
 };
-const probes = createLightProbes({ground}), rig = createLightRig();
-const stage = createBasicStage({scene, shadows: true, ground: false, shadowExtent: GROUND.size / 4, ambient: probes.ambient, lights: rig.lights});
+const probes = createLightProbes({ground}), rig = createLightRig(), shadows = createSunShadows({renderer});
+const stage = createBasicStage({scene, ground: false, ambient: probes.ambient, lights: rig.lights, sun: shadows.sun});
 
 const groundGeometry = new THREE.PlaneGeometry(GROUND.size, GROUND.size, GROUND.cells, GROUND.cells).rotateX(-Math.PI / 2);
 const position = groundGeometry.attributes.position;
@@ -50,13 +51,16 @@ function paintGround() {
 for (let index = 0; index < position.count; index++) position.setY(index, ground.heightAt(position.getX(index)));
 groundGeometry.computeVertexNormals();
 paintGround();
-const groundMaterial = probes.applyTo(new THREE.MeshStandardMaterial({vertexColors: true, roughness: 1}), stage.lighting);
+// A ground has no underside to draw from the sun: it casts with the side that faces it.
+const groundMaterial = probes.applyTo(new THREE.MeshStandardMaterial({vertexColors: true, roughness: 1, shadowSide: THREE.FrontSide}), stage.lighting);
+shadows.applyTo(groundMaterial);
 const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-groundMesh.receiveShadow = true;
+groundMesh.castShadow = true;
 scene.add(groundMesh);
 
 // The same white on both lighting paths.
 const standard = probes.applyTo(new THREE.MeshStandardMaterial({color: OBJECT.color, roughness: 1}), stage.lighting);
+shadows.applyTo(standard);
 const hooked = new THREE.ShaderMaterial({
   uniforms: {...stage.lighting.uniforms, uColor: {value: new THREE.Color(OBJECT.color)}},
   vertexShader: /* glsl */`varying vec3 vNormal; varying vec3 vWorld;
@@ -75,7 +79,7 @@ function addPair(geometry, x, z, halfHeight) {
   [standard, hooked].forEach((material, index) => {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, ground.heightAt(x) + OBJECT.lift + halfHeight, z + (index ? OBJECT.pair : -OBJECT.pair));
-    mesh.castShadow = material === standard;
+    mesh.castShadow = true;
     scene.add(mesh);
   });
 }
@@ -118,6 +122,16 @@ spotFolder.add(spotSettings, 'angle', 5, 80, 1).name('cone · °').onChange(angl
 spotFolder.add(spot, 'penumbra', 0, 1, .01).name('soft edge');
 spotFolder.add(spot.target.position, 'x', OBJECT.flat - 10, OBJECT.flat + 10, .1).name('aim x · m');
 spotFolder.addColor(spot, 'color').name('colour');
+const shadowFolder = gui.addFolder('Sun shadows (cascades)');
+const shadowSlider = (name, step, label) => shadowFolder.add(shadows.settings, name, ...SUN_SHADOW_LIMITS[name], step).name(label);
+shadowSlider('strength', .01, 'strength');
+shadowSlider('softness', .1, 'soft edge · texels');
+shadowFolder.add(shadows.settings, 'distance', 20, VIEW.far, 1).name('distance · m');
+shadowSlider('lambda', .01, 'cut (0 even, 1 log)');
+shadowSlider('blend', .005, 'cascade blend');
+shadowSlider('normalOffset', .1, 'normal offset · texels');
+shadowSlider('depthBias', .1, 'depth bias · texels');
+shadowFolder.add(shadows.settings, 'debug').name('show cascades');
 const groundFolder = gui.addFolder('Ground');
 groundFolder.addColor(settings, 'colorA').name('colour, near side').onChange(applyGround);
 groundFolder.addColor(settings, 'colorB').name('colour, far side').onChange(applyGround);
@@ -130,13 +144,15 @@ startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   probes.update(controls.target.x, controls.target.z);
   const lit = rig.update(camera.position);
+  camera.updateMatrixWorld();
+  const drawn = shadows.render(scene, camera, stage.environment.sun.direction);
   renderer.render(scene, camera);
   if (now - lastStatus > STATUS_REFRESH_MS) {
     lastStatus = now;
     const {columns, spacing, layers} = LIGHT_PROBE_DEFAULTS;
-    status.textContent = `${columns} x ${columns} columns of ${layers} probes, ${spacing} m apart\n${probes.pending} columns to measure\n${lit} of ${rig.count} rig lights on the hook`;
+    status.textContent = `${columns} x ${columns} columns of ${layers} probes, ${spacing} m apart\n${probes.pending} columns to measure\n${lit} of ${rig.count} rig lights on the hook\n${drawn} of ${shadows.settings.cascades} cascades drawn this frame`;
   }
 });
 document.body.dataset.ready = 'true';
-onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); stage.dispose(); probes.dispose(); rig.dispose(); scene.remove(point, spot, spot.target); point.dispose(); spot.dispose(); for (const item of [standard, hooked, groundMaterial, groundGeometry, sphere, pillar]) item.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });
-window.lightingBench = {stage, probes, rig, point, spot, settings, applyGround, scene, camera, controls, renderer};
+onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); stage.dispose(); probes.dispose(); rig.dispose(); shadows.dispose(); scene.remove(point, spot, spot.target); point.dispose(); spot.dispose(); for (const item of [standard, hooked, groundMaterial, groundGeometry, sphere, pillar]) item.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });
+window.lightingBench = {stage, probes, rig, shadows, point, spot, settings, applyGround, scene, camera, controls, renderer};
