@@ -52,7 +52,7 @@ export function createBoundaries({scene, assets = {}, lighting, sampleGround = (
     repeatModules(route, asset.length, ({x, z, yaw, scaleX}) => { const m = asset.model.clone(true); m.position.set(x, sampleGround(x, z), z); m.rotation.y = yaw; m.scale.x = scaleX; view.add(m); });
   }
   function hedgePlacements(route, out) {
-    const base = new T.Color(hedgeOptions.color).convertSRGBToLinear(), o = hedgeOptions;
+    const base = new T.Color(hedgeOptions.color), o = hedgeOptions;   // a Color made from a hex string is already linear
     walkRun(route, o.spacingM, ({x, z, yaw}) => {
       const jitter = 1 + o.tintJitter * (hash2(x, z, 21) * 2 - 1), h = o.heightM * (HEDGE_JITTER.height[0] + HEDGE_JITTER.height[1] * hash2(x, z, 22));
       out.push({x, z, h, r: o.widthM / 2 * HEDGE_JITTER.overlap, yaw: yaw + hash2(x, z, 23) * HEDGE_JITTER.yaw, tint: [base.r * jitter, base.g * jitter, base.b * jitter]});

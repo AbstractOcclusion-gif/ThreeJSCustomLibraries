@@ -1,15 +1,22 @@
 // World demo: the kit's modules together on one terrain world. A finite corridor through four biomes (terrain world,
 // rings and palette material) under the weather module, which lights the scene and wets or snows the ground; rocks,
-// grass and trees on it (dressing.js); the lighting module's sun shadows, light probes and volumetric light; and the
-// camera module's director for the shots.
+// grass and trees on it (dressing.js); the lighting module's sun shadows, light probes, light rig and volumetric
+// light; a camp by the river (the shared demo life and structures: leaved trees, a fire, fish, a fence and a hedge,
+// a rope, a bridge to shoot down); a play area for test balls; ambience from the sound module; and the camera
+// module's director for the shots.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainClipmap, createTerrainMaterial, createTerrainWorld, SNOW_DEFAULTS, terrainLightGround} from '../../src/terrain/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
-import {createLightProbes, createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
+import {createLightProbes, createLightRig, createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
+import {createAmbience, createSound} from '../../src/sound/index.js';
 import {createCameraDirector, createOrbitRig} from '../../src/camera/director.js';
 import {createShadowReceivers} from '../kit/shadow-receivers.js';
+import {createDemoLife} from '../kit/life.js';
+import {createDemoStructures} from '../kit/structures.js';
+import {createTerrainPlay, PLAY} from '../terrain/play.js';
+import {DEMO as SOUND_DEMO} from '../sound/presets.js';
 import {createSurfaceWeather} from '../../src/surface/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
@@ -36,7 +43,18 @@ const VIEW = {
   circle: {radius: 70, height: 26, speed: .1},             // the circling shot, around the ground under the view
   blend: 1.5,                                               // s to ease from one shot into another
 };
-const SHOTS = {free: 'Free (drag to look)', fly: 'Fly along the corridor', circle: 'Circle'};
+const SHOTS = {free: 'Free (drag to look)', fly: 'Fly along the corridor', circle: 'Circle', camp: 'Camp', bridge: 'Bridge'};
+// The camp, in the first stretch: `along` m from the start and `beside` m from the route, on dry ground above the
+// river. A few leaved trees and bushes grow within `radius` m of it. The bridge crosses the river `bridgeAlong` m in;
+// the fish keep to a pool `pool` m long and `poolHalf` m to each side of the route, `fishDepth` m under the surface.
+const CAMP = {
+  along: 260, beside: 38, radius: 26, trees: 6, bushes: 10, dryAbove: 1.5,
+  bridgeAlong: 340, pool: [235, 295], poolHalf: 5, fishDepth: .15, fish: {roach: 10, rudd: 6, perch: 3}, fishSize: .3,
+  shot: {radius: 19, height: 8, speed: .2}, bridgeShot: {radius: 46, height: 14, speed: .14},
+};
+// Ambience: the rain and wind recordings of the sound bench, at the level of the weather. fullWind: m/s of full volume.
+const SOUND = {fullWind: 18, gain: {rain: .9, wind: .6}};
+const PLAY_SNOW_FROM = .5;   // snow cover of the ground from which the play area lies under real snow
 // The light, as the All tools demo: the kit's cascaded sun shadows, and thin air lit by the sun through them and
 // through the weather's clouds. The weather's own pass then draws its fog bank and rainbow over that frame.
 const LIGHT = {shadowDistance: 220, airDensity: .0012, sunInAir: 1.5, scanSeconds: 2};   // scan: how often new materials are looked for
@@ -49,7 +67,7 @@ const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(VIEW.fov, 
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
 const focus = new THREE.Vector3();
-const settings = {shot: 'free', speed: VIEW.speed, followWeather: true, wetness: 0, snow: 0, volumetric: true};
+const settings = {shot: 'free', speed: VIEW.speed, followWeather: true, wetness: 0, snow: 0, volumetric: true, ballRadius: PLAY.ball.radius};
 
 const {stretch, ...corridorShape} = CORRIDOR;
 const world = createTerrainWorld({seed: SEED, biomes: BIOMES.map(cloneBiome), water: true, corridor: {
@@ -71,10 +89,11 @@ const appearance = createTerrainAppearance(), sandLook = createSandLook(), surfa
 for (const [key, value] of Object.entries(APPEARANCE)) appearance[key].value = value;
 appearance.shoreWidth.value = WATER.shoreWidth;
 appearance.waterLevel.value = world.waterLevel;
+const cutout = {value: new THREE.Vector4()};   // the square of ground the play area draws in place of the rings
 const clipmap = createTerrainClipmap({world, ...CLIP, createMaterial: field => {
   // The shadows of the sun and of the clouds reach the rings with every other receiver (shadowReceivers).
   return createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray,
-    layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook, weather: surfaceWeather});
+    layerDetailArray: textures.layerDetailArray, detailNormal: textures.detail, appearance, sandLook, weather: surfaceWeather, cutout});
 }});
 scene.add(clipmap.group);
 clipmap.update(focus.x, focus.z);
@@ -93,11 +112,13 @@ const dressing = createWorldDressing({scene, world, renderer, environment, trees
 // terrain itself keeps its own, finer sky map.
 const sunShadows = createSunShadows({renderer, distance: LIGHT.shadowDistance});
 const sunCover = [sunShadows.sun, weather.view.sunCover];
-const volumetric = createVolumetricLight({renderer, sun: sunCover, density: LIGHT.airDensity});
+const lightRig = createLightRig({shadows: {renderer, casters: 1}});   // the camp fire, with one shadow
+const volumetric = createVolumetricLight({renderer, sun: sunCover, rig: lightRig, density: LIGHT.airDensity});
 volumetric.set('sun', LIGHT.sunInAir);
-const shadowReceivers = createShadowReceivers(scene, sunShadows, weather.view);
+const shadowReceivers = createShadowReceivers(scene, sunShadows, weather.view, lightRig);
 const probes = createLightProbes({ground: terrainLightGround({world, palette: {...world.palette, means: textures.means}, appearance, sandColor: sandLook.color.value})});
-const lighting = createLighting({ambient: probes.ambient, sun: sunCover});
+// The hook of the custom shaders (the leaved trees and the hedge of the camp): same sun covers, lights and probes.
+const lighting = createLighting({ambient: probes.ambient, sun: sunCover, lights: lightRig.lights});
 const probed = new WeakSet();
 function findReceivers() {
   shadowReceivers.update();
@@ -109,6 +130,36 @@ function findReceivers() {
       probed.add(material);
     }
   });
+}
+
+// The camp. Its trees and hedge are the kit's leaved trees, on the lighting hook; the fire lights the rig.
+const campZ = CAMP.along, campX = route.routeX(campZ) + CAMP.beside, bridgeX = route.routeX(CAMP.bridgeAlong);
+const poolX = route.routeX((CAMP.pool[0] + CAMP.pool[1]) / 2), ground = (x, z) => world.heightAt(x, z);
+const life = await createDemoLife({scene, ground, centre: [campX, campZ], environment, lighting, lightRig,
+  plants: {radius: CAMP.radius, treeLine: world.waterLevel + CAMP.dryAbove, bushLine: world.waterLevel + CAMP.dryAbove, trees: CAMP.trees, bushes: CAMP.bushes, grass: 0},
+  camp: [campX, campZ],
+  fish: {bounds: new THREE.Box3(new THREE.Vector3(poolX - CAMP.poolHalf, world.heightAt(poolX, CAMP.pool[0]), CAMP.pool[0]), new THREE.Vector3(poolX + CAMP.poolHalf, world.waterLevel - CAMP.fishDepth, CAMP.pool[1])),
+    counts: CAMP.fish, size: CAMP.fishSize, surfaceHeight: () => world.waterLevel - CAMP.fishDepth}});
+// The bridge stands on the river bed, its deck across the river.
+const structures = createDemoStructures({scene, ground, camp: life.camp, bridge: [bridgeX, world.heightAt(bridgeX, CAMP.bridgeAlong), CAMP.bridgeAlong, 0], environment, lighting});
+const campTarget = new THREE.Vector3(campX, world.heightAt(campX, campZ) + 1, campZ);
+
+// The play area: test balls leave ruts in the ground and pack the snow (the terrain pages' play.js).
+const play = createTerrainPlay({scene, appearance, sandLook, weather: surfaceWeather, cutout, world: () => world, textures: () => textures,
+  seed: () => SEED, rules: () => world.biomes[0].paint});
+
+// Ambience (sound module). A browser only plays sound after a click: the Sound button starts it.
+let sound = null, ambience = null;
+async function startSound() {
+  if (sound) return;
+  const started = createSound();
+  try {
+    await started.unlock();
+    for (const id of ['rain', 'wind']) started.define(id, {bus: 'ambience', buffer: await started.load(SOUND_DEMO.recordings[id])});
+    ambience = createAmbience(started, {layers: ['rain', 'wind'].map(id => ({id, sound: id, gain: 0}))});
+    ambience.start();
+    sound = started;
+  } catch (error) { await started.dispose(); throw error; }
 }
 
 // The shots, on the camera module's director, which eases from one into the next.
@@ -125,11 +176,13 @@ function flyRig({dt}) {
   flyPose.lookAt(aheadX, ahead + VIEW.low, aheadZ);
   return flyPose;
 }
-const director = createCameraDirector(camera).register('fly', flyRig).register('circle', createOrbitRig(VIEW.circle));
+const director = createCameraDirector(camera).register('fly', flyRig).register('circle', createOrbitRig(VIEW.circle))
+  .register('camp', createOrbitRig(CAMP.shot)).register('bridge', createOrbitRig(CAMP.bridgeShot));
 const shotTarget = new THREE.Vector3();
 function selectShot(shot) {
   const z = THREE.MathUtils.clamp(focus.z, VIEW.turnBack, route.length - VIEW.turnBack), x = route.routeX(z);
   shotTarget.set(x, world.heightAt(x, z), z);
+  if (shot === 'camp') shotTarget.copy(campTarget); else if (shot === 'bridge') shotTarget.copy(structures.bridgeCentre);
   orbit.enabled = shot === 'free';
   if (shot === 'free') { orbit.target.copy(shotTarget); orbit.update(); return; }
   if (shot === 'fly') flyZ = z;
@@ -140,6 +193,18 @@ const gui = createBenchPanel('World demo');
 const viewFolder = gui.addFolder('View');
 viewFolder.add(settings, 'shot', Object.fromEntries(Object.entries(SHOTS).map(([id, label]) => [label, id]))).name('Camera').onChange(selectShot);
 viewFolder.add(settings, 'speed', 2, 60, 1).name('Flight speed · m/s');
+const attempt = action => async () => { try { await action(); report(); } catch (error) { report(error); } };
+const campFolder = gui.addFolder('Camp, bridge, balls');
+campFolder.add({run: attempt(() => life.ignite())}, 'run').name('Light the camp fire');
+campFolder.add({run: attempt(() => life.resetFire())}, 'run').name('Put the fire out');
+campFolder.add({run: attempt(() => structures.cutRope())}, 'run').name('Cut the rope');
+campFolder.add({run: attempt(() => structures.hangRope())}, 'run').name('Hang the rope again');
+campFolder.add({run: attempt(() => structures.fireAtBridge())}, 'run').name('Fire at the bridge');
+campFolder.add({run: attempt(() => structures.buildBridge())}, 'run').name('Rebuild the bridge');
+campFolder.add(settings, 'ballRadius', PLAY.ball.minRadius, PLAY.ball.maxRadius, .1).name('Ball radius · m');
+campFolder.add({run: attempt(() => play.roll({focus, camera, radius: settings.ballRadius}))}, 'run').name('Roll a ball from the view');
+campFolder.add({run: attempt(() => play.reset())}, 'run').name('Clear balls, ruts and marks');
+campFolder.add({run: attempt(startSound)}, 'run').name('Sound: start the ambience');
 const lightFolder = gui.addFolder('Light');
 lightFolder.add(sunShadows.settings, 'strength', 0, 1, .01).name('Sun shadows');
 lightFolder.add(sunShadows.settings, 'distance', 40, 600, 5).name('Sun shadows reach · m');
@@ -166,6 +231,7 @@ let lastStatus = -Infinity, lastScan = -Infinity;
 startFrameLoop(renderer, (dt, now) => {
   if (settings.shot === 'free') { orbit.update(); focus.copy(orbit.target); }
   else { director.update(dt, {target: shotTarget}); focus.copy(settings.shot === 'fly' ? camera.position : shotTarget); }
+  camera.updateProjectionMatrix();   // a shot may change the field of view
   weather.system.update(dt);
   weather.view.update(dt);
   syncLighting(lighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});
@@ -182,7 +248,18 @@ startFrameLoop(renderer, (dt, now) => {
   const terrainMs = performance.now() - started;
   waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
   dressing.update(dt, camera, focus);
+  life.update(dt, camera);
+  structures.update(dt, camera);
+  // Real snow on the play area once the ground is mostly covered.
+  play.setSnow(surfaceWeather.levels.value.y > PLAY_SNOW_FROM);
+  play.update(dt);
+  if (ambience) {
+    ambience.setLevel('rain', SOUND.gain.rain * weather.system.weather.rain);
+    ambience.setLevel('wind', SOUND.gain.wind * Math.min(1, environment.wind.speed / SOUND.fullWind));
+  }
   camera.updateMatrixWorld();
+  lightRig.update(camera.position);
+  lightRig.renderShadows(scene);
   sunShadows.render(scene, camera, environment.sun.direction);
   weather.view.render(settings.volumetric ? volumetric.capture(scene, camera, environment) : undefined);
   weatherUI.sync();
@@ -199,10 +276,11 @@ startFrameLoop(renderer, (dt, now) => {
 });
 document.body.dataset.ready = 'true';
 onLeave(() => {
-  renderer.setAnimationLoop(null); unbindResize(); shadowReceivers.dispose(); dressing.dispose(); weatherUI.dispose();
-  sunShadows.dispose(); volumetric.dispose(); probes.dispose(); weather.view.dispose(); orbit.dispose(); gui.destroy();
+  renderer.setAnimationLoop(null); unbindResize(); shadowReceivers.dispose(); play.dispose(); life.dispose(); structures.dispose(); dressing.dispose(); weatherUI.dispose();
+  ambience?.stop(0); sound?.dispose();
+  sunShadows.dispose(); volumetric.dispose(); lightRig.dispose(); probes.dispose(); weather.view.dispose(); orbit.dispose(); gui.destroy();
   scene.remove(clipmap.group, waterSheet); clipmap.dispose(); waterSheet.geometry.dispose(); waterSheet.material.dispose();
   for (const texture of Object.values(textures)) texture?.dispose?.();
   renderer.dispose();
 });
-window.worldDemo = {world, clipmap, dressing, sunShadows, volumetric, probes, selectShot, weather, surfaceWeather, settings, focus, camera, orbit, scene};
+window.worldDemo = {world, clipmap, dressing, life, structures, play, lightRig, sunShadows, volumetric, probes, selectShot, weather, surfaceWeather, settings, focus, camera, orbit, scene};
