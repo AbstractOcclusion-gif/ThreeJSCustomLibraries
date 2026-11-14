@@ -64,8 +64,10 @@ const loading = new Map();
 const loadFailures = new Map();
 let leaving = false;
 const authoredItems = [
-  {profile: 'ez-oak', items: [{x: -4, z: 0, h: 6, variant: 0}]},
-  {profile: 'ez-spruce', items: [{x: 4, z: 0, h: 6, variant: 0}]},
+  {profile: 'ez-oak', items: [{x: -7.5, z: 0, h: 6, variant: 0}]},
+  {profile: 'ez-birch', items: [{x: -2.5, z: 0, h: 6.5, variant: 0}]},
+  {profile: 'ez-bush', items: [{x: 2.5, z: 0, h: 2.2, variant: 0}]},
+  {profile: 'ez-spruce', items: [{x: 7.5, z: 0, h: 6, variant: 0}]},
 ];
 const view = {layout: 'EZ-Tree comparison'};
 const meadowNoise = valueNoise(23);
@@ -184,7 +186,7 @@ function applyView() {
     loading.set(profile, pending);
   }
   syncVisibility();
-  camera.position.set(...(authored ? [0, 5.5, 18] : compare ? [4.5, 13, 50] : [13, 5.5, 16]));
+  camera.position.set(...(authored ? [0, 6.5, 26] : compare ? [4.5, 13, 50] : [13, 5.5, 16]));
   controls.target.set(compare && !authored ? 4.5 : 0, compare ? 2.6 : 1, 0);
   controls.update();
 }

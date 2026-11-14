@@ -5,6 +5,8 @@ const models = {
   spruce: new URL('../../assets/trees/spruce.glb', import.meta.url).href,
   'ez-oak': new URL('../../assets/trees/ez-oak.glb', import.meta.url).href,
   'ez-spruce': new URL('../../assets/trees/ez-spruce.glb', import.meta.url).href,
+  'ez-birch': new URL('../../assets/trees/ez-birch.glb', import.meta.url).href,
+  'ez-bush': new URL('../../assets/trees/ez-bush.glb', import.meta.url).href,
 };
 const WIND = {maximum: 3, perSpeed: .08, perGust: .1, travel: .16};
 const TURN = Math.PI * 2;
