@@ -56,7 +56,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  const defaultEnvironment={active:false,setDynamic(texture){ownedEnvironment=texture;scene.environment=texture;this.active=true;},setBlend(){},clear(){if(scene.environment===ownedEnvironment)scene.environment=saved.environment;ownedEnvironment=null;this.active=false;}};
  const dynamic=new DynamicSky(settings,uniforms,{renderer,camera:{position:worldPosition},environment:environment??defaultEnvironment,assetBaseUrl:assets,fetch,loadTexture});
  const cloudShadows=createCloudShadows(dynamic.cloudUniforms);
- let scattering;
+ let scattering,coverUsed=false;
  const bankOffset=new THREE.Vector2(),bankSettings=new THREE.Vector4(),bankShape=new THREE.Vector4(),shaftHaze=new THREE.Vector4(),bankColor=new THREE.Color(),bankAmbient=new THREE.Color();
  const wakeHead=new THREE.Vector4(),wakeTail=new THREE.Vector3();
  let bankTime=0,airWetness=0;
@@ -95,6 +95,13 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
  }
  const view={group,settings,uniforms,sun,hemi,environment:shared,sky:dynamic,ready:dynamic.readyPromise,get precipitationCount(){return rain?.instanceCount??0;},
   get lightningFlash(){return flashStrength;},
+  // The clouds as a sun cover (core/lighting.js): createLighting({sun:[...,view.sunCover]}) shades the hook's materials
+  // under them, createVolumetricLight({sun:[...,view.sunCover]}) cuts the sun's shafts with them.
+  get sunCover(){
+   if(disposed)throw Error('Weather view is disposed');
+   scattering??=createSunScattering(dynamic.cloudUniforms,sunDir);coverUsed=true;
+   return scattering.cover;
+  },
   addCloudShadowReceiver(material){
    if(disposed)throw Error('Weather view is disposed');
    return cloudShadows.add(material);
@@ -182,16 +189,24 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    // viewport and scissor even when a shader/asset error interrupts the update.
    updateScope(()=>dynamic.update(dt,{active:true,sunDir,weather:w,day:bridge,windHeading:w.windHeading,flashPosition,flashStrength}));
    cloudShadows.update(sun,dynamic.ready&&!d.moonLit&&sun.intensity>0?look.cloudShadowStrength:0);
+   if(coverUsed){
+    // The sun cover reads the cloud shadow map: drawn here, since the pass that owns it may leave the shafts to the host.
+    const cover=dynamic.ready&&!d.moonLit&&sun.intensity>0&&sunDir.y>SHAFT_MIN_SUN?look.cloudShadowStrength:0;
+    scattering.cover.uniforms.uWeatherCover.value.y=cover;
+    if(cover>0)updateScope(()=>scattering.renderCloudShadow(renderer,camera));
+   }
    return view;
   },
   get postEnabled(){
    return (look.sunShafts&&sunDir.y>SHAFT_MIN_SUN&&!system.day.moonLit&&system.weather.sunlight>0&&look.shaftStrength>0)||
     (look.heightFog&&look.bankDensity>0)||rainbowAmount()>0;
   },
-  // Optional final draw for a perspective camera. A host can supply its own captured layers.
+  // Optional final draw for a perspective camera. A host can supply its own captured layers; with input.airLit the
+  // air of that capture is already lit (a volumetric pass): the sun's shafts are left to it, the fog bank and the
+  // rainbow are still drawn.
   render(input){
    if(disposed)return;
-   const shafts=look.sunShafts&&sunDir.y>SHAFT_MIN_SUN&&!system.day.moonLit&&system.weather.sunlight>0?look.shaftStrength:0;
+   const shafts=!input?.airLit&&look.sunShafts&&sunDir.y>SHAFT_MIN_SUN&&!system.day.moonLit&&system.weather.sunlight>0?look.shaftStrength:0;
    const bankDensity=look.heightFog?look.bankDensity*Math.min(BANK.max,BANK.base+system.weather.bank):0;
    const bow=rainbowAmount();
    if(!input&&((shafts===0&&bankDensity===0&&bow===0)||!camera.isPerspectiveCamera||renderer.getRenderTarget()!==null||

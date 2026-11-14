@@ -13,8 +13,9 @@ export const STAGE_DEFAULTS = Object.freeze({
 const SUN_DISTANCE = 100;          // metres from the light target, so the shadow camera sees the whole stage
 
 // sky / ground: false leaves that part out (the host has its own). shadows: the sun casts, the ground receives.
-// ambient, lights, sun: {glsl, uniforms} for the lighting hook (core createLighting), e.g. the light probes, the light
-// rig and the sun shadows of the lighting module (with those, leave `shadows` off: it is Three's own shadow map).
+// ambient, lights: {glsl, uniforms} and sun: sun cover(s) for the lighting hook (core createLighting), e.g. the light
+// probes, the light rig and the sun shadows of the lighting module (with those, leave `shadows` off: it is Three's own
+// shadow map).
 export function createBasicStage({scene, sky = true, ground = true, shadows = false, ambient, lights, sun: sunPart, ...options} = {}) {
   if (!scene) throw Error('Basic stage needs a scene');
   const o = {...STAGE_DEFAULTS, ...options};

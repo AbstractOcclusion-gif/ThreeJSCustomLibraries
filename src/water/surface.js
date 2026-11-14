@@ -6,6 +6,7 @@ import {ICE_COVERAGE_GLSL, ICE_MAP_SCALE, ICE_PATTERN_GLSL, createIceLook, iceLo
 import {createPlanarCapture} from './planar-capture.js';
 import {POND_OPTICS_GLSL} from './pond-optics.js';
 import {createPondShadow, POND_SHADOW_GLSL} from './pond-shadow.js';
+import {sunCovers} from '../core/lighting.js';
 import {createRenderScope} from '../core/render-state.js';
 
 // WebAquarium's Fishing pond reflection settings.
@@ -88,7 +89,7 @@ const RIPPLE_HEIGHT_GLSL = `
 // uDaylight (see sky-binding.js: skyFromWeather(view) or proceduralSky()). foamTexture (rgba tile: r/g brightness,
 // b density threshold, a coverage) is optional; without it a generated tile is used.
 // The host calls render(seconds, settings) once per frame (it captures the bed), then draws the scene itself.
-export function createChannelSurface({renderer, scene, camera, sky = proceduralSky(), ripples, obstacles, flow, foamTexture, foamLayer, freezeMap, iceDamage, iceLook = createIceLook(), captureScale = .5, causticSegments = 160, clipToBed = false, pondOptics = false, bedCaustics = 'screen', lightOccluders}) {
+export function createChannelSurface({renderer, scene, camera, sky = proceduralSky(), ripples, obstacles, flow, foamTexture, foamLayer, freezeMap, iceDamage, iceLook = createIceLook(), captureScale = .5, causticSegments = 160, clipToBed = false, pondOptics = false, bedCaustics = 'screen', lightOccluders, sun}) {
  if (!renderer || !scene || !camera || !ripples || !obstacles || !flow) throw Error('Channel surface needs renderer, scene, camera, ripples, obstacles and flow');
  const depth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
  const capture = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthTexture: depth});
@@ -96,15 +97,28 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
  const causticTarget = new THREE.WebGLRenderTarget(CAUSTIC_MAP_SIZE, CAUSTIC_MAP_SIZE, {type: THREE.HalfFloatType, depthBuffer: false,
   ...(pondOptics ? {generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter} : {})});
  const causticGrid = new THREE.PlaneGeometry(2, 2, causticSegments, causticSegments).rotateX(-Math.PI / 2);
- const shadow = lightOccluders ? createPondShadow(renderer, lightOccluders) : null;
+ // What shades the light under the water. `sun`: one sun cover or a list (core/lighting.js), e.g. the sun shadows of the
+ // lighting module: the shafts and the caustics then take the shadows the rest of the scene has. Without it,
+ // `lightOccluders` builds the pond's own shadow map of those meshes. The covers are read along the sun in the air:
+ // the bend of the light at the surface is left out.
+ const covers = sunCovers(sun), coverUniforms = Object.assign({}, ...covers.map(cover => cover.uniforms));
+ const coverGLSL = covers.length ? `
+ #define POND_SHAFT_SHADOWS
+ ${covers.map(cover => cover.glsl).join('\n')}
+ float pondShadow(vec3 p, float r) {
+  vec3 worldPosition = p, n = vec3(0.0);
+  vec3 through = ${covers.map(cover => `(${cover.air ?? cover.read})`).join(' * ')};
+  return (through.r + through.g + through.b) / 3.0;
+ }` : '';
+ const shadow = !covers.length && lightOccluders ? createPondShadow(renderer, lightOccluders) : null;
  const iceLightingGLSL = iceDamage ? POND_ICE_LIGHT_GLSL : 'float pondLightThroughIce(vec2 entry) { return 1.0; }';
- const lightingGLSL = (shadow ? POND_SHADOW_GLSL : '') + iceLightingGLSL + POND_CAUSTICS_GLSL;
+ const lightingGLSL = (covers.length ? coverGLSL : shadow ? POND_SHADOW_GLSL : '') + iceLightingGLSL + POND_CAUSTICS_GLSL;
  const ownsFoam = !foamTexture;
  const foamTile = foamTexture ?? createFoamTexture();
  foamTile.wrapS = foamTile.wrapT = THREE.RepeatWrapping;
  const R = CHANNEL_RENDER_DEFAULTS;
  const uniforms = {
-  ...shadow?.uniforms,
+  ...shadow?.uniforms, ...coverUniforms,
   ...sky.uniforms,
   ...waves.uniforms,
   bedColor: {value: capture.texture},
@@ -598,7 +612,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
  }
 
  const lightingUniforms = {
-   ...shadow?.uniforms,
+   ...shadow?.uniforms, ...coverUniforms,
    ...(iceDamage ? {freezeProgress: uniforms.freezeProgress, iceDamageMap: uniforms.iceDamageMap,
     iceDamageBounds: uniforms.iceDamageBounds, iceHasDamage: uniforms.iceHasDamage} : {}),
    causticMap: uniforms.causticMap, rippleBounds: uniforms.rippleBounds,
@@ -634,7 +648,7 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
      reflectedLight.directDiffuse *= pondFocus;
      reflectedLight.directSpecular *= pondFocus;`);
   };
-  mat.customProgramCacheKey = () => `${cacheKey}|pond-caustics:${Boolean(shadow)}:${Boolean(iceDamage)}`;
+  mat.customProgramCacheKey = () => `${cacheKey}|pond-caustics:${Boolean(shadow)}:${covers.length}:${Boolean(iceDamage)}`;
   mat.needsUpdate = true;
   litMaterials.add(mat);
   return mat;

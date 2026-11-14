@@ -44,7 +44,7 @@ const ground = {
 };
 const probes = createLightProbes({ground}), rig = createLightRig({shadows: {renderer, translucent: true}}), shadows = createSunShadows({renderer, translucent: true});
 const stage = createBasicStage({scene, ground: false, ambient: probes.ambient, lights: rig.lights, sun: shadows.sun});
-const volumetric = createVolumetricLight({renderer, sunShadows: shadows, rig}), air = {on: true};
+const volumetric = createVolumetricLight({renderer, sun: shadows.sun, rig}), air = {on: true};
 
 const groundGeometry = new THREE.PlaneGeometry(GROUND.size, GROUND.size, GROUND.cells, GROUND.cells).rotateX(-Math.PI / 2);
 const position = groundGeometry.attributes.position;

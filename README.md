@@ -278,7 +278,7 @@ both.
 
 ### Volumetric light
 
-`createVolumetricLight({renderer, sunShadows, rig, ...VOLUMETRIC_DEFAULTS})` lights the air. One pass marches each view
+`createVolumetricLight({renderer, sun, rig, ...VOLUMETRIC_DEFAULTS})` lights the air. One pass marches each view
 ray through a thin fog (`density` per metre, optionally thinning with height) and adds up what the air sends toward the
 camera: the sun through the cascades (shafts between the shadows, tinted by glass), the rig's point and spot lights
 (cones and halos, with their shadows) and the sky. `anisotropy` is how much the air scatters onward: bright looking
@@ -286,10 +286,10 @@ into a light. The march runs at `scale` (0.5) of the screen with `steps` (24) sa
 the sky; each of the rig's lights gets `lightSteps` (8) samples of its own on the stretch of the ray within its cutoff
 distance, where it actually lights the air, and brings `lightDensity` of air with it (thinning toward the cutoff by
 `lightDensityFalloff`), so beams and halos show even with `density` 0. The result is laid back over the scene along its depth edges, smoothed
-over the dither that hides the steps. `sunShadows` and `rig` are both optional.
+over the dither that hides the steps. `sun` (one [sun cover](#sun-covers) or a list) and `rig` are both optional.
 
 ```js
-const volumetric = createVolumetricLight({renderer, sunShadows: shadows, rig});
+const volumetric = createVolumetricLight({renderer, sun: shadows.sun, rig});
 // each frame, after the shadows, in place of renderer.render(scene, camera):
 volumetric.render(scene, camera, environment);   // core environment: stage.environment, view.environment
 ```
@@ -297,6 +297,24 @@ volumetric.render(scene, camera, environment);   // core environment: stage.envi
 It draws the scene into its own target first, so the canvas antialiasing does not apply to that frame; a pass that
 already holds the scene hands it over instead: `render(scene, camera, environment, {color, depth})`. Every setting is
 live in `volumetric.settings`.
+
+**In a chain of passes.** `capture(scene, camera, environment, input)` draws the same frame into a texture of the pass
+and returns `{color, depth, airLit: true}`, the input the next pass takes: `view.render(volumetric.capture(...))` lets the
+weather draw its fog bank and rainbow over it, and leave the sun's shafts to the volumetric pass. The air ends at the
+water: an input with `waterPlane` (and `waterDistance`), as the water composites give, stops the march there.
+
+### Sun covers
+
+Everything that stands between the sun and a place is a sun cover: `{glsl, uniforms, read, air?}` (`src/core/lighting.js`).
+`createLighting({sun})`, `createBasicStage({sun})`, `createVolumetricLight({sun})` and the pond
+(`createChannelSurface({sun})`: its underwater shafts and caustics) take one or a list, and multiply them. The kit has
+two: `shadows.sun` (the sun shadows) and `view.sunCover` (the weather's clouds, from its cloud shadow map).
+
+```js
+const sun = [shadows.sun, view.sunCover];
+const lighting = createLighting({sun});                          // trees, hedges, coast: shaded by both
+const volumetric = createVolumetricLight({renderer, sun});       // shafts under the clouds and between the casters
+```
 
 ### Light slots
 

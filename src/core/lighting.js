@@ -35,11 +35,24 @@ export const LIGHT_LOCAL_GLSL = /* glsl */`
 vec3 lightLocal(vec3 n, vec3 worldPosition, float wrap) { return vec3(0.0); }`;
 
 // The sun at a place in the default hook: `vec3 lightSunVisibility(vec3 worldPosition, vec3 n)`, the share of the
-// sunlight that reaches a surface facing n (per colour: light through tinted glass). Here all of it.
-// createLighting({sun: {glsl, uniforms}}) swaps it for a real one (the sun shadows of the lighting module). It
-// multiplies the sunVisibility a material passes itself.
+// sunlight that reaches a surface facing n (per colour: light through tinted glass). Here all of it. It multiplies
+// the sunVisibility a material passes itself. createLighting({sun}) builds a real one from sun covers: everything
+// that stands between the sun and a place. A sun cover is {glsl, uniforms, read, air?}: its GLSL (written so that it
+// may come twice in a shader), and `read`, a GLSL expression of worldPosition and n giving the vec3 share of the
+// sunlight it lets through; `air`, the same for a point of the air (of worldPosition alone, cheap: it is read at every
+// step of a march), defaults to `read` with no normal. One cover or a list: the sun shadows of the lighting module,
+// the cloud cover of the weather.
 export const LIGHT_SUN_GLSL = /* glsl */`
 vec3 lightSunVisibility(vec3 worldPosition, vec3 n) { return vec3(1.0); }`;
+export function sunCovers(sun) {
+  const covers = sun === undefined ? [] : Array.isArray(sun) ? sun : [sun];
+  for (const cover of covers) {
+    if (typeof cover?.glsl !== 'string' || typeof cover.uniforms !== 'object' || typeof cover.read !== 'string') throw Error('A sun cover needs glsl, uniforms and read');
+  }
+  return covers;
+}
+const sunGLSL = covers => covers.map(cover => cover.glsl).join('\n') + `
+vec3 lightSunVisibility(vec3 worldPosition, vec3 n) { return ${covers.map(cover => `(${cover.read})`).join(' * ')}; }`;
 
 export const lightingGLSL = (ambient = LIGHT_AMBIENT_GLSL, lights = LIGHT_LOCAL_GLSL, sun = LIGHT_SUN_GLSL) => /* glsl */`
 uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uHemiSky; uniform vec3 uHemiGround;
@@ -86,12 +99,15 @@ export function createLightingUniforms(options = {}) {
 }
 
 // options: LIGHTING_DEFAULTS overrides, `ambient: {glsl, uniforms}` (see LIGHT_AMBIENT_GLSL),
-// `lights: {glsl, uniforms}` (see LIGHT_LOCAL_GLSL) and `sun: {glsl, uniforms}` (see LIGHT_SUN_GLSL).
+// `lights: {glsl, uniforms}` (see LIGHT_LOCAL_GLSL) and `sun`: one sun cover or a list of them (see LIGHT_SUN_GLSL).
 export function createLighting({ambient, lights, sun, ...options} = {}) {
-  for (const [name, part] of [['ambient', ambient], ['lights', lights], ['sun', sun]]) {
+  const covers = sunCovers(sun);
+  for (const [name, part] of [['ambient', ambient], ['lights', lights]]) {
     if (part !== undefined && (typeof part?.glsl !== 'string' || typeof part.uniforms !== 'object')) throw Error(`Lighting ${name} needs glsl and uniforms`);
   }
-  return {glsl: ambient || lights || sun ? lightingGLSL(ambient?.glsl, lights?.glsl, sun?.glsl) : LIGHT_GLSL, uniforms: {...createLightingUniforms(options), ...ambient?.uniforms, ...lights?.uniforms, ...sun?.uniforms}};
+  const uniforms = {...createLightingUniforms(options), ...ambient?.uniforms, ...lights?.uniforms};
+  for (const cover of covers) Object.assign(uniforms, cover.uniforms);
+  return {glsl: ambient || lights || covers.length ? lightingGLSL(ambient?.glsl, lights?.glsl, covers.length ? sunGLSL(covers) : undefined) : LIGHT_GLSL, uniforms};
 }
 
 // Drive the uniforms from ordinary Three lights (e.g. the ones the weather adapter animates) and the scene fog.

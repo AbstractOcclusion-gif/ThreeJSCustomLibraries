@@ -113,7 +113,7 @@ function validate(settings) {
 
 // renderer: the THREE.WebGLRenderer the cascades are drawn with. cascades, resolution and translucent are fixed at creation; the
 // other settings are live in `settings` (set(name, value) checks them).
-// Returns {settings, sun: {glsl, uniforms}, atlas, set(name, value), applyTo(material) -> detach,
+// Returns {settings, sun (a sun cover), atlas, set(name, value), applyTo(material) -> detach,
 // render(scene, camera, sunDirection) -> cascades drawn, dispose()}.
 export function createSunShadows({renderer, ...overrides} = {}) {
   if (typeof renderer?.render !== 'function') throw new TypeError('Sun shadows need a renderer');
@@ -156,7 +156,8 @@ export function createSunShadows({renderer, ...overrides} = {}) {
   }
 
   const shadows = {
-    settings, sun: {uniforms, glsl: glsl + '\nvec3 lightSunVisibility(vec3 worldPosition, vec3 n) { return sunShadowAt(worldPosition, n); }'},
+    // A sun cover (core/lighting.js) for the hook and for the air of a volumetric pass.
+    settings, sun: {uniforms, glsl, read: 'sunShadowAt(worldPosition, n)', air: 'sunShadowInAir(worldPosition)'},
     atlas: depth,
     // Changes a live setting (everything but cascades and resolution).
     set(name, value) {

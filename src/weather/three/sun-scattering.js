@@ -342,7 +342,39 @@ export function createSunScattering(cloudUniforms, sunDirection) {
  const screenCamera = new THREE.Camera();
  const size = new THREE.Vector2();
  const forward = new THREE.Vector3(), sunPoint = new THREE.Vector3();
+ // The cloud shadow map as a sun cover (core/lighting.js): what the clouds let through of the sun at a place, for the
+ // lighting hook and for the air of a volumetric pass. One texture read: the map is drawn by renderCloudShadow().
+ // uWeatherCover: metres the map covers, strength of the shadow (0 = none: night, no clouds drawn).
+ const cover = {
+  uniforms: {uWeatherCoverMap: uniforms.cloudShadowMap, uWeatherCoverCentre: uniforms.shadowCentre, uWeatherCoverSun: uniforms.sunDirection,
+   uWeatherCover: {value: new THREE.Vector2(SHADOW_MAP.cover, 0)}},
+  glsl: `
+   #ifndef WEATHER_SUN_COVER
+   #define WEATHER_SUN_COVER
+   uniform sampler2D uWeatherCoverMap;
+   uniform vec3 uWeatherCoverCentre, uWeatherCoverSun;
+   uniform vec2 uWeatherCover;
+   vec3 weatherSunCover(vec3 p) {
+    if (uWeatherCover.y <= 0.0) return vec3(1.0);
+    vec2 crossing = p.xz - uWeatherCoverSun.xz * ((p.y - uWeatherCoverCentre.y) / uWeatherCoverSun.y);
+    return vec3(mix(1.0, textureLod(uWeatherCoverMap, (crossing - uWeatherCoverCentre.xz) / uWeatherCover.x + .5, 0.0).r, uWeatherCover.y));
+   }
+   #endif`,
+  read: 'weatherSunCover(worldPosition)',
+ };
+ function drawCloudShadow(renderer, camera) {
+  uniforms.shadowCentre.value.setFromMatrixPosition(camera.matrixWorld);
+  renderer.setRenderTarget(shadowTarget);
+  renderer.render(shadowScene, screenCamera);
+ }
  return {
+  cover,
+  // Draws the cloud shadow map around a camera, for the sun cover. The caller restores the render target.
+  renderCloudShadow(renderer, camera) {
+   const autoClear = renderer.autoClear;
+   renderer.autoClear = true;
+   try { drawCloudShadow(renderer, camera); } finally { renderer.autoClear = autoClear; }
+  },
   render(renderer, scene, camera, color, strength, haze, rays, glare, fogColor, sunColor, sunStrength, banks, shape, offset, time, wakeHead, wakeTail, bow, input) {
    if (!input) {
     renderer.getDrawingBufferSize(size);
@@ -386,11 +418,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    try {
     renderer.setScissorTest(false);
     renderer.autoClear = true;
-    if (strength > 0 || sunStrength > 0) {
-     uniforms.shadowCentre.value.setFromMatrixPosition(camera.matrixWorld);
-     renderer.setRenderTarget(shadowTarget);
-     renderer.render(shadowScene, screenCamera);
-    }
+    if (strength > 0 || sunStrength > 0) drawCloudShadow(renderer, camera);
     if (!input) {
      renderer.setRenderTarget(target);
      renderer.render(scene, camera);

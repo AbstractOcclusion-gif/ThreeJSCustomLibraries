@@ -342,18 +342,18 @@ test('with translucent shadows a transparent caster tints the light: a second dr
 test('volumetric light marches the air with the parts it is given and lays it over the scene', () => {
  const renderer = recordingRenderer(), shadows = createSunShadows({renderer, translucent: true}), rig = createLightRig({shadows: {renderer}});
  assert.throws(() => createVolumetricLight(), TypeError);
- assert.throws(() => createVolumetricLight({renderer, rig: {}}), TypeError); assert.throws(() => createVolumetricLight({renderer, sunShadows: {}}), TypeError);
+ assert.throws(() => createVolumetricLight({renderer, rig: {}}), TypeError); assert.throws(() => createVolumetricLight({renderer, sun: {}}), /sun cover/);
  for (const bad of [{steps: 65}, {steps: 2.5}, {lightSteps: 0}, {scale: 0}, {anisotropy: 1}, {density: -1}]) assert.throws(() => createVolumetricLight({renderer, ...bad}), RangeError);
  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(45, 4 / 3, .1, 400), environment = createEnvironment();
  const drawn = [];
  renderer.render = (what, view) => drawn.push({scene: what === scene, material: what.children[0]?.material});
  // Each part is optional: the march reads the sun shadows and the rig only when it has them.
- const plain = createVolumetricLight({renderer}), full = createVolumetricLight({renderer, sunShadows: shadows, rig, density: .01, steps: 16, scale: .25});
+ const plain = createVolumetricLight({renderer}), full = createVolumetricLight({renderer, sun: shadows.sun, rig, density: .01, steps: 16, scale: .25});
  plain.render(scene, camera, environment); full.render(scene, camera, environment);
  const [plainMarch, fullMarch, composite] = [drawn[1].material, drawn[4].material, drawn[5].material];
  assert.deepEqual(drawn.map(draw => draw.scene), [true, false, false, true, false, false]);   // the scene, the march, the composite
  assert.ok(!plainMarch.fragmentShader.includes('sunShadowInAir(p)') && !plainMarch.fragmentShader.includes('volumeRigLights(origin'));
- assert.ok(fullMarch.fragmentShader.includes('light += sunInAir * sunShadowInAir(p);') && fullMarch.fragmentShader.includes('lightShadowRead(uRigCaster[i], p, vec3(0.0), 0)'));
+ assert.ok(fullMarch.fragmentShader.includes('light += sunInAir * (sunShadowInAir(worldPosition));') && fullMarch.fragmentShader.includes('lightShadowRead(uRigCaster[i], p, vec3(0.0), 0)'));
  assert.equal(fullMarch.uniforms.uSunShadowAtlas, shadows.sun.uniforms.uSunShadowAtlas); assert.equal(fullMarch.uniforms.uRigCount, rig.lights.uniforms.uRigCount);
  // The air takes the sun and the sky of the environment, and the march runs at its share of the screen.
  assert.deepEqual(fullMarch.uniforms.uVolumeSun.value.toArray(), environment.sun.color.toArray());
@@ -368,4 +368,27 @@ test('volumetric light marches the air with the parts it is given and lays it ov
  assert.throws(() => full.render(scene, camera, {}), TypeError); assert.throws(() => full.render(scene, new THREE.OrthographicCamera(), environment), TypeError);
  plain.dispose(); full.dispose(); drawn.length = 0; full.render(scene, camera, environment); assert.equal(drawn.length, 0);
  shadows.dispose(); rig.dispose();
+});
+
+test('sun covers multiply in the hook and in the air, and a volumetric pass stops at the water and hands its frame on', () => {
+ const renderer = recordingRenderer(), shadows = createSunShadows({renderer});
+ const clouds = {glsl: 'uniform float uCloud;\nvec3 cloudCover(vec3 p) { return vec3(uCloud); }', uniforms: {uCloud: {value: .5}}, read: 'cloudCover(worldPosition)'};
+ const lighting = createLighting({sun: [shadows.sun, clouds]});
+ assert.ok(lighting.glsl.includes('return (sunShadowAt(worldPosition, n)) * (cloudCover(worldPosition));') && lighting.uniforms.uCloud === clouds.uniforms.uCloud);
+ assert.throws(() => createLighting({sun: [{glsl: '', uniforms: {}}]}), /sun cover/);
+ const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(), environment = createEnvironment(), drawn = [];
+ renderer.render = what => drawn.push(what === scene ? 'scene' : what.children[0].material);
+ const volumetric = createVolumetricLight({renderer, sun: [shadows.sun, clouds]});
+ // In the air a cover is read its cheap way when it has one.
+ const targets = []; renderer.setRenderTarget = target => targets.push(target);
+ const frame = volumetric.capture(scene, camera, environment, {waterPlane: new THREE.Vector4(0, 1, 0, -2)});
+ const march = drawn[1];
+ assert.ok(march.fragmentShader.includes('light += sunInAir * (sunShadowInAir(worldPosition)) * (cloudCover(worldPosition));'));
+ assert.deepEqual(march.uniforms.uVolumeWater.value.toArray(), [0, 1, 0, -2]); assert.deepEqual(march.uniforms.uVolumeHasWater.value.toArray(), [1, 0]);
+ // The frame goes into a texture of the pass, with what the next pass needs to know.
+ assert.ok(frame.airLit && frame.color.isTexture && frame.depth.isDepthTexture && frame.waterPlane.w === -2);
+ assert.equal(targets[2].texture, frame.color);
+ volumetric.render(scene, camera, environment);
+ assert.deepEqual(march.uniforms.uVolumeHasWater.value.toArray(), [0, 0]);
+ volumetric.dispose(); shadows.dispose(); assert.equal(volumetric.capture(scene, camera, environment), null);
 });
