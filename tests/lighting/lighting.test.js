@@ -373,10 +373,13 @@ test('volumetric light marches the air with the parts it is given and lays it ov
 test('sun covers multiply in the hook and in the air, and a volumetric pass stops at the water and hands its frame on', () => {
  const renderer = recordingRenderer(), shadows = createSunShadows({renderer});
  const clouds = {glsl: 'uniform float uCloud;\nvec3 cloudCover(vec3 p) { return vec3(uCloud); }', uniforms: {uCloud: {value: .5}}, read: 'cloudCover(worldPosition)'};
- const lighting = createLighting({sun: [shadows.sun, clouds]});
+ const environment = createEnvironment();
+ const lighting = createLighting({sun: [shadows.sun, clouds], environment});
+ assert.equal(lighting.uniforms.uSunDir.value, environment.sun.direction);
+ assert.equal(lighting.uniforms.uSunColor.value, environment.sun.color);
  assert.ok(lighting.glsl.includes('return (sunShadowAt(worldPosition, n)) * (cloudCover(worldPosition));') && lighting.uniforms.uCloud === clouds.uniforms.uCloud);
  assert.throws(() => createLighting({sun: [{glsl: '', uniforms: {}}]}), /sun cover/);
- const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(), environment = createEnvironment(), drawn = [];
+ const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(), drawn = [];
  renderer.render = what => drawn.push(what === scene ? 'scene' : what.children[0].material);
  const volumetric = createVolumetricLight({renderer, sun: [shadows.sun, clouds]});
  // In the air a cover is read its cheap way when it has one.
@@ -388,6 +391,13 @@ test('sun covers multiply in the hook and in the air, and a volumetric pass stop
  // The frame goes into a texture of the pass, with what the next pass needs to know.
  assert.ok(frame.airLit && frame.color.isTexture && frame.depth.isDepthTexture && frame.waterPlane.w === -2);
  assert.equal(targets[2].texture, frame.color);
+ const water = new THREE.Texture(), held = {color: new THREE.Texture(), depth: new THREE.DepthTexture(), waterPlane: frame.waterPlane, waterDistance: water};
+ drawn.length = 0;
+ const oceanFrame = volumetric.capture(scene, camera, environment, held);
+ assert.equal(drawn.length, 2, 'reuses the composed water frame');
+ assert.equal(oceanFrame.waterDistance, water);
+ assert.equal(oceanFrame.depth, held.depth);
+ assert.equal(march.uniforms.uVolumeSun.value, environment.sun.color);
  volumetric.render(scene, camera, environment);
  assert.deepEqual(march.uniforms.uVolumeHasWater.value.toArray(), [0, 0]);
  volumetric.dispose(); shadows.dispose(); assert.equal(volumetric.capture(scene, camera, environment), null);

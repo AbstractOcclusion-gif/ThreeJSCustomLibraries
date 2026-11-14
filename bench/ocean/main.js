@@ -28,7 +28,7 @@ ocean.setEnvironment(stage.environment);
 const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);
 const probes = new SurfaceProbes(ocean.fft, 3, {wake: ocean.wake}), probeStep = 2;
-const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics});
+const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics, sky: sky.uniforms});
 const ray = new THREE.Raycaster(), impact = new THREE.Vector3();
 const meanSea = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const rippleGesture = bindRippleGesture(renderer.domElement, controls, event => {
@@ -71,9 +71,7 @@ startFrameLoop(renderer, (dt, now) => {
   const height = valid ? a.height + slopeX * (x - a.x) + slopeZ * (z - a.z) : 0;
   const opaque = ocean.captureScene(scene, camera, {waterType: view.waterType});
   const water = ocean.captureWater(waterScene, camera);
-  const light = sky.uniforms;
-  waterline.renderLayers(opaque, water, camera, {height, slopeX, slopeZ, waterType: view.waterType, clarity: s.clarity, godRays: view.godRays,
-    sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
+  waterline.renderLayers(opaque, water, camera, {height, slopeX, slopeZ, waterType: view.waterType, clarity: s.clarity, godRays: view.godRays});
   if (now - lastUI > STATUS_REFRESH_MS) {
     lastUI = now;
     const {fft, clipmap} = ocean;

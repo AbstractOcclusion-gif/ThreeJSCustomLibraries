@@ -55,6 +55,7 @@ varying vec2 vUv;
 ${VIEW_GLSL}
 uniform mat4 uCameraWorld;
 uniform vec3 uVolumeSun, uVolumeSunDirection, uVolumeAmbient, uVolumeColor;
+uniform float uVolumeSunStrength;
 uniform vec4 uVolumeMedium;   // density (1 / m), base height (m), height falloff (m, 0 = none), anisotropy
 uniform vec4 uVolumeMarch;    // distance (m), steps, strength of the rig's lights, steps for each of them
 uniform vec2 uVolumeLightAir; // air the rig's lights bring with them: density (1 / m), falloff toward their cutoff
@@ -165,7 +166,7 @@ void main() {
   // Only the air is marched: the ray stops where it enters the water, or starts where it leaves it.
   if (uVolumeHasWater.x > 0.5) {
     float side = dot(uVolumeWater.xyz, origin) + uVolumeWater.w, slope = dot(uVolumeWater.xyz, ray);
-    if (side >= 0.0) { if (slope < -0.00001) end = min(end, -side / slope); }
+    if (side >= 0.0) { if (uVolumeHasWater.y < 0.5 && slope < -0.00001) end = min(end, -side / slope); }
     else begin = slope > 0.00001 ? min(-side / slope, end) : end;
     if (side >= 0.0 && uVolumeHasWater.y > 0.5) {
       float water = texture2D(tVolumeWater, vUv).a;
@@ -173,7 +174,7 @@ void main() {
     }
   }
   float jitter = volumeNoise(gl_FragCoord.xy);
-  vec3 sunInAir = uVolumeSun * volumePhase(dot(ray, uVolumeSunDirection), uVolumeMedium.w);
+  vec3 sunInAir = uVolumeSun * (uVolumeSunStrength * volumePhase(dot(ray, uVolumeSunDirection), uVolumeMedium.w));
   vec3 scattered = vec3(0.0);
   float transmittance = 1.0, previous = 0.0;
   int steps = int(uVolumeMarch.y);
@@ -255,7 +256,7 @@ export function createVolumetricLight({renderer, sun, rig, ...overrides} = {}) {
   const view = {tDepth: {value: depth}, uInverseProjection: {value: new THREE.Matrix4()}};
   const marchUniforms = {
     ...view, uCameraWorld: {value: new THREE.Matrix4()},
-    uVolumeSun: {value: new THREE.Color()}, uVolumeSunDirection: {value: new THREE.Vector3(0, 1, 0)}, uVolumeAmbient: {value: new THREE.Color()},
+    uVolumeSun: {value: null}, uVolumeSunDirection: {value: null}, uVolumeSunStrength: {value: settings.sun}, uVolumeAmbient: {value: new THREE.Color()},
     uVolumeColor: {value: new THREE.Color()}, uVolumeMedium: {value: new THREE.Vector4()}, uVolumeMarch: {value: new THREE.Vector4()}, uVolumeLightAir: {value: new THREE.Vector2()},
     uVolumeWater: {value: new THREE.Vector4()}, tVolumeWater: {value: null}, uVolumeHasWater: {value: new THREE.Vector2()},
     ...rig?.lights.uniforms,
@@ -314,8 +315,9 @@ export function createVolumetricLight({renderer, sun, rig, ...overrides} = {}) {
     camera.updateMatrixWorld();
     view.uInverseProjection.value.copy(camera.projectionMatrixInverse); marchUniforms.uCameraWorld.value.copy(camera.matrixWorld);
     view.tDepth.value = input?.depth ?? depth; compositeUniforms.tScene.value = input?.color ?? sceneTarget.texture;
-    marchUniforms.uVolumeSun.value.copy(environment.sun.color).multiplyScalar(sun);
-    marchUniforms.uVolumeSunDirection.value.copy(environment.sun.direction);
+    marchUniforms.uVolumeSun.value = environment.sun.color;
+    marchUniforms.uVolumeSunDirection.value = environment.sun.direction;
+    marchUniforms.uVolumeSunStrength.value = sun;
     marchUniforms.uVolumeAmbient.value.copy(environment.ambient.sky).multiplyScalar(ambient * ISOTROPIC);
     marchUniforms.uVolumeColor.value.set(color);
     marchUniforms.uVolumeMedium.value.set(density, heightBase, heightFalloff, anisotropy);

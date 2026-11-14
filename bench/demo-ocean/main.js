@@ -4,6 +4,8 @@ import {createBenchPanel} from '../panel.js';
 import {BOAT_DEFAULTS, BUOYANCY_DEFAULTS, FoamTrail, createOceanSurface, createWaterlineComposite, SurfaceProbes, skyFromWeather} from '../../src/water/index.js';
 import {OceanCoastTerrain} from '../../src/terrain/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
+import {createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
+import {createShadowReceivers} from '../kit/shadow-receivers.js';
 import {createParticleDepthBinding, createWaterSpray, Motes} from '../../src/particles/water/index.js';
 import {createOceanFloat} from './float.js';
 import {createDemoLife} from '../kit/life.js';
@@ -29,15 +31,22 @@ const controls = new OrbitControls(camera, renderer.domElement); controls.target
 controls.minDistance = 12; controls.maxDistance = 165; controls.maxPolarAngle = Math.PI * .495; controls.enablePan = false; controls.update();
 controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
 const weather = await createBenchWeather({scene, renderer, camera, initial: 'cloudy 1', hour: 15});
+const environment = weather.view.environment;
+const OCEAN_LIGHT = Object.freeze({shadowDistance: 360, airDensity: .0015, receiverScanSeconds: 2});
+const shadows = createSunShadows({renderer, distance: OCEAN_LIGHT.shadowDistance});
+const sunCover = [shadows.sun, weather.view.sunCover];
+const volumetric = createVolumetricLight({renderer, sun: sunCover, density: OCEAN_LIGHT.airDensity});
+const shadowReceivers = createShadowReceivers(scene, shadows, weather.view);
+const lightSettings = {volumetric: true};
 const {aquariumAssets, sheetBase, laceTexture} = await loadOceanLace();
-const ocean = createOceanSurface({renderer, sky: skyFromWeather(weather.view), caustics: {}, wake: {}, exclusion: true, laceTexture});
+const ocean = createOceanSurface({renderer, sky: skyFromWeather(weather.view), caustics: {}, wake: {}, exclusion: true, laceTexture, sun: sunCover});
 const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);
-const terrainLighting = createLighting();
+const terrainLighting = createLighting({sun: sunCover, environment});
 const ISLAND_CENTRE = [0, -220], PLANT_GUST = .4;
 const coast = new OceanCoastTerrain({scene, settings: {centerX: ISLAND_CENTRE[0], centerZ: ISLAND_CENTRE[1]}, water: ocean.shoreBinding, onHeightField: ocean.setShore, lighting: terrainLighting});
 // One environment for everything: the weather fills it, the ocean, plants, fire, smoke and spray read it.
-const environment = weather.view.environment; environment.wind.gust = PLANT_GUST;
+environment.wind.gust = PLANT_GUST;
 ocean.setEnvironment(environment);
 const groundAt = (x, z) => coast.collisionHeightAt(x, z);
 // Demo layout, metres. Plant lines are ground heights above mean sea: nothing grows on the wave-washed beach below them.
@@ -55,7 +64,7 @@ const shots = createCameraShots({camera, controls, shots: {
   bridge: {radius: 62, height: 14, speed: .15, target: structures.bridgeCentre},
 }});
 const probes = new SurfaceProbes(ocean.fft, 3, {wake: ocean.wake}), probeStep = 2;
-const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics});
+const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics, sky: weather.view.uniforms});
 const postColor = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthBuffer: false});
 const waterPlane = new THREE.Vector4();
 const fxScene = new THREE.Scene();
@@ -142,6 +151,7 @@ islandActions.add(structures, 'hangRope').name('Hang a new rope');
 islandActions.add(structures, 'fireAtBridge').name('Fire at the bridge');
 islandActions.add(structures, 'buildBridge').name('Rebuild the bridge');
 shots.addTo(islandActions);
+gui.addFolder('Light').add(lightSettings, 'volumetric').name('Volumetric light');
 sprayControls(gui, {spray, depth: fxDepth}).close();
 const wf = mountWeatherControls(weather);
 const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanDemoControls(gui, {
@@ -150,7 +160,7 @@ const {settings: s, view, orbitPosition, disposeTrailTextures} = oceanDemoContro
 });
 
 const unbindResize = bindResize(renderer, camera);
-let lastUI = 0, time = 0;
+let lastUI = 0, time = 0, receiverScan = OCEAN_LIGHT.receiverScanSeconds;
 startFrameLoop(renderer, (dt, now) => {
   probes.collect();
   if (view.waterline) {
@@ -158,9 +168,7 @@ startFrameLoop(renderer, (dt, now) => {
     camera.lookAt(controls.target.x, view.eyeHeight, controls.target.z);
   } else if (!shots.update(dt)) controls.update();
   weather.system.update(dt); weather.view.update(dt);
-  const light = weather.view.uniforms;
-  syncLighting(terrainLighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});   // island lit and fogged like the rest
-  const wind = weather.system.weather;
+  syncLighting(terrainLighting.uniforms, {fog: scene.fog});
   island.update(dt, camera);
   structures.update(dt, camera);
   float.step(dt);
@@ -184,23 +192,27 @@ startFrameLoop(renderer, (dt, now) => {
   const slopeZ = valid ? (c.height - a.height) / probeStep : 0;
   const height = valid ? a.height + slopeX * (x - a.x) + slopeZ * (z - a.z) : 0;
   motes.update(dt, {cameraPosition: camera.position, height, viewportHeight: Math.max(1, ocean.viewport.y)});
+  receiverScan += dt;
+  if (receiverScan >= OCEAN_LIGHT.receiverScanSeconds) { receiverScan = 0; shadowReceivers.update(); }
+  camera.updateMatrixWorld();
+  shadows.render(scene, camera, environment.sun.direction);
   const opaque = ocean.captureScene(scene, camera, {waterType: view.waterType, excludeHulls: boatSettings.excludeHulls});
   const water = ocean.captureWater(waterScene, camera);
-  const useWeatherPost = weather.view.postEnabled;
+  const useWeatherPost = lightSettings.volumetric || weather.view.postEnabled;
   if (useWeatherPost) {
     postColor.setSize(opaque.width, opaque.height);
     renderer.setRenderTarget(postColor);
   }
   try {
-    waterline.renderLayers(opaque, water, camera, {height, slopeX, slopeZ, waterType: view.waterType, clarity: s.clarity, godRays: view.godRays,
-      sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
+    waterline.renderLayers(opaque, water, camera, {height, slopeX, slopeZ, waterType: view.waterType, clarity: s.clarity, godRays: view.godRays});
   } finally {
     if (useWeatherPost) renderer.setRenderTarget(null);
   }
   const n = waterline.uniforms.uPlaneN.value;
   waterPlane.set(n.x, n.y, n.z, waterline.uniforms.uPlaneD.value);
   if (useWeatherPost) {
-    weather.view.render({color: postColor.texture, depth: opaque.depthTexture, waterDistance: water.texture, waterPlane});
+    const frame = {color: postColor.texture, depth: opaque.depthTexture, waterDistance: water.texture, waterPlane};
+    weather.view.render(lightSettings.volumetric ? volumetric.capture(scene, camera, environment, frame) : frame);
   }
   const autoClear = renderer.autoClear;
   try {
@@ -238,6 +250,9 @@ onLeave(() => {
   motes.dispose();
   waterline.dispose();
   postColor.dispose();
+  shadowReceivers.dispose();
+  volumetric.dispose();
+  shadows.dispose();
   coast.dispose();
   ocean.dispose();
   laceTexture?.dispose();

@@ -13,7 +13,7 @@ export function skyFromWeather(view, {celestial = true, water = false} = {}) {
 export function proceduralSky(sunDir = new THREE.Vector3(.4, .6, .3).normalize()) {
   const uniforms = createSkyUniforms(sunDir);
   return {glsl: SKY_GLSL, uniforms, defines: {},
-    setSun(direction, color) { uniforms.uSkySunDir.value.copy(direction); uniforms.uSkySun.value.copy(direction); if (color) uniforms.uSunCol.value.copy(color); },
+    setSun(direction, color) { uniforms.uSkySun.value.copy(direction); if (color) uniforms.uSunCol.value.copy(color); },
     // Optional shared environment (core/environment.js): sun direction, light level and daylight in one call per frame.
     setEnvironment(environment) {
       this.setSun(environment.sun.direction);

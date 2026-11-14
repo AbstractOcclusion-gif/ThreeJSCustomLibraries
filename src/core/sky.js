@@ -19,7 +19,7 @@ export const SKY_GLSL = /* glsl */`
 #ifndef SKY_HOST_UNIFORMS
 uniform vec3 uSunCol, uAmb; uniform int uSky;
 #endif
-uniform float uSkyDyn, uEnvI, uEnvRot, uNightBlend, uDaylight; uniform vec3 uSkySunDir, uSkySun;   // uSkySun: every sky mode, the water shaders read it
+uniform float uSkyDyn, uEnvI, uEnvRot, uNightBlend, uDaylight; uniform vec3 uSkySun;   // astronomical sun shared with water
 #ifndef SKY_DYNAMIC_ONLY
 uniform sampler2D tEnv;
 #ifdef SKY_WEATHER_HDR
@@ -146,7 +146,7 @@ vec3 clearGradient(vec3 d, float s){ float y = max(d.y, 0.0); return mix(vec3(0.
 #ifdef SKY_WEATHER_HDR
 vec3 rawDaySky(vec3 d, float sunMul){
   if (uSky == 7) return min(texture2D(tEnv, skyUv(d)).rgb, vec3(${HDR_MAX_RADIANCE.toFixed(1)}));
-  float s = max(dot(d, uSkySunDir), 0.0);
+  float s = max(dot(d, uSkySun), 0.0);
   return clearGradient(d, s) + vec3(1.0, 0.96, 0.9) * pow(s, 900.0) * 12.0 * sunMul; }
 vec3 weatherDaySky(vec3 d, float sunMul){
   vec3 clear = rawDaySky(d, sunMul);
@@ -194,7 +194,7 @@ vec3 sky(vec3 d, float sunMul){
 #endif
     // the weather veil (fishing/weather.js): the photo sky blends toward the state's sky colour, brighter at the zenith, so background and reflections agree
     return mix(h, uSkyVeilCol * mix(0.75, 1.0, max(r.y, 0.0)), uSkyVeil); }
-  float y = max(d.y, 0.0), s = max(dot(d, uSkySunDir), 0.0); vec3 c;
+  float y = max(d.y, 0.0), s = max(dot(d, uSkySun), 0.0); vec3 c;
   if (uSky == 0) c = clearGradient(d, s);
   else if (uSky == 1) c = mix(vec3(1.0,0.5,0.25), vec3(0.18,0.16,0.4), pow(y, 0.35)) + vec3(1.0,0.45,0.15) * pow(s, 4.0) * 0.8;
   else if (uSky == 2) c = mix(vec3(0.66,0.68,0.7), vec3(0.48,0.5,0.55), y);
@@ -232,7 +232,8 @@ const DOME_SEGMENTS = [32, 16];               // sphere width x height segments
 // sunDir: the page's live sun direction. uSkyMode is JS-side state for the ocean's GUI / presets (0 procedural, 1 hdr, 2 dynamic);
 // the shader reads uSky / uSkyDyn, which the page derives from it.
 export function createSkyUniforms(sunDir) {
-  return { uSunDir: { value: sunDir }, uSkySun: { value: sunDir }, uSkySunDir: { value: sunDir.clone() }, uSunCol: { value: new THREE.Color(...CLEAR_NOON_SUN) }, uAmb: { value: new THREE.Color().setScalar(SKY_UNIFORM_DEFAULTS.ambient) },
+  const direction = {value: sunDir};
+  return { uSunDir: direction, uSkySun: direction, uSkySunDir: direction, uSunCol: { value: new THREE.Color(...CLEAR_NOON_SUN) }, uAmb: { value: new THREE.Color().setScalar(SKY_UNIFORM_DEFAULTS.ambient) },
     uSkyMode: { value: 0 }, uSky: { value: 0 }, uSkyDyn: { value: 0 }, uDaylight: { value: 1 }, tEnv: { value: null }, tEnvB: { value: null },
     tDynamicSky: { value: null }, tDynamicSkyPrev: { value: null }, uDynamicSkyBlend: { value: 1 },
     tMoon: { value: null }, tStars: { value: null }, tGalaxy: { value: null }, uMoonDir: { value: new THREE.Vector3(0, 1, 0) }, uMoonOn: { value: 1 }, uMoonPhase: { value: SKY_UNIFORM_DEFAULTS.moonPhase }, uMoonRadius: { value: SKY_UNIFORM_DEFAULTS.moonRadius },

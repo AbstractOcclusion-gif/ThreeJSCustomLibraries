@@ -11,6 +11,7 @@ import { SprayPump } from '../../particles/water/spray-pump.js';
 import { OCEAN_CAUSTIC_GLSL } from './caustics.js';
 import { SurfaceProbes } from './surface-sampler.js';
 import { configureTexture } from '../../core/data-texture.js';
+import { addLightSlot } from '../../core/light-slots.js';
 
 // Asset conventions (read off the file, see the batch notes): Z-up, Y-forward, centimetres, LOD0..3 + a UCX collision hull,
 // two material slots (hull, outboard motor; the motor maps are the shared "BoatsCommon" set shipped with Motorboat02).
@@ -64,19 +65,20 @@ export class Boat {
         roughnessMap: tex(base,'R'), metalnessMap: tex(base,'MT'), metalness: 1, roughness: 1});
       this.owned.add(m);
       const {caustics, exclusion} = this.ocean;
-      if (caustics && exclusion) m.onBeforeCompile = sh => {
-        Object.assign(sh.uniforms, caustics.uniforms, exclusion.uniforms);
-        sh.vertexShader = 'varying vec3 vHullWorld;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n vHullWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-        sh.fragmentShader = ('varying vec3 vHullWorld; uniform sampler2D tExclusionFront; uniform float uExclusionOn; uniform vec2 uExclusionSize;\n' + sh.fragmentShader)
-          .replace('#include <packing>', '#include <packing>\n' + OCEAN_CAUSTIC_GLSL)
-          .replace('#include <lights_fragment_begin>', '#include <lights_fragment_begin>\n { float lid = uExclusionOn > .5 ? texture2D(tExclusionFront, gl_FragCoord.xy / uExclusionSize).r : 1.0; float k = lid < gl_FragCoord.z - 1e-4 ? 1.0 : causticLight(vHullWorld); reflectedLight.directDiffuse *= k; reflectedLight.directSpecular *= k; }');
-      };
+      if (caustics && exclusion) addLightSlot(m, {
+        key: 'boat-caustics', worldPosition: true, uniforms: {...caustics.uniforms, ...exclusion.uniforms},
+        declarations: `uniform sampler2D tExclusionFront; uniform float uExclusionOn; uniform vec2 uExclusionSize;\n${OCEAN_CAUSTIC_GLSL}`,
+        after: `float lid = uExclusionOn > .5 ? texture2D(tExclusionFront, gl_FragCoord.xy / uExclusionSize).r : 1.0;
+          float focus = lid < gl_FragCoord.z - 1e-4 ? 1.0 : causticLight(vLightWorld);
+          reflectedLight.directDiffuse *= focus;
+          reflectedLight.directSpecular *= focus;`,
+      });
       return m;
     };
     const materials = [pbr(BOAT_ASSET.hullTex), pbr(BOAT_ASSET.motorTex)];
     let lod0 = null, lid = null, shell = null;
     fbx.traverse(o => { if (!o.isMesh) return; o.visible = o.name === BOAT_ASSET.lod0; if (o.name === BOAT_ASSET.exclusionLid) lid = o; if (o.name === BOAT_ASSET.exclusionShell) shell = o;
-      if (o.visible) { lod0 = o; o.castShadow = true; o.material = Array.isArray(o.material) ? o.material.map((_, i) => materials[Math.min(i, materials.length - 1)]) : materials[0]; } });
+      if (o.visible) { lod0 = o; o.castShadow = o.receiveShadow = true; o.material = Array.isArray(o.material) ? o.material.map((_, i) => materials[Math.min(i, materials.length - 1)]) : materials[0]; } });
     if (!lod0) throw new Error(`boat: mesh ${BOAT_ASSET.lod0} not found in ${BOAT_ASSET.fbx}`);
     if (!lid || !shell) throw new Error(`boat: exclusion meshes ${BOAT_ASSET.exclusionLid} / ${BOAT_ASSET.exclusionShell} not found in ${BOAT_ASSET.fbx}`);
     this.exclusionLid = lid; this.exclusionShell = shell;   // dry-interior exclusion volumes (invisible, follow the boat)

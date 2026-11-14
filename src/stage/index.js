@@ -53,7 +53,7 @@ export function createBasicStage({scene, sky = true, ground = true, shadows = fa
     }
     environment.ambient.ground.copy(hemi.groundColor).multiplyScalar(hemi.intensity);
     environment.light.setScalar(level); environment.daylight = level;
-    if (skyUniforms) { skyUniforms.uSkySunDir.value.copy(direction); skyUniforms.uSunCol.value.setRGB(...CLEAR_NOON_SUN).multiplyScalar(level); skyUniforms.uDaylight.value = level; }
+    if (skyUniforms) { skyUniforms.uSunCol.value.setRGB(...CLEAR_NOON_SUN).multiplyScalar(level); skyUniforms.uDaylight.value = level; }
     syncLighting(lighting.uniforms, {sun, hemi, fog: scene.fog});
   }
   const stage = {

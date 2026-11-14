@@ -21,6 +21,7 @@ import {createLightRig, createSunShadows, createVolumetricLight} from '../../src
 import {createCameraShots} from '../kit/shots.js';
 import {createDemoLife} from '../kit/life.js';
 import {createDemoStructures} from '../kit/structures.js';
+import {createShadowReceivers} from '../kit/shadow-receivers.js';
 import {grassControls} from '../vegetation/controls.js';
 import {splashControls, sprayControls} from '../particles/controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
@@ -53,22 +54,7 @@ const volumetric = createVolumetricLight({renderer, sun: sunCover, rig: lightRig
 volumetric.set('sun', AIR.sunStrength);
 const lightSettings = {volumetric: true};
 // Every lit Three material on a mesh that receives shadows takes the cascades (as Three's own shadow map did).
-const shadowReceivers = new Map();
-function receiveSunShadows() {
- const present = new Set();
- scene.traverse(object => {
-  if (!object.isMesh || !object.receiveShadow) return;
-  for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-   if (!(material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial)) continue;
-   present.add(material);
-   if (shadowReceivers.has(material)) continue;
-   const removeCloud = material.isMeshStandardMaterial && weather.view.addCloudShadowReceiver(material);
-   const removeSun = sunShadows.applyTo(material), removeLocal = lightRig.applyTo(material);
-   shadowReceivers.set(material, () => { if (removeCloud) removeCloud(); removeSun(); removeLocal(); });
-  }
- });
- for (const [material, detach] of shadowReceivers) if (!present.has(material)) { detach(); shadowReceivers.delete(material); }
-}
+const shadowReceivers = createShadowReceivers(scene, sunShadows, weather.view, lightRig);
 
 // Free repeatable diagnostic swatches. Alpha is micro-height, never transparency.
 const textureSize = 96;
@@ -175,7 +161,7 @@ const ice = createTerrainIce(field, freezeMap, scene, icePattern);
 // The pond shares the weather capture and uses a procedural moon to fit the WebGL2 minimum of 16 fragment samplers.
 const pond = createChannelSurface({renderer, scene, camera, sky: skyFromWeather(weather.view, {water: true, celestial: false}), ripples, flow, obstacles,
  freezeMap, iceDamage: ice, iceLook: icePattern, foamLayer, captureScale: .4, causticSegments: 280, clipToBed: true, pondOptics: true, sun: sunCover});
-const waterline = createWaterlineComposite(renderer, {caustics: pond.lighting});
+const waterline = createWaterlineComposite(renderer, {caustics: pond.lighting, sky: weather.view.uniforms});
 const sprayScene = new THREE.Scene();
 const waterPlane = new THREE.Vector4(0, 1, 0, 0);
 const splashPosition = new THREE.Vector3();
@@ -279,7 +265,7 @@ function rebuildGrass() {
 rebuildGrass();
 // One environment for everything: the weather fills it; plants, fire, smoke, rope and grass read it.
 const environment = weather.view.environment; environment.wind.gust = .4;
-const demoLighting = createLighting({sun: sunCover, lights: lightRig.lights});
+const demoLighting = createLighting({sun: sunCover, lights: lightRig.lights, environment});
 const groundAt = (x, z) => field.heightAt(x, z) ?? 0;
 // Demo layout, metres: the pond lies around (-8, 2), the camp on the east bank; the bridge runs along the west edge from
 // the south bank up to the cliff, turned so its shots fly in from over the pond.
@@ -454,14 +440,14 @@ startFrameLoop(renderer, (dt, now) => {
  const bedChanged = impacts.update(dt, controlsState.water ? freeze.progress : 0, appearance.waterLevel.value);
  if (bedChanged) { bedHeight.needsUpdate = true; grassDirty = true; }
  if (grassDirty && !impacts.moving) rebuildGrass();
- syncLighting(demoLighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});
+ syncLighting(demoLighting.uniforms, {fog: scene.fog});
  life.update(dt, camera);
  structures.update(dt, camera);
  terrainGrass.update(dt, {camera, environment, transmission: grassSettings.transmission * weather.system.day.daylight,
   lodDistance: grassSettings.lodDistance, farDensity: grassSettings.farDensity,
   shadowDistance: grassSettings.shadowDistance, density: grassSettings.density});
  receiverScan += dt;
- if (receiverScan >= RECEIVER_SCAN_SECONDS) { receiverScan = 0; receiveSunShadows(); }
+ if (receiverScan >= RECEIVER_SCAN_SECONDS) { receiverScan = 0; shadowReceivers.update(); }
  if (ripples.active && (bedChanged || pond.surface.position.y !== appearance.waterLevel.value)) ripples.mask(wetAt);
  pond.surface.position.y = appearance.waterLevel.value;
  const diveFloor = field.heightAt(diveX, diveZ);
@@ -504,8 +490,7 @@ startFrameLoop(renderer, (dt, now) => {
  splash.update(dt);
  foamLayer.update(dt);
  if (diving) {
-  waterline.render(scene, camera, {height: waterLevel, clarity: pondSettings.clarity, godRays: pondSettings.godRays,
-   sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
+  waterline.render(scene, camera, {height: waterLevel, clarity: pondSettings.clarity, godRays: pondSettings.godRays});
  } else {
   // The opaque pond surface supplies the stop depth for rays over the basin. Dry rays keep the scene depth.
   // Underwater, the separate waterline pass above owns the light transport.
@@ -527,8 +512,7 @@ window.allToolsDemo = {scene, camera, renderer, controls, weather, life, structu
 onLeave(() => {
  renderer.setAnimationLoop(null);
  unbindResize();
- for (const detach of shadowReceivers.values()) detach();
- shadowReceivers.clear();
+ shadowReceivers.dispose();
  weather.view.dispose();
  rippleGesture.dispose();
  controls.dispose();

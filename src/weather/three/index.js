@@ -138,7 +138,7 @@ export function createThreeWeather({system,scene,renderer,camera,sun,hemi,lightT
    if(disposed)return;assertFrameTime(dt,'Visual weather');dt=system.paused?0:dt;
    const w=system.weather,d=system.day;camera.getWorldPosition(worldPosition);sunDir.copy(d.sunDir);nightColor.set(d.settings.nightColor);sunTint.setRGB(d.sunTint.r,d.sunTint.g,d.sunTint.b);
    bridge.s.auto=d.settings.auto;bridge.s.hour=d.hour;bridge.daylight=d.daylight;bridge.moonDir.copy(d.moonDir);bridge.moonPhase=d.moonPhase;
-   uniforms.uNightBlend.value=d.night;uniforms.uDaylight.value=d.daylight;uniforms.uSkySunDir.value.copy(sunDir);uniforms.uSky.value=d.daylight<SKY_PRESET.nightDaylight?SKY_PRESET.night:w.sunlight<SKY_PRESET.overcastSunlight?SKY_PRESET.overcast:SKY_PRESET.clear;
+   uniforms.uNightBlend.value=d.night;uniforms.uDaylight.value=d.daylight;uniforms.uSky.value=d.daylight<SKY_PRESET.nightDaylight?SKY_PRESET.night:w.sunlight<SKY_PRESET.overcastSunlight?SKY_PRESET.overcast:SKY_PRESET.clear;
    const auroraHeading=THREE.MathUtils.degToRad(settings.auroraHeading);
    uniforms.uAuroraDirection.value.set(Math.cos(auroraHeading),Math.sin(auroraHeading));
    uniforms.uAuroraIntensity.value=settings.aurora?settings.auroraIntensity:0;

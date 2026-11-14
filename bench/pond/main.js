@@ -50,7 +50,7 @@ const lightOccluders = [];
 const freeze = createWaterFreeze(), freezeMap = createFreezeTexture(), iceLook = createIceLook();
 const water = createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow,
  freezeMap, iceLook, foamLayer, causticSegments: 280, clipToBed: true, pondOptics: true, bedCaustics: 'material', lightOccluders});
-const waterline = createWaterlineComposite(renderer, {caustics: water.lighting});
+const waterline = createWaterlineComposite(renderer, {caustics: water.lighting, sky: sky.uniforms});
 
 // Pond, cliff and falling sheet adapted from Glider 2's procedural waterfall sample.
 
@@ -304,9 +304,8 @@ startFrameLoop(renderer, (dt, now) => {
     freezeProgress, freezeThaw: freeze.thaw,
   });
   if (diving) {
-    const light = sky.uniforms;
     waterline.render(scene, camera, {height: water.surface.position.y,
-      clarity: state.clarity, godRays: state.godRays, sunDirection: light.uSkySun.value, sunColor: light.uSunCol.value, ambientColor: light.uAmb.value});
+      clarity: state.clarity, godRays: state.godRays});
   } else renderer.render(scene, camera);
   renderer.autoClear = false;
   try { renderer.render(fxScene, camera); }

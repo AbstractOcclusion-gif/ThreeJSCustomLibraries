@@ -58,12 +58,12 @@ export function createOceanGeometry({segments = 224, near = 150, far = 7100} = {
 }
 
 export function createOceanSurface({renderer, sky = proceduralSky(), geometry, laceTexture, settings = {}, fft: fftOptions = {},
-  clipmap: clipmapSettings, caustics: causticSettings = false, wake: wakeSettings = false, exclusion: exclude = false} = {}) {
+  clipmap: clipmapSettings, caustics: causticSettings = false, wake: wakeSettings = false, exclusion: exclude = false, sun} = {}) {
   const fft = renderer && fftOptions !== false ? new OceanFft(renderer, fftOptions) : null;
   const windDetail = fft ? createWaveBank() : null;
   const obstacles = fft && wakeSettings ? new ObstacleFootprint(renderer, wakeSettings.resolution ?? WAKE_RESOLUTION) : null;
   const wake = obstacles ? new SimWindow(renderer, wakeSettings, obstacles.uniforms) : null;
-  const caustics = fft && causticSettings ? createOceanCaustics(fft, sky.uniforms.uSkySun, causticSettings, wake) : null;
+  const caustics = fft && causticSettings ? createOceanCaustics(fft, sky.uniforms.uSkySun, causticSettings, wake, sun) : null;
   const capture = renderer ? new THREE.WebGLRenderTarget(1, 1, {
     type: THREE.HalfFloatType, depthTexture: new THREE.DepthTexture(1, 1, THREE.UnsignedIntType),
   }) : null;

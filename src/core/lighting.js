@@ -62,6 +62,7 @@ ${ambient}
 ${lights}
 ${sun}
 #define LIGHT_SHADE_AT
+#define LIGHT_SUN_VISIBILITY
 vec3 shadeAt(vec3 albedo, vec3 n, float sunVisibility, float ao, float wrap, vec3 worldPosition) {
   float ndl = max((dot(n, uSunDir) + wrap) / (1.0 + wrap), 0.0);
   return albedo * LIGHT_RECIPROCAL_PI * (lightAmbient(n, worldPosition) * ao + uSunColor * lightSunVisibility(worldPosition, n) * (ndl * sunVisibility) + lightLocal(n, worldPosition, wrap));
@@ -100,12 +101,19 @@ export function createLightingUniforms(options = {}) {
 
 // options: LIGHTING_DEFAULTS overrides, `ambient: {glsl, uniforms}` (see LIGHT_AMBIENT_GLSL),
 // `lights: {glsl, uniforms}` (see LIGHT_LOCAL_GLSL) and `sun`: one sun cover or a list of them (see LIGHT_SUN_GLSL).
-export function createLighting({ambient, lights, sun, ...options} = {}) {
+// `environment` shares the host's live sun and hemisphere values by reference. Fog remains scene-specific.
+export function createLighting({ambient, lights, sun, environment, ...options} = {}) {
   const covers = sunCovers(sun);
   for (const [name, part] of [['ambient', ambient], ['lights', lights]]) {
     if (part !== undefined && (typeof part?.glsl !== 'string' || typeof part.uniforms !== 'object')) throw Error(`Lighting ${name} needs glsl and uniforms`);
   }
   const uniforms = {...createLightingUniforms(options), ...ambient?.uniforms, ...lights?.uniforms};
+  if (environment) {
+    uniforms.uSunDir.value = environment.sun.direction;
+    uniforms.uSunColor.value = environment.sun.color;
+    uniforms.uHemiSky.value = environment.ambient.sky;
+    uniforms.uHemiGround.value = environment.ambient.ground;
+  }
   for (const cover of covers) Object.assign(uniforms, cover.uniforms);
   return {glsl: ambient || lights || covers.length ? lightingGLSL(ambient?.glsl, lights?.glsl, covers.length ? sunGLSL(covers) : undefined) : LIGHT_GLSL, uniforms};
 }

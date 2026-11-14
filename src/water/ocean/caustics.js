@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {FFT_SAMPLE_GLSL} from './fft.js';
 import {SIM_SAMPLE_GLSL} from './sim-window.js';
 import {createTargetScope} from './passes.js';
+import {sunCovers} from '../../core/lighting.js';
 
 // WebAquarium ocean/caustics.js. Each ocean owns the projected grid and map.
 export const OCEAN_CAUSTIC_DEFAULTS = Object.freeze({
@@ -26,7 +27,7 @@ export const OCEAN_CAUSTIC_GLSL = `
   return 1.0 + (causticRaw(p) - 1.0) * uCausticStrength * exp(-uCausticDepthFade * max(0.0, -p.y)) * smoothstep(0.0, .3, -p.y);
  }`;
 
-export function createOceanCaustics(fft, sun, settings, wake) {
+export function createOceanCaustics(fft, sun, settings, wake, cover) {
  const renderer = fft.renderer;
  const scope = createTargetScope(renderer);
  const s = {...OCEAN_CAUSTIC_DEFAULTS, ...settings};
@@ -38,6 +39,17 @@ export function createOceanCaustics(fft, sun, settings, wake) {
   uRefrLight: {value: new THREE.Vector3(0, -1, 0)}, uCausticOn: {value: 0},
   uCausticStrength: {value: s.strength}, uCausticDepthFade: {value: s.depthFade},
  };
+ const covers = sunCovers(cover);
+ const coverUniforms = Object.assign({}, ...covers.map(part => part.uniforms));
+ const glsl = OCEAN_CAUSTIC_GLSL + (covers.length ? `
+ #define OCEAN_SUN_COVER
+ ${covers.map(part => part.glsl).join('\n')}
+ vec3 oceanSunVisibility(vec3 p) {
+  vec2 entry = p.xz - uRefrLight.xz * p.y / uRefrLight.y;
+  vec3 worldPosition = vec3(entry.x, 0.0, entry.y);
+  vec3 n = vec3(0.0);
+  return ${covers.map(part => `(${part.air ?? part.read})`).join(' * ')};
+ }` : '\n vec3 oceanSunVisibility(vec3 p) { return vec3(1.0); }');
  const material = new THREE.ShaderMaterial({
   uniforms: {...fft.uniforms, ...wake?.uniforms, ...uniforms, uLight: sun, uNormalStrength: {value: s.normalStrength}},
   side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: true,
@@ -79,7 +91,7 @@ export function createOceanCaustics(fft, sun, settings, wake) {
  mesh.frustumCulled = false;
  scene.add(mesh);
  return {
-  settings: s, uniforms, glsl: OCEAN_CAUSTIC_GLSL,
+  settings: s, uniforms: {...uniforms, ...coverUniforms}, glsl,
   update(position) {
    const direction = sun.value;
    const active = s.on && s.strength > 0 && direction.y > .025;

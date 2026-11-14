@@ -7,6 +7,7 @@ import {createPlanarCapture} from './planar-capture.js';
 import {POND_OPTICS_GLSL} from './pond-optics.js';
 import {createPondShadow, POND_SHADOW_GLSL} from './pond-shadow.js';
 import {sunCovers} from '../core/lighting.js';
+import {addLightSlot} from '../core/light-slots.js';
 import {createRenderScope} from '../core/render-state.js';
 
 // WebAquarium's Fishing pond reflection settings.
@@ -623,34 +624,22 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    godFalloff: uniforms.godFalloff, godColor: uniforms.godColor, godSteps: uniforms.godSteps,
    pondColor: uniforms.pondColor, pondHaze: uniforms.pondHaze, pondDepthDark: uniforms.pondDepthDark, pondClarity: uniforms.pondClarity,
  };
- const litMaterials = new WeakSet();
+ const litMaterials = new Map();
  // WebAquarium rendering/underwater-lit.js multiplies the material's direct
  // diffuse and specular. The same caustics then appear in capture, refraction,
  // reflection, and on a diver's view, without a second screen-space light.
  function bindBedMaterial(mat) {
   if (bedCaustics !== 'material') throw new Error('Set bedCaustics to material before binding a bed material.');
   if (litMaterials.has(mat)) return mat;
-  const compile = mat.onBeforeCompile, cacheKey = mat.customProgramCacheKey();
-  mat.onBeforeCompile = function (shader, renderer) {
-   compile.call(this, shader, renderer);
-   Object.assign(shader.uniforms, lightingUniforms);
-   shader.vertexShader = 'varying vec3 vPondBed;\n' + shader.vertexShader.replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
-    vec4 pondBedWorld = vec4(transformed, 1.0);
-    #ifdef USE_INSTANCING
-    pondBedWorld = instanceMatrix * pondBedWorld;
-    #endif
-    vPondBed = (modelMatrix * pondBedWorld).xyz;`);
-   shader.fragmentShader = ('varying vec3 vPondBed;\n' + shader.fragmentShader)
-    .replace('#include <packing>', '#include <packing>\n' + lightingGLSL)
-    .replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>
-     float pondFocus = max(0.0, 1.0 + pondBedFocus(vPondBed) * uCausticStrength);
-     if (vPondBed.y < pondLightLevel - .03) pondFocus *= pondShadow(vPondBed, .5);
+  const detach = addLightSlot(mat, {
+   key: `pond-caustics:${Boolean(shadow)}:${Boolean(iceDamage)}:${covers.map(cover => cover.read).join(',')}`,
+   worldPosition: true, uniforms: lightingUniforms, declarations: lightingGLSL,
+   after: `float pondFocus = max(0.0, 1.0 + pondBedFocus(vLightWorld) * uCausticStrength);
+     if (vLightWorld.y < pondLightLevel - .03) pondFocus *= pondShadow(vLightWorld, .5);
      reflectedLight.directDiffuse *= pondFocus;
-     reflectedLight.directSpecular *= pondFocus;`);
-  };
-  mat.customProgramCacheKey = () => `${cacheKey}|pond-caustics:${Boolean(shadow)}:${covers.length}:${Boolean(iceDamage)}`;
-  mat.needsUpdate = true;
-  litMaterials.add(mat);
+     reflectedLight.directSpecular *= pondFocus;`,
+  });
+  litMaterials.set(mat, detach);
   return mat;
  }
  return {
@@ -735,6 +724,8 @@ export function createChannelSurface({renderer, scene, camera, sky = proceduralS
    } });
   },
   dispose() {
+   for (const detach of litMaterials.values()) detach();
+   litMaterials.clear();
    scene.remove(surface);
   godTarget?.dispose(); godMaterial?.dispose();
   shadow?.dispose();

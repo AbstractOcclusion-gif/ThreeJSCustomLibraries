@@ -138,7 +138,11 @@ function terrainMaterial(water, wet, lighting) {
         vec3 color = shade(albedo * ripple, n, focus, 1.0, 0.0);
         #endif
         if (wet > 0.0) { vec3 V = normalize(cameraPosition - vWorld), H = normalize(V + uSunDir);   // the film's mirror-flat sheen
-          color += uSunColor * pow(max(dot(n, H), 0.0), waterSpecularExponent(min(uWetSmoothness, WET_SMOOTHNESS_CEILING))) * (wet * WET_SHEEN_STRENGTH); }
+          vec3 direct = uSunColor;
+          #ifdef LIGHT_SUN_VISIBILITY
+          direct *= lightSunVisibility(vWorld, n);
+          #endif
+          color += direct * pow(max(dot(n, H), 0.0), waterSpecularExponent(min(uWetSmoothness, WET_SMOOTHNESS_CEILING))) * (wet * WET_SHEEN_STRENGTH); }
         gl_FragColor = vec4(applyFog(color, distance(vWorld, cameraPosition)), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

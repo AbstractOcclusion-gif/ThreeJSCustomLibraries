@@ -80,5 +80,7 @@ test('ocean surface builds on the procedural sky, applies presets and rejects an
  const sky = proceduralSky();
  sky.setSun(new THREE.Vector3(0, 1, 0));
  assert.equal(sky.uniforms.uSkySun.value.y, 1);
+ assert.equal(sky.uniforms.uSkySunDir, sky.uniforms.uSkySun);
+ assert.equal(sky.uniforms.uSunDir, sky.uniforms.uSkySun);
  assert.throws(() => customSky({glsl: '', uniforms: {}}), /uSkySun/);
 });

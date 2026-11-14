@@ -190,7 +190,7 @@ export class DynamicSky {
     this.sunColor.copy(sky.uSunCol.value);
     if (sunDim !== undefined) this.sunColor.multiply(day.sunTint).multiplyScalar(Math.max(day.daylight, 0.02) / Math.max(sunDim, 0.05));
     m.turbidity.value = s.turbidity; m.rayleigh.value = s.rayleigh; m.mieCoefficient.value = s.mie; m.mieDirectionalG.value = s.mieG;
-    m.sunPosition.value.copy(sunDir).multiplyScalar(450000); sky.uSkySun.value.copy(sunDir); m.uDynamicDaylight.value = day.daylight; m.uDynamicExposure.value = s.exposure;
+    m.sunPosition.value.copy(sunDir).multiplyScalar(450000); m.uDynamicDaylight.value = day.daylight; m.uDynamicExposure.value = s.exposure;
     if (this.nightColor._s !== s.nightColor) { this.nightColor.set(s.nightColor); this.nightColor._s = s.nightColor; }
     m.uNightAmbient.value.copy(this.nightColor).multiplyScalar(s.nightLight * 0.35);
     m.uCaptureOrigin.value.copy(this.camera.position); m.uCaptureOrigin.value.y = Math.max(0.1, this.camera.position.y);

@@ -6,7 +6,7 @@ import {createRenderScope} from '../core/render-state.js';
 
 // WebAquarium ocean/composite.js: split the camera near plane at the local water
 // plane and integrate only the submerged part of each view ray.
-export function createWaterlineComposite(renderer, {caustics} = {}) {
+export function createWaterlineComposite(renderer, {caustics, sky} = {}) {
  const depth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
  const target = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthTexture: depth});
  const uniforms = {
@@ -17,8 +17,8 @@ export function createWaterlineComposite(renderer, {caustics} = {}) {
   uExtinction: {value: new THREE.Vector3()}, uFogDensity: {value: 1},
   uDepthDarken: {value: .6}, uScatterIntensity: {value: 1}, uAnisotropy: {value: .6},
   uBodyColor: {value: new THREE.Color()},
-  uMeniscus: {value: .03}, uSunDir: {value: new THREE.Vector3(0, 1, 0)},
-  uSunCol: {value: new THREE.Color(1, .95, .85)}, uAmbCol: {value: new THREE.Color(.4, .5, .6)},
+  uMeniscus: {value: .03}, uSunDir: sky?.uSkySun ?? {value: new THREE.Vector3(0, 1, 0)},
+  uSunCol: sky?.uSunCol ?? {value: new THREE.Color(1, .95, .85)}, uAmbCol: sky?.uAmb ?? {value: new THREE.Color(.4, .5, .6)},
   ...(caustics ? {...caustics.uniforms, uGodStrength: {value: 1}} : {}),
  };
  const material = new THREE.ShaderMaterial({
@@ -72,7 +72,11 @@ export function createWaterlineComposite(renderer, {caustics} = {}) {
      accum += godColor * clamp(focus - .75, 0.0, 5.0) * exp(-t * godFalloff) * downwelling(p.y) * stepLength;
      #else
      float shaft = max(0.0, 1.0 + (causticRaw(p) - 1.0) * uCausticStrength);
-     accum += downwelling(p.y) * shaft * uExtinction * uFogDensity * exp(-uExtinction * uFogDensity * t) * stepLength;
+     vec3 shaftSun = vec3(shaft);
+     #ifdef OCEAN_SUN_COVER
+     shaftSun *= oceanSunVisibility(p);
+     #endif
+     accum += downwelling(p.y) * shaftSun * uExtinction * uFogDensity * exp(-uExtinction * uFogDensity * t) * stepLength;
      #endif
     }
     return accum;
@@ -113,11 +117,16 @@ export function createWaterlineComposite(renderer, {caustics} = {}) {
      float depthMid = nearPoint.y + dir.y * L * .5;
      float phase = schlickPhase(uAnisotropy, dot(uSunDir, -dir));
      vec3 lightSun = phase * uSunCol;
+     #ifdef OCEAN_SUN_COVER
+     vec3 baseSun = lightSun * oceanSunVisibility(nearPoint + dir * (L * .5));
+     #else
+     vec3 baseSun = lightSun;
+     #endif
      float marchWeight = 0.0;
      #ifdef COAST_CAUSTICS
      if (uCausticOn > .5) marchWeight = clamp(uGodStrength, 0.0, 1.0);
      #endif
-     vec3 inscatter = uBodyColor * uScatterIntensity * (uAmbCol + lightSun * (1.0 - marchWeight)) * downwelling(depthMid);
+     vec3 inscatter = uBodyColor * uScatterIntensity * (uAmbCol + baseSun * (1.0 - marchWeight)) * downwelling(depthMid);
      vec3 absorb = exp(-uExtinction * uFogDensity * L);
      #ifdef POND_SCREEN_CAUSTICS
      if (z < 1.0) color *= max(vec3(0.0), 1.0 + uSunCol * pondBedFocus(p) * pondShadow(p, .5) * uCausticStrength);
@@ -177,9 +186,9 @@ export function createWaterlineComposite(renderer, {caustics} = {}) {
    if (caustics) uniforms.uGodStrength.value = godRays;
    camera.getWorldDirection(uniforms.uCamForward.value);
    uniforms.uInvVP.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
-   if (sunDirection) uniforms.uSunDir.value.copy(sunDirection);
-   if (sunColor) uniforms.uSunCol.value.copy(sunColor);
-   if (ambientColor) uniforms.uAmbCol.value.copy(ambientColor);
+   if (sunDirection && !sky?.uSkySun) uniforms.uSunDir.value.copy(sunDirection);
+   if (sunColor && !sky?.uSunCol) uniforms.uSunCol.value.copy(sunColor);
+   if (ambientColor && !sky?.uAmb) uniforms.uAmbCol.value.copy(ambientColor);
    return uniforms.uUnderOn.value;
  }
  return {

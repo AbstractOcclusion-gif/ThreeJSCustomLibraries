@@ -306,8 +306,8 @@ water: an input with `waterPlane` (and `waterDistance`), as the water composites
 ### Sun covers
 
 Everything that stands between the sun and a place is a sun cover: `{glsl, uniforms, read, air?}` (`src/core/lighting.js`).
-`createLighting({sun})`, `createBasicStage({sun})`, `createVolumetricLight({sun})` and the pond
-(`createChannelSurface({sun})`: its underwater shafts and caustics) take one or a list, and multiply them. The kit has
+`createLighting({sun})`, `createBasicStage({sun})`, `createVolumetricLight({sun})` and water
+(`createChannelSurface({sun})` and `createOceanSurface({sun})`) take one or a list, and multiply them. The kit has
 two: `shadows.sun` (the sun shadows) and `view.sunCover` (the weather's clouds, from its cloud shadow map).
 
 ```js
@@ -315,6 +315,10 @@ const sun = [shadows.sun, view.sunCover];
 const lighting = createLighting({sun});                          // trees, hedges, coast: shaded by both
 const volumetric = createVolumetricLight({renderer, sun});       // shafts under the clouds and between the casters
 ```
+
+Pass `environment: view.environment` to `createLighting` to share the live key light and hemisphere values.
+Water keeps the sky's astronomical sun for glints and refraction. Pass `sky: view.uniforms` (or a procedural
+sky's uniforms) to `createWaterlineComposite` to share those values with the underwater pass.
 
 ### Light slots
 
