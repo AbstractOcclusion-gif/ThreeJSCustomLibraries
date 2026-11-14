@@ -49,7 +49,10 @@ function collectResources(model, geometries, materials, textures) {
   });
 }
 
-export async function loadTreeModels({scene, profile, items, environment, renderer, distanceTest = false}) {
+// items: {x, y?, z, h, variant}: where each tree stands (y: its ground, 0 when left out) and how tall it is.
+// lights: the object whose sun and hemisphere light the impostors are baked under, when the trees go into a group
+// rather than the scene itself.
+export async function loadTreeModels({scene, profile, items, environment, renderer, distanceTest = false, lights = scene}) {
   const loader = new GLTFLoader();
   const {scene: model} = await loader.loadAsync(models[profile]);
   const bounds = new THREE.Box3().setFromObject(model);
@@ -97,9 +100,9 @@ export async function loadTreeModels({scene, profile, items, environment, render
   }
   model.position.set(-centre.x, -bounds.min.y, -centre.z);
   const placements = [];
-  for (const {x, z, h, variant} of items) {
+  for (const {x, y = 0, z, h, variant} of items) {
     const placement = new THREE.Group();
-    placement.position.set(x, 0, z);
+    placement.position.set(x, y, z);
     placement.scale.setScalar(h / height);
     placement.rotation.y = variant * TURN / items.length;
     if (!distanceTest) placement.add(model.clone());
@@ -134,7 +137,7 @@ export async function loadTreeModels({scene, profile, items, environment, render
       collectResources(far, geometries, materials, textures);
       // Bake before attaching the instanced fade shader to the source.
       far.position.copy(model.position);
-      const {atlas, geometry, material, viewCount} = bakeTreeImpostor(renderer, scene, far, bounds);
+      const {atlas, geometry, material, viewCount} = bakeTreeImpostor(renderer, lights, far, bounds);
       textures.add(atlas);
       geometries.add(geometry);
       materials.add(material);

@@ -8,6 +8,7 @@ import {createSurfaceWeather} from '../../src/surface/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {loadTerrainPalette} from '../terrain/textures.js';
+import {createWorldDressing} from './dressing.js';
 import '../bench.css';
 
 const query = new URLSearchParams(location.search);
@@ -17,7 +18,8 @@ const RINGS_PER_FRAME = 1;
 const SEED = 17;
 // The corridor: stretches of biome in this order from its start, each `stretch` m long, between walls.
 const BIOMES = ['valley', 'dry', 'alpine', 'mountains'];
-const CORRIDOR = {stretch: 620, width: 44, shoulder: 70, wall: 38, bend: 34, bendScale: 170, endRamp: 90, sectionBlend: 90};
+// Wide, gentle sides and a floor a few metres above the water leave room for grass and woods on the way through.
+const CORRIDOR = {stretch: 620, width: 44, shoulder: 150, wall: 26, floor: 4, floorRelief: .4, bend: 34, bendScale: 170, endRamp: 90, sectionBlend: 90};
 const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
 // As the terrain tool: soft junctions and rock drawn large, for a landscape rather than a close-up.
 const APPEARANCE = {edgeSharpness: .25, rockScale: .18};
@@ -72,6 +74,8 @@ waterSheet.scale.setScalar(clipmap.extent);
 waterSheet.position.y = world.waterLevel;
 scene.add(waterSheet);
 
+const dressing = createWorldDressing({scene, world, renderer, environment: weather.view.environment, report});
+
 // Fly-along: low over the route, back and forth between the two ends.
 let flyZ = VIEW.start, flyHeading = 1;
 function fly(dt) {
@@ -97,6 +101,12 @@ const groundFolder = gui.addFolder('Ground');
 groundFolder.add(settings, 'followWeather').name('Follows the weather');
 groundFolder.add(settings, 'wetness', 0, 1, .01).name('Wetness (by hand)').listen();
 groundFolder.add(settings, 'snow', 0, 1, .01).name('Snow cover (by hand)').listen();
+const dressingFolder = gui.addFolder('Rocks, grass, trees');
+dressingFolder.add(dressing.settings, 'rocks').name('Rocks and cliffs');
+dressingFolder.add(dressing.settings, 'grass').name('Grass');
+dressingFolder.add(dressing.settings, 'trees').name('Trees');
+dressingFolder.add(dressing.settings, 'treeLod', 20, 200, 1).name('Trees: far model from · m');
+dressingFolder.add(dressing.settings, 'treeImpostor', 40, 400, 1).name('Trees: flat cards from · m');
 const weatherUI = mountWeatherControls(weather);
 
 const unbindResize = bindResize(renderer, camera);
@@ -116,6 +126,7 @@ startFrameLoop(renderer, (dt, now) => {
   clipmap.update(focus.x, focus.z, RINGS_PER_FRAME);
   const terrainMs = performance.now() - started;
   waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
+  dressing.update(dt, camera, focus);
   weather.view.render();
   weatherUI.sync();
   if (now - lastStatus >= STATUS_REFRESH_MS) {
@@ -123,14 +134,16 @@ startFrameLoop(renderer, (dt, now) => {
     const z = THREE.MathUtils.clamp(focus.z, 0, route.length), section = route.sectionAt(z);
     $status.textContent = `${world.biomes[section.biome].label} · ${Math.round(z)} m of ${route.length} m`
       + `\nwetness ${settings.wetness.toFixed(2)} · snow ${settings.snow.toFixed(2)} · terrain ${terrainMs.toFixed(1)} ms`
+      + `\n${dressing.stats.rockTiles} rock tiles · ${dressing.stats.grassClumps} grass clumps · ${dressing.stats.trees} trees`
+      + (dressing.stats.treesLoading ? ` (${dressing.stats.treesLoading} species loading)` : '')
       + (missing.length ? '\nTexture sets not bundled, default used · ' + missing.join(', ') + ' · run npm run textures:fetch' : '');
   }
 });
 document.body.dataset.ready = 'true';
 onLeave(() => {
-  renderer.setAnimationLoop(null); unbindResize(); weatherUI.dispose(); weather.view.dispose(); orbit.dispose(); gui.destroy();
+  renderer.setAnimationLoop(null); unbindResize(); dressing.dispose(); weatherUI.dispose(); weather.view.dispose(); orbit.dispose(); gui.destroy();
   scene.remove(clipmap.group, waterSheet); clipmap.dispose(); waterSheet.geometry.dispose(); waterSheet.material.dispose();
   for (const texture of Object.values(textures)) texture?.dispose?.();
   renderer.dispose();
 });
-window.worldDemo = {world, clipmap, weather, surfaceWeather, settings, focus, camera, orbit, scene};
+window.worldDemo = {world, clipmap, dressing, weather, surfaceWeather, settings, focus, camera, orbit, scene};
