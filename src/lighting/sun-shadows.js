@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import {addLightSlot} from '../core/light-slots.js';
 import {createRenderScope} from '../core/render-state.js';
 import {cascadeSplits, createCascadeFitter} from './cascades.js';
+import {createShadowCasters, withShadowCasters, SHADOW_LAYER} from './shadow-casters.js';
 
 export const SUN_SHADOW_DEFAULTS = Object.freeze({
   cascades: 4,        // slices of the view, each with its own tile
@@ -30,9 +31,7 @@ export const SUN_SHADOW_LIMITS = Object.freeze({
 });
 const WHOLE = ['cascades', 'resolution'];
 const ATLAS_COLUMNS = 2;                 // tiles per row of the atlas, when there is more than one cascade
-const SHADOW_LAYER = 31;                 // layer the casters are put on while a cascade is drawn
 const SLOT = 'sun-shadows';
-const SIDE_FOR_SHADOW = Object.freeze({[THREE.FrontSide]: THREE.BackSide, [THREE.BackSide]: THREE.FrontSide, [THREE.DoubleSide]: THREE.DoubleSide});   // as Three's shadow pass
 const TO_UV = new THREE.Matrix4().set(.5, 0, 0, .5, 0, .5, 0, .5, 0, 0, .5, .5, 0, 0, 0, 1);   // clip space -> 0..1
 
 // `vec3 sunShadowAt(vec3 worldPosition, vec3 n)`: the share of the sunlight that reaches a surface facing n.
@@ -126,34 +125,9 @@ export function createSunShadows({renderer, ...overrides} = {}) {
   const toTile = tiles.map(({x, y}) => new THREE.Matrix4().makeScale(resolution / width, resolution / height, 1).setPosition(x / width, y / height, 0).multiply(TO_UV));
   const cameras = perCascade(() => { const camera = new THREE.OrthographicCamera(); camera.layers.set(SHADOW_LAYER); return camera; });
   const fitter = createCascadeFitter(), scope = createRenderScope(renderer), splits = [];
-  const casters = [], materials = [];            // the meshes that cast this frame, and the material each one had
-  const depthMaterials = new Map();              // one depth material per side / cutout a caster needs
+  const casters = createShadowCasters();
   let frame = 0, disposed = false;
 
-  // The material a caster is drawn with from the sun: its own depth material when it has one (cutout, wind), or a
-  // plain depth material with its side and its cutout.
-  function depthMaterialOf(mesh) {
-    if (mesh.customDepthMaterial) return mesh.customDepthMaterial;
-    const source = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-    const cutout = source.alphaTest > 0 && source.map ? source.map : null;
-    const side = source.shadowSide ?? SIDE_FOR_SHADOW[source.side];
-    const key = `${side}|${cutout ? cutout.id : ''}|${cutout ? source.alphaTest : 0}`;
-    let material = depthMaterials.get(key);
-    if (!material) depthMaterials.set(key, material = new THREE.MeshDepthMaterial({side, map: cutout, alphaTest: cutout ? source.alphaTest : 0}));
-    return material;
-  }
-  const casts = material => !material.transparent && material.depthWrite && material.visible;
-  function collect(object) {
-    if (!object.isMesh || !object.castShadow) return;
-    const material = object.material;
-    if (!(Array.isArray(material) ? material.some(casts) : casts(material))) return;
-    casters.push(object); materials.push(material);
-    object.material = depthMaterialOf(object); object.layers.enable(SHADOW_LAYER);
-  }
-  function release() {
-    for (let index = 0; index < casters.length; index++) { casters[index].material = materials[index]; casters[index].layers.disable(SHADOW_LAYER); }
-    casters.length = materials.length = 0;
-  }
   function draw(index, scene, camera, sunDirection) {
     const {reach, depthBias} = settings, lightCamera = cameras[index];
     const from = index ? splits[index - 1] : camera.near;
@@ -199,26 +173,17 @@ export function createSunShadows({renderer, ...overrides} = {}) {
       look.set(strength, normalOffset, softness, blend); atlasTexel.z = debug ? 1 : 0; sunDir.copy(sunDirection).normalize();
       cascadeSplits(Math.min(near, distance), distance, cascades, lambda, splits);
       let drawn = 0;
-      const background = scene.background, override = scene.overrideMaterial, autoClear = renderer.autoClear;
-      scene.traverseVisible(collect);
-      scene.background = null; scene.overrideMaterial = null; renderer.autoClear = false;
-      try {
-        scope(() => {
-          // The first frame draws every cascade; after that each one waits its own number of frames.
-          for (let index = 0; index < cascades; index++) if (frame === 0 || frame % every[index] === index % every[index]) { draw(index, scene, camera, sunDir); drawn++; }
-        });
-      } finally {
-        scene.background = background; scene.overrideMaterial = override; renderer.autoClear = autoClear;
-        release();
-      }
+      // The first frame draws every cascade; after that each one waits its own number of frames.
+      withShadowCasters(casters, scene, renderer, () => scope(() => {
+        for (let index = 0; index < cascades; index++) if (frame === 0 || frame % every[index] === index % every[index]) { draw(index, scene, camera, sunDir); drawn++; }
+      }));
       frame++;
       return drawn;
     },
     dispose() {
       if (disposed) return; disposed = true;
       target.dispose(); depth.dispose();
-      for (const material of depthMaterials.values()) material.dispose();
-      depthMaterials.clear();
+      casters.dispose();
     },
   };
   return shadows;

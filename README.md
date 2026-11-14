@@ -104,7 +104,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | rocks (seeded stones, boulders, scatter and cliff runs) | `three-kit/rocks` | `bench/rocks/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
-| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials; cascaded sun shadows for both paths) | `three-kit/lighting` | `bench/lighting/` | ✓ |
+| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials, with their shadows; cascaded sun shadows for both paths) | `three-kit/lighting` | `bench/lighting/` | ✓ |
 | cable (articulated rope on cannon-es, tube view) | `three-kit/cable` | `bench/cable/` | ✓ |
 | destruction (rigid structures, impact fracture, overload detachment) | `three-kit/destruction`, `/destruction/three` | `bench/destruction/` | ✓ |
 | camera (director, rigs, bullet time, replay, collision, post, panel) | `three-kit/camera` | `bench/camera/` | ✓ |
@@ -235,7 +235,15 @@ const remove = rig.add(pointLight); rig.add(spotLight);
 ```
 
 The hook reads `capacity` lights at once (8 by default). With more in the rig, `update(focus)` keeps the ones that count
-most at the focus (luminance over squared distance); hidden and dark lights are left out. They cast no shadow yet.
+most at the focus (luminance over squared distance); hidden and dark lights are left out.
+
+**Light shadows.** `createLightRig({shadows: {renderer, ...LIGHT_SHADOW_DEFAULTS}})` gives the rig a second depth atlas for
+its lights: a spot light draws its cone into one tile, a point light a cube into six. `rig.add(light, {shadow: true})`
+(or `rig.setShadow(light, on)`) makes a light cast; `casters` (4) cast at once, the ones that count most at the focus.
+Hook materials get the shadows with the lights; lit Three materials with `rig.applyTo(material)`. Each frame, after
+`rig.update(focus)`: `rig.renderShadows(scene)`. A new caster is drawn at once, the others `perFrame` (1) at a time in
+turn. `rig.shadows.settings` is live (`strength`, `softness`, `normalOffset`, `depthBias`, `perFrame`, `range`: how far the
+shadow of a light without a cutoff distance is drawn). The flag is the rig's own: Three's `castShadow` is left alone.
 
 ### Sun shadows
 
@@ -262,7 +270,7 @@ cascade waits between two draws (`[1, 1, 2, 4]`). A ground mesh casts with `shad
 
 A lit Three material has one light loop, so two features that each rewrite it cannot share a material.
 `addLightSlot(material, slot)` from `three-kit/core` is the one place that extends it: grass backlight, weather cloud
-shadows, the light probes and the sun shadows each add a slot, in any order, and get it back out with the function it returns.
+shadows, the light probes, the sun shadows and the light shadows each add a slot, in any order, and get it back out with the function it returns.
 
 ## Bench
 

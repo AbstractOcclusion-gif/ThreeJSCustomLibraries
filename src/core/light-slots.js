@@ -1,19 +1,21 @@
 // Light slots: the one place where the light loop of a lit Three material (standard, physical, lambert, phong...) is
 // extended. Three resolves `#include <lights_fragment_begin>` once per program, so two features that each rewrite it
 // cannot share a material. Here every feature adds a slot instead, and one compile hook writes them all in:
+//   point, spot     right after a point / spot light is read: may change directLight.color (shadow)
 //   directional     right after a directional light is read: may change directLight.color (shadow, cloud cover)
 //   directionalLit  right after that light is applied: may add to reflectedLight (light through a thin leaf)
 //   after           after the whole loop: may change `irradiance` (ambient by place)
-// A slot is {key, uniforms?, declarations?, worldPosition?, directional?, directionalLit?, after?}: GLSL strings, each
+// A slot is {key, uniforms?, declarations?, worldPosition?, point?, spot?, directional?, directionalLit?, after?}: GLSL strings, each
 // written inside its own block. declarations go before main(); worldPosition: true gives the code `vLightWorld`, the
 // world position of the fragment. The hook runs after the material's own onBeforeCompile and keeps it; a feature that
 // assigns onBeforeCompile must do so before it adds a slot.
 import * as THREE from 'three';
 
 const LIGHT_LOOP = '#include <lights_fragment_begin>', PROJECTION = '#include <project_vertex>', MAIN = 'void main() {';
+const POINT_READ = 'getPointLightInfo( pointLight, geometryPosition, directLight );', SPOT_READ = 'getSpotLightInfo( spotLight, geometryPosition, directLight );';
 const DIRECTIONAL_READ = 'getDirectionalLightInfo( directionalLight, directLight );';
 const DIRECTIONAL_APPLY = 'RE_Direct( directLight', AFTER_DIRECTIONAL = '#if ( NUM_RECT_AREA_LIGHTS';
-const STAGES = ['directional', 'directionalLit', 'after'];
+const STAGES = ['point', 'spot', 'directional', 'directionalLit', 'after'];
 const WORLD_VARYING = 'varying vec3 vLightWorld;';
 const WORLD_VERTEX = /* glsl */`
 {
@@ -32,7 +34,11 @@ const block = (slots, stage) => slots.filter(slot => slot[stage]).map(slot => `\
 
 // Three's light loop with the slots written in. Throws when this Three no longer has the statements the slots follow.
 function lightLoop(slots) {
-  const source = THREE.ShaderChunk.lights_fragment_begin;
+  let source = THREE.ShaderChunk.lights_fragment_begin;
+  for (const [stage, statement] of [['point', POINT_READ], ['spot', SPOT_READ]]) {
+    if (!source.includes(statement)) throw Error(`Light slots do not know the light loop of Three r${THREE.REVISION}`);
+    source = source.replace(statement, statement + block(slots, stage));
+  }
   const read = source.indexOf(DIRECTIONAL_READ);
   const apply = source.lastIndexOf(DIRECTIONAL_APPLY, source.indexOf(AFTER_DIRECTIONAL));
   const applied = source.indexOf(';', apply) + 1;

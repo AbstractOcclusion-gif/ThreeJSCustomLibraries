@@ -1,12 +1,12 @@
 // Lighting bench: the kit's lights on the basic stage. A ground of two colours with a trench, light probes measured
-// from it, a point light and a spot light in a light rig, the kit's cascaded sun shadows, and pairs of white objects:
+// from it, a point light and a spot light in a light rig with their shadows, the kit's cascaded sun shadows, and pairs of white objects:
 // one on Three's standard material, one on the lighting hook. Each light stands midway between the two objects of a
 // pair, and both cast and receive the same shadows, so they must match.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {createLightProbes, createLightRig, createSunShadows, LIGHT_PROBE_DEFAULTS, SUN_SHADOW_LIMITS} from '../../src/lighting/index.js';
+import {createLightProbes, createLightRig, createSunShadows, LIGHT_PROBE_DEFAULTS, SUN_SHADOW_LIMITS, LIGHT_SHADOW_LIMITS} from '../../src/lighting/index.js';
 import {benchRenderer, onLeave, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import '../bench.css';
@@ -35,7 +35,7 @@ const ground = {
   },
   colorAt: (x, z, target) => target.copy(groundColors[z < 0 ? 0 : 1]),
 };
-const probes = createLightProbes({ground}), rig = createLightRig(), shadows = createSunShadows({renderer});
+const probes = createLightProbes({ground}), rig = createLightRig({shadows: {renderer}}), shadows = createSunShadows({renderer});
 const stage = createBasicStage({scene, ground: false, ambient: probes.ambient, lights: rig.lights, sun: shadows.sun});
 
 const groundGeometry = new THREE.PlaneGeometry(GROUND.size, GROUND.size, GROUND.cells, GROUND.cells).rotateX(-Math.PI / 2);
@@ -53,14 +53,14 @@ groundGeometry.computeVertexNormals();
 paintGround();
 // A ground has no underside to draw from the sun: it casts with the side that faces it.
 const groundMaterial = probes.applyTo(new THREE.MeshStandardMaterial({vertexColors: true, roughness: 1, shadowSide: THREE.FrontSide}), stage.lighting);
-shadows.applyTo(groundMaterial);
+shadows.applyTo(groundMaterial); rig.applyTo(groundMaterial);
 const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
 groundMesh.castShadow = true;
 scene.add(groundMesh);
 
 // The same white on both lighting paths.
 const standard = probes.applyTo(new THREE.MeshStandardMaterial({color: OBJECT.color, roughness: 1}), stage.lighting);
-shadows.applyTo(standard);
+shadows.applyTo(standard); rig.applyTo(standard);
 const hooked = new THREE.ShaderMaterial({
   uniforms: {...stage.lighting.uniforms, uColor: {value: new THREE.Color(OBJECT.color)}},
   vertexShader: /* glsl */`varying vec3 vNormal; varying vec3 vWorld;
@@ -94,7 +94,8 @@ const spot = new THREE.SpotLight(SPOT.color, SPOT.intensity, SPOT.distance, THRE
 spot.position.set(OBJECT.flat, ground.heightAt(OBJECT.flat) + SPOT.height, OBJECT.side);
 spot.target.position.set(OBJECT.flat, ground.heightAt(OBJECT.flat), OBJECT.side);
 scene.add(point, spot, spot.target);
-rig.add(point); rig.add(spot);
+rig.add(point, {shadow: true}); rig.add(spot, {shadow: true});
+const casts = {point: true, spot: true};
 const spotSettings = {angle: SPOT.angle};
 
 const albedo = new THREE.Color();
@@ -111,12 +112,14 @@ const probeFolder = gui.addFolder('Light probes');
 probeFolder.add(probes.strength, 'value', 0, 1, .01).name('strength (0 = plain ambient)');
 const pointFolder = gui.addFolder('Point light (trench pair)');
 pointFolder.add(point, 'visible').name('on');
+pointFolder.add(casts, 'point').name('casts shadow').onChange(on => rig.setShadow(point, on));
 pointFolder.add(point, 'intensity', 0, 100, .5).name('intensity · cd');
 pointFolder.add(point, 'distance', 0, 60, .5).name('cutoff · m (0 = none)');
 pointFolder.add(point.position, 'y', ground.heightAt(0) + .5, 12, .1).name('height · m');
 pointFolder.addColor(point, 'color').name('colour');
 const spotFolder = gui.addFolder('Spot light (flat pair)');
 spotFolder.add(spot, 'visible').name('on');
+spotFolder.add(casts, 'spot').name('casts shadow').onChange(on => rig.setShadow(spot, on));
 spotFolder.add(spot, 'intensity', 0, 600, 1).name('intensity · cd');
 spotFolder.add(spotSettings, 'angle', 5, 80, 1).name('cone · °').onChange(angle => { spot.angle = THREE.MathUtils.degToRad(angle); });
 spotFolder.add(spot, 'penumbra', 0, 1, .01).name('soft edge');
@@ -132,6 +135,13 @@ shadowSlider('blend', .005, 'cascade blend');
 shadowSlider('normalOffset', .1, 'normal offset · texels');
 shadowSlider('depthBias', .1, 'depth bias · texels');
 shadowFolder.add(shadows.settings, 'debug').name('show cascades');
+const lightShadowFolder = gui.addFolder('Light shadows (point, spot)');
+const lightShadowSlider = (name, step, label) => lightShadowFolder.add(rig.shadows.settings, name, ...LIGHT_SHADOW_LIMITS[name], step).name(label);
+lightShadowSlider('strength', .01, 'strength');
+lightShadowSlider('softness', .1, 'soft edge · texels');
+lightShadowSlider('normalOffset', .1, 'normal offset · texels');
+lightShadowSlider('depthBias', .1, 'depth bias · texels');
+lightShadowSlider('perFrame', 1, 'lights redrawn per frame');
 const groundFolder = gui.addFolder('Ground');
 groundFolder.addColor(settings, 'colorA').name('colour, near side').onChange(applyGround);
 groundFolder.addColor(settings, 'colorB').name('colour, far side').onChange(applyGround);
@@ -146,11 +156,12 @@ startFrameLoop(renderer, (dt, now) => {
   const lit = rig.update(camera.position);
   camera.updateMatrixWorld();
   const drawn = shadows.render(scene, camera, stage.environment.sun.direction);
+  const lightsDrawn = rig.renderShadows(scene);
   renderer.render(scene, camera);
   if (now - lastStatus > STATUS_REFRESH_MS) {
     lastStatus = now;
     const {columns, spacing, layers} = LIGHT_PROBE_DEFAULTS;
-    status.textContent = `${columns} x ${columns} columns of ${layers} probes, ${spacing} m apart\n${probes.pending} columns to measure\n${lit} of ${rig.count} rig lights on the hook\n${drawn} of ${shadows.settings.cascades} cascades drawn this frame`;
+    status.textContent = `${columns} x ${columns} columns of ${layers} probes, ${spacing} m apart\n${probes.pending} columns to measure\n${lit} of ${rig.count} rig lights on the hook\n${drawn} of ${shadows.settings.cascades} cascades and ${lightsDrawn} light shadows drawn this frame`;
   }
 });
 document.body.dataset.ready = 'true';

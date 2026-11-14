@@ -248,3 +248,49 @@ test('sun shadows draw their cascades into the tiles of one atlas and give both 
  assert.throws(() => shadows.render(scene, camera, [0, 1, 0]), TypeError);
  shadows.dispose(); assert.equal(shadows.render(scene, camera, sun), 0);
 });
+
+test('light shadows give each caster a block of the atlas, draw a spot once and a point light six times, and take turns', () => {
+ const renderer = recordingRenderer(), rig = createLightRig({capacity: 4, shadows: {renderer, casters: 2, resolution: 128}}), {uniforms} = rig.lights;
+ assert.throws(() => createLightRig().renderShadows(new THREE.Scene()), /no shadows/);
+ for (const bad of [{casters: 0}, {resolution: 64.5}, {perFrame: 0}]) assert.throws(() => createLightRig({shadows: {renderer, ...bad}}), RangeError);
+ assert.throws(() => rig.shadows.set('casters', 3), /fixed at creation/); assert.throws(() => rig.shadows.set('strength', -1), RangeError);
+ // Two blocks of 3 x 2 tiles, side by side.
+ assert.deepEqual([rig.shadows.atlas.image.width, rig.shadows.atlas.image.height], [768, 256]);
+ assert.ok(rig.lights.glsl.includes('lightShadowOf(uRigCaster[i], worldPosition, n)') && !createLightRig().lights.glsl.includes('uRigCaster'));
+ const scene = new THREE.Scene(), box = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial()); box.castShadow = true;
+ const point = new THREE.PointLight(0xffffff, 50, 20), spot = new THREE.SpotLight(0xffffff, 40, 0, Math.PI / 6), plain = new THREE.PointLight(0xffffff, 30), weak = new THREE.PointLight(0xffffff, 1);
+ point.position.set(0, 4, 0); spot.position.set(5, 10, 0); spot.target.position.set(5, 0, 0);
+ scene.add(box, point, spot, spot.target, plain, weak);
+ rig.add(point, {shadow: true}); rig.add(spot, {shadow: true}); rig.add(plain); rig.add(weak, {shadow: true});
+ assert.throws(() => rig.setShadow(new THREE.PointLight(), true), /not in the rig/);
+ // Three lights want to cast, two blocks: the weakest waits.
+ assert.equal(rig.update(), 4);
+ const blockOf = light => rig.shadows.blockOf(light), casterOf = light => uniforms.uRigCaster.value[uniforms.uRigColor.value.findIndex(color => color.x === light.intensity)];
+ assert.deepEqual([blockOf(point), blockOf(spot), blockOf(weak)].sort(), [-1, 0, 1]);
+ assert.equal(blockOf(weak), -1); assert.equal(casterOf(point), blockOf(point)); assert.equal(casterOf(plain), -1);
+ // New casters are all drawn at once: six faces and one cone.
+ assert.equal(rig.renderShadows(scene), 2);
+ assert.equal(renderer.calls.filter(call => call[0] === 'render').length, 7);
+ assert.ok(box.material.isMeshStandardMaterial && box.layers.mask === 1);
+ const place = uniforms.uLightShadowPlace.value[blockOf(point)], spotBlock = blockOf(spot);
+ assert.deepEqual(place.toArray(), [0, 4, 0, 20]);                                           // where it was drawn, and its cutoff as far plane
+ assert.equal(uniforms.uLightShadowPlace.value[spotBlock].w, rig.shadows.settings.range);    // no cutoff: the range
+ assert.deepEqual(uniforms.uLightShadowKind.value[blockOf(point)].toArray(), [1, 1]);
+ assert.ok(Math.abs(uniforms.uLightShadowKind.value[spotBlock].y - Math.tan(Math.PI / 6)) < 1e-9);
+ // The point under the spot is seen in the middle of its tile.
+ const seen = new THREE.Vector3(5, 0, 0).applyMatrix4(uniforms.uLightShadowMatrix.value[spotBlock]);
+ assert.ok(Math.abs(seen.x) < 1e-6 && Math.abs(seen.y) < 1e-6 && seen.z > -1 && seen.z < 1);
+ // Then one light per frame, in turn.
+ assert.deepEqual([0, 1, 2].map(() => { rig.update(); return rig.renderShadows(scene); }), [1, 1, 1]);
+ assert.equal(renderer.calls.filter(call => call[0] === 'render').length, 7 + 6 + 1 + 6 - (blockOf(point) === 0 ? 0 : 5));
+ // A light that stops casting gives its block to the one that waited.
+ rig.setShadow(point, false); rig.update();
+ assert.ok(blockOf(point) === -1 && blockOf(weak) >= 0 && rig.castsShadow(spot) && !rig.castsShadow(point));
+ // A lit Three material: the cut stands right after each kind of light is read.
+ const material = new THREE.MeshStandardMaterial(); rig.applyTo(material);
+ const shader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
+ material.onBeforeCompile(shader);
+ for (const kind of ['point', 'spot']) assert.ok(new RegExp(`get${kind[0].toUpperCase()}${kind.slice(1)}LightInfo\\( ${kind}Light, geometryPosition, directLight \\);\\s*\\{[^\\n]*\\s*if \\(directLight\\.visible\\) directLight\\.color \\*= lightShadowNear\\(${kind}Light\\.position`).test(shader.fragmentShader));
+ assert.equal(shader.uniforms.uLightShadowAtlas.value, rig.shadows.atlas);
+ rig.dispose(); assert.equal(rig.renderShadows(scene), 0);
+});
