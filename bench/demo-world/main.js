@@ -87,10 +87,11 @@ const settings = {shot: 'free', speed: VIEW.speed, followWeather: true, wetness:
   sunShadows: true, cloudShadows: true, camp: true, pixelRatio: renderer.getPixelRatio()};
 
 const {stretch, ...corridorShape} = CORRIDOR;
-const world = createTerrainWorld({seed: SEED, biomes: BIOMES.map(cloneBiome), water: true, corridor: {
+const worldOptions = {seed: SEED, biomes: BIOMES.map(cloneBiome), water: true, corridor: {
   ...corridorShape, length: stretch * BIOMES.length, sectionMin: stretch, sectionMax: stretch,
   sections: BIOMES.map((_, biome) => ({biome, length: stretch})),
-}});
+}};
+const world = createTerrainWorld(worldOptions);
 const route = world.corridor;
 {
   const z = VIEW.start, x = route.routeX(z);
@@ -182,8 +183,32 @@ function setCampShadows(on) {
 // The play area: test balls leave ruts in the ground and pack the snow (the terrain pages' play.js).
 // Warm the default linear capture variant with its shadow hooks before the play area replaces the rings.
 const playCompileTarget = new THREE.WebGLRenderTarget(1, 1);
+const playWorker = new Worker(new URL('./play-worker.js', import.meta.url), {type: 'module'});
+const playRequests = new Map();
+let playRequestId = 0, playWorkerError;
+playWorker.onmessage = ({data: {id, result, error}}) => {
+  const request = playRequests.get(id);
+  if (!request) return;
+  playRequests.delete(id);
+  if (error) request.reject(new Error(error));
+  else request.resolve(result);
+};
+playWorker.onerror = event => {
+  playWorkerError = new Error(event.message || 'Terrain play worker failed');
+  for (const request of playRequests.values()) request.reject(playWorkerError);
+  playRequests.clear();
+};
+playWorker.postMessage({world: worldOptions});
 const play = createTerrainPlay({scene, appearance, sandLook, weather: surfaceWeather, cutout, world: () => world, textures: () => textures,
   seed: () => SEED, rules: () => world.biomes[0].paint, cells: CLIP.cells, reliefCellSize: CLIP.cellSize,
+  sampleArea(request) {
+    if (playWorkerError) return Promise.reject(playWorkerError);
+    return new Promise((resolve, reject) => {
+      const id = ++playRequestId;
+      playWorker.postMessage({id, request});
+      playRequests.set(id, {resolve, reject});
+    });
+  },
   async prepare(mesh) {
     shadowReceivers.update();
     const previous = renderer.getRenderTarget();
@@ -350,6 +375,7 @@ onLeave(() => {
   sunShadows.dispose(); volumetric.dispose(); lightRig.dispose(); probes.dispose(); weather.view.dispose(); orbit.dispose(); gui.destroy();
   scene.remove(clipmap.group, waterSheet); clipmap.dispose(); waterSheet.geometry.dispose(); waterSheet.material.dispose();
   for (const texture of Object.values(textures)) texture?.dispose?.();
+  playWorker.terminate(); playRequests.clear();
   playCompileTarget.dispose(); renderer.dispose();
 });
 window.worldDemo = {renderer, world, clipmap, dressing, life, structures, play, lightRig, sunShadows, volumetric, probes, selectShot, weather, surfaceWeather, settings, focus, camera, orbit, scene};

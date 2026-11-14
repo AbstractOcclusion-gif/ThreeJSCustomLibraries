@@ -16,14 +16,16 @@ export function createTerrainCollider(field) {
 // Coarse ground for bodies that leave the field: a square of the world's relief around a point, sampled every `cell`
 // m. Samples inside `hole` ({x, z, size}: the field) are sunk by `sink` m, so the field's own collider carries the
 // bodies there and its edge meets this one at the same height. `lift` raises it all (lying snow).
-export function createSurroundCollider({heightAt, center, size, cell, hole, sink, lift = 0}) {
+export function createSurroundCollider({heightAt, center, size, cell, hole, sink, lift = 0, samples}) {
  const count = Math.round(size / cell) + 1;
  const originX = Math.round((center.x - size / 2) / cell) * cell, originZ = Math.round((center.z - size / 2) / cell) * cell;
  let low = Infinity, high = -Infinity;
  const data = Array.from({length: count}, (_, row) => Array.from({length: count}, (_, column) => {
   const x = originX + column * cell, z = originZ + row * cell;
   const inside = hole && x > hole.x && x < hole.x + hole.size && z > hole.z && z < hole.z + hole.size;
-  const height = heightAt(x, z) + lift - (inside ? sink : 0);
+  const ix = samples && Math.round((x - samples.originX) / cell), iz = samples && Math.round((z - samples.originZ) / cell);
+  const base = samples && ix >= 0 && ix < count && iz >= 0 && iz < count ? samples.data[iz * count + ix] : heightAt(x, z);
+  const height = base + lift - (inside ? sink : 0);
   low = Math.min(low, height); high = Math.max(high, height);
   return height;
  }));

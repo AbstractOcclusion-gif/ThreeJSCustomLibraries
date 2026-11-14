@@ -27,7 +27,7 @@ const MAX_SUBSTEPS = 6;
 // Ground beyond the field (the `surround` option): a square `size` m wide sampled every `cell` m, laid again around
 // the latest body when it comes within `margin` m of the edge. Bodies it leaves behind are removed. Under the field
 // it is sunk by `sink` m.
-const SURROUND = Object.freeze({size: 192, cell: 1, margin: 40, sink: 60});
+export const SURROUND = Object.freeze({size: 192, cell: 1, margin: 40, sink: 60});
 export function createTerrainImpacts({scene, field, tracks, material, ice, lightOccluders, onIceBreak, onSphereStep, chips, surfaces = CONTACT_SURFACES, trackRadius = TRACK_RADIUS, fallOutHeight = FALL_OUT_HEIGHT, surround}) {
  const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
  world.defaultContactMaterial.friction = .52;
@@ -42,7 +42,7 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
  let outer = null;
  function laySurround(center) {
   if (outer) world.removeBody(outer.body);
-  outer = createSurroundCollider({heightAt: surround.heightAt, center, size: SURROUND.size, cell: SURROUND.cell, sink: SURROUND.sink,
+  outer = createSurroundCollider({heightAt: surround.heightAt, center, size: SURROUND.size, cell: SURROUND.cell, sink: SURROUND.sink, samples: surround.samples,
    hole: {x: field.bounds.x, z: field.bounds.y, size: field.bounds.z}, lift: surround.lift?.() ?? 0});
   world.addBody(outer.body);
   for (const body of active.keys()) body.wakeUp();
