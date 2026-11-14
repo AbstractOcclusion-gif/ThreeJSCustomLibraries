@@ -141,11 +141,11 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    const z = at?.position?.[1] ?? (iceDrop ? 2 : rolling ? 13.5 : 12.5);
    const ground = field.heightAt(x, z);
    if (!iceDrop && ground === undefined) throw Error('A body must be launched over the field');
-   const y = iceDrop ? iceDrop.level + (iceDrop.hard ? 8 : .65) : ground + (rolling ? .88 : 6) * scale;
+   const y = at?.height ?? (iceDrop ? iceDrop.level + (iceDrop.hard ? 8 : .65) : ground + (rolling ? .88 : 6) * scale);
    // Mass follows the volume.
    const body = new Body({mass: (rolling ? 22 : 36) * scale ** 3, shape: rolling ? new Sphere(.72 * scale) : new Box(new Vec3(.71, .47, .9).scale(scale)),
     material: blockMaterial, position: new Vec3(x, y, z),
-    velocity: new Vec3(at?.velocity?.[0] ?? (iceDrop ? (iceDrop.hard ? 0 : 3.2) : rolling ? -5.5 : -.9), 0, at?.velocity?.[1] ?? (rolling ? -.75 : 0)), angularDamping: .34});
+    velocity: new Vec3(at?.velocity?.[0] ?? (iceDrop ? (iceDrop.hard ? 0 : 3.2) : rolling ? -5.5 : -.9), at?.verticalSpeed ?? 0, at?.velocity?.[1] ?? (rolling ? -.75 : 0)), angularDamping: .34});
    if (rolling) body.angularVelocity.set(-1, 0, 7.5);
    else body.quaternion.setFromEuler(iceDrop ? 0 : .13, .52, iceDrop ? 0 : .16);
    if (ice) body.addEventListener('collide', ({body: other, contact}) => {

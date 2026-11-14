@@ -21,11 +21,15 @@ export const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, skyTexel: 2, tra
 // clear(), roll({focus, camera, radius}), setSnow(on), update(dt), reset(), dispose()}.
 export function createTerrainPlay({scene, world, textures, seed, rules, appearance, sandLook, weather, cutout, cells = PLAY.cells, reliefCellSize = PLAY.size / cells, prepare, sampleArea}) {
   const ballMaterial = new THREE.MeshStandardMaterial({color: PLAY.ball.color, roughness: PLAY.ball.roughness});
+  const airborneGeometry = sampleArea && new THREE.SphereGeometry(PLAY.ball.baseRadius, 24, 16);
+  const airborne = new Set();
   let area, snow = false;
   let pending;
 
   function clear() {
     pending = undefined;
+    for (const shot of airborne) shot.mesh.removeFromParent();
+    airborne.clear();
     if (!area) return;
     area.impacts.dispose();
     scene.remove(area.mesh);
@@ -104,9 +108,25 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     lay, clear, setSnow,
     warm({focus, camera}) { return roll({focus, camera}, true); },
     roll,
-    update(dt) { area?.impacts.update(dt); },
-    reset() { area?.impacts.reset(); },
-    dispose() { clear(); ballMaterial.dispose(); },
+    update(dt) {
+      area?.impacts.update(dt);
+      for (const shot of airborne) {
+        if (shot.contact) continue;
+        const {mesh, velocity} = shot;
+        const x = mesh.position.x + velocity[0] * dt, z = mesh.position.z + velocity[1] * dt;
+        shot.verticalSpeed -= 9.82 * dt;
+        const y = mesh.position.y + shot.verticalSpeed * dt;
+        const floor = shot.ground(x, z) + shot.radius;
+        mesh.position.set(x, Math.max(y, floor), z);
+        shot.contact = y <= floor;
+      }
+    },
+    reset() {
+      for (const shot of airborne) shot.mesh.removeFromParent();
+      airborne.clear();
+      area?.impacts.reset();
+    },
+    dispose() { clear(); airborneGeometry?.dispose(); ballMaterial.dispose(); },
   };
 
   // Rolls a ball of `radius` m from just ahead of the focus, away from the camera.
@@ -116,6 +136,21 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     heading.normalize();
     const x = focus.x + heading.x * PLAY.ahead, z = focus.z + heading.z * PLAY.ahead;
     const inside = area && [x - area.origin[0], z - area.origin[1]].every(offset => offset > PLAY.edge && offset < PLAY.size - PLAY.edge);
+    const target = inside ? area : lay(x, z, warm);
+    if (warm) return Promise.resolve(target).then(laid => laid?.ready);
+    const velocity = [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale = radius / PLAY.ball.baseRadius;
+    let shot;
+    if (sampleArea && (!inside || !area.mesh.visible)) {
+      const ground = world();
+      const floor = (px, pz) => ground.heightAt(px, pz, reliefCellSize) + (snow ? SNOW_DEFAULTS.driftDepth : 0);
+      const mesh = new THREE.Mesh(airborneGeometry, ballMaterial);
+      mesh.position.set(x, floor(x, z) + .88 * scale, z);
+      mesh.scale.setScalar(scale);
+      mesh.castShadow = true;
+      scene.add(mesh);
+      shot = {mesh, velocity, radius, ground: floor, verticalSpeed: 0, contact: false};
+      airborne.add(shot);
+    }
     const launch = laid => {
       if (!laid) return;
       if (laid.ready) return laid.ready.then(() => spawn(laid));
@@ -123,11 +158,16 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     };
     const spawn = laid => {
       if (area !== laid) return;
+      if (shot && !airborne.delete(shot)) return;
       laid.reveal();
-      laid.impacts.launch('sphere', snow ? 'snow' : 'mud', undefined, {position: [x, z], velocity: [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale: radius / PLAY.ball.baseRadius});
+      shot?.mesh.removeFromParent();
+      const position = shot ? shot.mesh.position : {x, z};
+      laid.impacts.launch('sphere', snow ? 'snow' : 'mud', undefined, {position: [position.x, position.z], velocity, scale,
+        height: shot && Math.max(position.y, laid.field.heightAt(position.x, position.z) + radius), verticalSpeed: shot?.verticalSpeed});
     };
-    const target = inside ? area : lay(x, z, warm);
-    if (warm) return Promise.resolve(target).then(laid => laid?.ready);
-    return sampleArea && !inside ? target.then(launch) : launch(target);
+    if (!shot) return launch(target);
+    return Promise.resolve(target).then(launch).finally(() => {
+      if (airborne.delete(shot)) shot.mesh.removeFromParent();
+    });
   }
 }
