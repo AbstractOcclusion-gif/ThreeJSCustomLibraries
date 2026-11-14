@@ -189,6 +189,8 @@ const airFolder = gui.addFolder('Volumetric light');
 const airSlider = (name, step, label, max = VOLUMETRIC_LIMITS[name][1]) => airFolder.add(volumetric.settings, name, VOLUMETRIC_LIMITS[name][0], max, step).name(label);
 airFolder.add(air, 'on').name('on');
 airSlider('density', .0005, 'density · 1/m', .08);
+airSlider('lightDensity', .001, 'lights own air · 1/m', .3);
+airSlider('lightDensityFalloff', .05, 'own air held near light');
 airSlider('anisotropy', .01, 'forward scatter');
 airSlider('sun', .05, 'sun', 8);
 airSlider('lights', .05, 'lights', 8);

@@ -2,7 +2,8 @@
 // air sends toward the camera: the sun through the cascades (shafts between the shadows, tinted by glass), the point
 // and spot lights of a light rig (cones and halos, with their shadows), and the sky. The sun and the sky fill the
 // whole ray, so they are sampled all along it; a point or spot light only lights the air within its reach, so it gets
-// samples of its own on the stretch of the ray that crosses it. The pass runs at a share of the screen and is laid
+// samples of its own on the stretch of the ray that crosses it, and brings a little air of its own with it (Luminex's
+// local density), so a beam shows in air that is otherwise clear. The pass runs at a share of the screen and is laid
 // back over the scene along its depth edges, smoothed over the dither that hides its steps. Each part is optional: without sun shadows the sun
 // fills the air evenly, without a rig there are no local lights.
 // The scene is drawn into the pass's own target first (or handed over as {color, depth}), then put on screen.
@@ -17,6 +18,8 @@ export const VOLUMETRIC_DEFAULTS = Object.freeze({
   distance: 150,       // m from the camera where the march ends
   steps: 24,           // samples along a ray, for the sun and the sky
   lightSteps: 8,       // samples for each of the rig's lights, on the stretch of the ray within its reach
+  lightDensity: .02,   // 1 / m: air the rig's lights bring with them, so their beams show even in clear air (density 0)
+  lightDensityFalloff: 1.5,   // how fast that air thins toward the cutoff distance of the light: 1 = evenly, 3 = held near the light
   scale: .5,           // share of the screen the march runs at, each way
   sun: 1,              // strength of the sun in the air
   lights: 1,           // strength of the rig's lights in the air
@@ -24,7 +27,7 @@ export const VOLUMETRIC_DEFAULTS = Object.freeze({
   color: 0xffffff,     // tint of the air
 });
 export const VOLUMETRIC_LIMITS = Object.freeze({
-  density: [0, 1], heightBase: [-10000, 10000], heightFalloff: [0, 10000], anisotropy: [-.95, .95], distance: [1, 10000], steps: [1, 64], lightSteps: [1, 16], scale: [.1, 1],
+  density: [0, 1], heightBase: [-10000, 10000], heightFalloff: [0, 10000], anisotropy: [-.95, .95], distance: [1, 10000], steps: [1, 64], lightSteps: [1, 16], lightDensity: [0, 1], lightDensityFalloff: [.5, 3], scale: [.1, 1],
   sun: [0, 16], lights: [0, 16], ambient: [0, 16],
 });
 const MAX_STEPS = VOLUMETRIC_LIMITS.steps[1], MAX_LIGHT_STEPS = VOLUMETRIC_LIMITS.lightSteps[1];
@@ -50,6 +53,7 @@ uniform mat4 uCameraWorld;
 uniform vec3 uVolumeSun, uVolumeSunDirection, uVolumeAmbient, uVolumeColor;
 uniform vec4 uVolumeMedium;   // density (1 / m), base height (m), height falloff (m, 0 = none), anisotropy
 uniform vec4 uVolumeMarch;    // distance (m), steps, strength of the rig's lights, steps for each of them
+uniform vec2 uVolumeLightAir; // air the rig's lights bring with them: density (1 / m), falloff toward their cutoff
 ${sunGLSL}
 ${rigGLSL}
 // Henyey-Greenstein: the share of the light the air sends on at an angle from where it was going.
@@ -95,7 +99,15 @@ vec3 volumeRigLights(vec3 origin, vec3 ray, float end, float jitter) {
       #endif
       // The air between the camera and the sample dims it: its density taken as the mean of both ends.
       float density = volumeDensity(p);
-      sum += light * (volumePhase(dot(ray, toward), uVolumeMedium.w) * density * stepLength * exp(-0.5 * (atCamera + density) * travelled));
+      float dimmed = exp(-0.5 * (atCamera + density) * travelled);
+      // The light's own air: full at the light, gone at its cutoff distance (everywhere, for a light without one).
+      float within = 1.0;
+      if (cutoff > 0.0) {
+        float edge = distance(p, uRigPosition[i]) / cutoff;
+        within = clamp(1.0 - edge * edge * edge * edge, 0.0, 1.0);
+      }
+      density += uVolumeLightAir.x * pow(within, uVolumeLightAir.y);
+      sum += light * (volumePhase(dot(ray, toward), uVolumeMedium.w) * density * stepLength * dimmed);
     }
   }
   return sum;
@@ -188,7 +200,7 @@ export function createVolumetricLight({renderer, sunShadows, rig, ...overrides} 
   const marchUniforms = {
     ...view, uCameraWorld: {value: new THREE.Matrix4()},
     uVolumeSun: {value: new THREE.Color()}, uVolumeSunDirection: {value: new THREE.Vector3(0, 1, 0)}, uVolumeAmbient: {value: new THREE.Color()},
-    uVolumeColor: {value: new THREE.Color()}, uVolumeMedium: {value: new THREE.Vector4()}, uVolumeMarch: {value: new THREE.Vector4()},
+    uVolumeColor: {value: new THREE.Color()}, uVolumeMedium: {value: new THREE.Vector4()}, uVolumeMarch: {value: new THREE.Vector4()}, uVolumeLightAir: {value: new THREE.Vector2()},
     ...sunShadows?.sun.uniforms, ...rig?.lights.uniforms,
   };
   const compositeUniforms = {...view, tScene: {value: sceneTarget.texture}, tVolume: {value: volumeTarget.texture}, uVolumeSize: {value: new THREE.Vector2(1, 1)}};
@@ -217,7 +229,7 @@ export function createVolumetricLight({renderer, sunShadows, rig, ...overrides} 
       if (!environment?.sun?.direction?.isVector3) throw new TypeError('Volumetric light needs an environment');
       renderer.getDrawingBufferSize(size);
       if (size.x === 0 || size.y === 0) return;
-      const {density, heightBase, heightFalloff, anisotropy, distance, steps, lightSteps, scale, sun, lights, ambient, color} = settings;
+      const {density, heightBase, heightFalloff, anisotropy, distance, steps, lightSteps, lightDensity, lightDensityFalloff, scale, sun, lights, ambient, color} = settings;
       const width = Math.max(1, Math.round(size.x * scale)), height = Math.max(1, Math.round(size.y * scale));
       volumeTarget.setSize(width, height); compositeUniforms.uVolumeSize.value.set(width, height);
       camera.updateMatrixWorld();
@@ -229,6 +241,7 @@ export function createVolumetricLight({renderer, sunShadows, rig, ...overrides} 
       marchUniforms.uVolumeColor.value.set(color);
       marchUniforms.uVolumeMedium.value.set(density, heightBase, heightFalloff, anisotropy);
       marchUniforms.uVolumeMarch.value.set(distance, steps, lights, lightSteps);
+      marchUniforms.uVolumeLightAir.value.set(lightDensity, lightDensityFalloff);
       const screen = renderer.getRenderTarget();
       scope(() => {
         if (!input) { sceneTarget.setSize(size.x, size.y); renderer.setRenderTarget(sceneTarget); renderer.render(scene, camera); }

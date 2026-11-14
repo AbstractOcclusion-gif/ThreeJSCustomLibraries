@@ -357,7 +357,7 @@ test('volumetric light marches the air with the parts it is given and lays it ov
  assert.equal(fullMarch.uniforms.uSunShadowAtlas, shadows.sun.uniforms.uSunShadowAtlas); assert.equal(fullMarch.uniforms.uRigCount, rig.lights.uniforms.uRigCount);
  // The air takes the sun and the sky of the environment, and the march runs at its share of the screen.
  assert.deepEqual(fullMarch.uniforms.uVolumeSun.value.toArray(), environment.sun.color.toArray());
- assert.deepEqual(fullMarch.uniforms.uVolumeMedium.value.toArray(), [.01, 0, 0, .6]); assert.deepEqual(fullMarch.uniforms.uVolumeMarch.value.toArray(), [150, 16, 1, 8]);
+ assert.deepEqual(fullMarch.uniforms.uVolumeMedium.value.toArray(), [.01, 0, 0, .6]); assert.deepEqual(fullMarch.uniforms.uVolumeMarch.value.toArray(), [150, 16, 1, 8]); assert.deepEqual(fullMarch.uniforms.uVolumeLightAir.value.toArray(), [.02, 1.5]);
  assert.deepEqual(composite.uniforms.uVolumeSize.value.toArray(), [200, 150]);
  assert.ok(composite.fragmentShader.includes('#include <tonemapping_fragment>') && composite.uniforms.tVolume.value.isTexture);
  // A pass that already holds the scene hands it over: the scene is not drawn again.
