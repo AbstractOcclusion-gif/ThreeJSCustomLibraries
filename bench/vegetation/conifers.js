@@ -22,7 +22,7 @@ const FADE_HALF_WIDTH = .1; // fraction of the switch distance on either side
 function addDistanceFade(shader) {
   shader.vertexShader = `attribute vec2 treeBlend; varying vec2 vTreeBlend;\n${shader.vertexShader}`
     .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTreeBlend = treeBlend;');
-  shader.fragmentShader = `varying float vTreeBlend;\n${shader.fragmentShader}`
+  shader.fragmentShader = `varying vec2 vTreeBlend;\n${shader.fragmentShader}`
     .replace('#include <alphatest_fragment>', `
       #include <alphatest_fragment>
       // Both levels use the same screen-space threshold and complementary masks.
