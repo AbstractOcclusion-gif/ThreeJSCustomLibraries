@@ -42,7 +42,7 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     if (area && area.field.snowCover.value !== snow) area.impacts.setSurface(snow ? 'snow' : 'mud');
   }
   // Lays the area around a point. Its ground is sampled and painted from the world, like the rings.
-  function build(origin, {heights, paint, lowest, skyData, surroundSamples}) {
+  function build(origin, {heights, paint, lowest, skyData, surroundSamples}, hidden = false) {
     const ground = world(), loaded = textures();
     const {size, margin} = PLAY, n = cells + 1, step = size / cells;
     const skySide = size / PLAY.skyTexel + 1;
@@ -63,21 +63,23 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
       surround: {heightAt: ground.heightAt, lift: () => snow ? SNOW_DEFAULTS.driftDepth : 0, samples: surroundSamples}});
     const laid = area = {field, tracks, material, mesh, impacts, origin, sky};
     setSnow(snow);
-    const reveal = () => {
+    laid.reveal = () => {
       if (area !== laid) return;
       mesh.visible = true;
       cutout.value.set(origin[0] + margin, origin[1] + margin, size - 2 * margin, size - 2 * margin);
     };
     if (prepare) {
-      laid.ready = Promise.resolve().then(() => area === laid && prepare(mesh)).then(reveal, error => {
+      laid.ready = Promise.resolve().then(() => area === laid && prepare(mesh)).then(() => {
+        if (!hidden) laid.reveal();
+      }, error => {
         if (area === laid) clear();
         throw error;
       });
-    } else reveal();
+    } else laid.reveal();
     return laid;
   }
 
-  function lay(x, z) {
+  function lay(x, z, hidden = false) {
     const {size, snap} = PLAY;
     const origin = [x, z].map(value => Math.round((value - size / 2) / snap) * snap);
     if (pending?.origin.every((value, index) => origin[index] === value)) return pending.result;
@@ -89,7 +91,7 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     request.result = sampleArea(options).then(samples => {
       if (pending !== request) return;
       pending = undefined;
-      return build(origin, samples);
+      return build(origin, samples, hidden);
     }, error => {
       if (pending === request) pending = undefined;
       throw error;
@@ -100,27 +102,32 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
   return {
     get area() { return area; },
     lay, clear, setSnow,
-    // Rolls a ball of `radius` m from just ahead of the focus, away from the camera.
-    roll({focus, camera, radius = PLAY.ball.radius}) {
-      const heading = new THREE.Vector3().subVectors(focus, camera.position).setY(0);
-      if (heading.lengthSq() === 0) heading.set(0, 0, 1);
-      heading.normalize();
-      const x = focus.x + heading.x * PLAY.ahead, z = focus.z + heading.z * PLAY.ahead;
-      const inside = area && [x - area.origin[0], z - area.origin[1]].every(offset => offset > PLAY.edge && offset < PLAY.size - PLAY.edge);
-      const launch = laid => {
-        if (!laid) return;
-        if (laid.ready) return laid.ready.then(() => spawn(laid));
-        spawn(laid);
-      };
-      const spawn = laid => {
-        if (area !== laid) return;
-        laid.impacts.launch('sphere', snow ? 'snow' : 'mud', undefined, {position: [x, z], velocity: [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale: radius / PLAY.ball.baseRadius});
-      };
-      const target = inside ? area : lay(x, z);
-      return sampleArea && !inside ? target.then(launch) : launch(target);
-    },
+    warm({focus, camera}) { return roll({focus, camera}, true); },
+    roll,
     update(dt) { area?.impacts.update(dt); },
     reset() { area?.impacts.reset(); },
     dispose() { clear(); ballMaterial.dispose(); },
   };
+
+  // Rolls a ball of `radius` m from just ahead of the focus, away from the camera.
+  function roll({focus, camera, radius = PLAY.ball.radius}, warm = false) {
+    const heading = new THREE.Vector3().subVectors(focus, camera.position).setY(0);
+    if (heading.lengthSq() === 0) heading.set(0, 0, 1);
+    heading.normalize();
+    const x = focus.x + heading.x * PLAY.ahead, z = focus.z + heading.z * PLAY.ahead;
+    const inside = area && [x - area.origin[0], z - area.origin[1]].every(offset => offset > PLAY.edge && offset < PLAY.size - PLAY.edge);
+    const launch = laid => {
+      if (!laid) return;
+      if (laid.ready) return laid.ready.then(() => spawn(laid));
+      spawn(laid);
+    };
+    const spawn = laid => {
+      if (area !== laid) return;
+      laid.reveal();
+      laid.impacts.launch('sphere', snow ? 'snow' : 'mud', undefined, {position: [x, z], velocity: [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale: radius / PLAY.ball.baseRadius});
+    };
+    const target = inside ? area : lay(x, z, warm);
+    if (warm) return Promise.resolve(target).then(laid => laid?.ready);
+    return sampleArea && !inside ? target.then(launch) : launch(target);
+  }
 }

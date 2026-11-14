@@ -313,6 +313,7 @@ const weatherUI = mountWeatherControls(weather);
 const unbindResize = bindResize(renderer, camera);
 const gpu = gpuName(renderer.getContext());
 let lastStatus = -Infinity, lastScan = -Infinity, lastFrame = 0, frameMs = 0;
+let warmPlay = true;
 startFrameLoop(renderer, (dt, now) => {
   if (lastFrame) frameMs += (now - lastFrame - frameMs) * (frameMs ? COST.fpsSmoothing : 1);
   lastFrame = now;
@@ -353,6 +354,10 @@ startFrameLoop(renderer, (dt, now) => {
   lightRig.renderShadows(scene);
   if (settings.sunShadows) sunShadows.render(scene, camera, environment.sun.direction);
   weather.view.render(settings.volumetric ? volumetric.capture(scene, camera, environment) : undefined);
+  if (warmPlay) {
+    warmPlay = false;
+    play.warm({focus, camera}).catch(report);
+  }
   weatherUI.sync();
   if (now - lastStatus >= STATUS_REFRESH_MS) {
     lastStatus = now;
