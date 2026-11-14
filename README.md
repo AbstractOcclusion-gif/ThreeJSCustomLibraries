@@ -104,7 +104,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | rocks (seeded stones, boulders, scatter and cliff runs) | `three-kit/rocks` | `bench/rocks/` | ✓ |
 | boundaries (runs → hedges/fences/walls/electric lines, JSON layouts) | `three-kit/boundaries` | `bench/boundaries/` | ✓ |
-| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials, with their shadows; cascaded sun shadows for both paths) | `three-kit/lighting` | `bench/lighting/` | ✓ |
+| lighting (light probes: ambient light that follows the ground; light rig: point and spot lights for hook materials, with their shadows; cascaded sun shadows for both paths; light tinted through transparent meshes) | `three-kit/lighting` | `bench/lighting/` | ✓ |
 | cable (articulated rope on cannon-es, tube view) | `three-kit/cable` | `bench/cable/` | ✓ |
 | destruction (rigid structures, impact fracture, overload detachment) | `three-kit/destruction`, `/destruction/three` | `bench/destruction/` | ✓ |
 | camera (director, rigs, bullet time, replay, collision, post, panel) | `three-kit/camera` | `bench/camera/` | ✓ |
@@ -265,6 +265,16 @@ sun is a direction: the Three directional light that points the same way is the 
 Three's own shadow too (`castShadow = false`, the stage's default). `shadows.settings` is live (`strength`, `softness`,
 `distance`, `lambda`, `blend`, `normalOffset`, `depthBias`, `debug` to tint the cascades); `every` is how many frames each
 cascade waits between two draws (`[1, 1, 2, 4]`). A ground mesh casts with `shadowSide: THREE.FrontSide`.
+
+### Tinted light through glass
+
+With `translucent: true` (`createSunShadows({renderer, translucent: true})`, `createLightRig({shadows: {renderer,
+translucent: true}})`) a transparent mesh with `castShadow` casts as coloured glass instead of nothing. Each tile of the
+atlas is drawn a second time, behind the opaque depth: every pane multiplies what it lets through,
+`(1 - opacity) + opacity x colour` (its colour, map and opacity), into the colour of the atlas, which also keeps the depth
+of the nearest pane. A surface behind that depth takes the tint with its shadow, on both lighting paths, with no pass of
+its own. The atlas then holds half-float colour, so it is off by default. A surface between two panes takes the tint of
+both.
 
 ### Light slots
 

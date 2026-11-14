@@ -44,8 +44,8 @@ vec3 lightLocal(vec3 n, vec3 worldPosition, float wrap) {
     }
     float cone = smoothstep(shape.z, shape.w, dot(direction, uRigDirection[i]));
     float facing = max((dot(n, direction) + wrap) / (1.0 + wrap), 0.0);
-    float reach = falloff * cone * facing;
-    ${shadowGLSL ? 'if (reach > 0.0 && uRigCaster[i] >= 0) reach *= lightShadowOf(uRigCaster[i], worldPosition, n);' : ''}
+    vec3 reach = vec3(falloff * cone * facing);
+    ${shadowGLSL ? 'if (reach.x > 0.0 && uRigCaster[i] >= 0) reach *= lightShadowOf(uRigCaster[i], worldPosition, n);' : ''}
     sum += uRigColor[i] * reach;
   }
   return sum;

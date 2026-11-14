@@ -1,7 +1,8 @@
 // Lighting bench: the kit's lights on the basic stage. A ground of two colours with a trench, light probes measured
 // from it, a point light and a spot light in a light rig with their shadows, the kit's cascaded sun shadows, and pairs of white objects:
 // one on Three's standard material, one on the lighting hook. Each light stands midway between the two objects of a
-// pair, and both cast and receive the same shadows, so they must match.
+// pair, and both cast and receive the same shadows, so they must match. A third light circles the scene to judge
+// moving shadows, and panes of coloured glass tint the light that goes through them.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
@@ -20,6 +21,11 @@ const OBJECT = {color: 0xf2f2f2, radius: 1, lift: .3, pair: 1.3, side: 6, flat: 
 // intensity in candela, distance (cutoff) in m, angle in degrees.
 const POINT = {color: 0xffa040, intensity: 12, distance: 20, decay: 2, lift: 3.5};
 const SPOT = {color: 0x80b0ff, intensity: 150, distance: 30, decay: 2, height: 8, angle: 25, penumbra: .4};
+// The moving light circles `centre` (x, z) at `radius` m, `height` m over the flat, at `speed` rad/s.
+const MOVING = {color: 0xd8ffd0, intensity: 40, distance: 30, decay: 2, centre: [8, 0], radius: 11, height: 3, speed: .8};
+// Glass: upright panes (width, height in m) in a row along z from `at` (x, z), `gap` m apart, for the sun; and one
+// lying `under` m below the spot, over half its cone.
+const GLASS = {colors: [0xff3030, 0x30d040, 0x3060ff], size: [1.8, 3.2], at: [21, -4], gap: 2, opacity: .65, under: 3, spotPane: [3, 3], spotColor: 0xffd020};
 const renderer = benchRenderer();
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(VIEW.fov, innerWidth / innerHeight, VIEW.near, VIEW.far);
 camera.position.set(...VIEW.position);
@@ -35,7 +41,7 @@ const ground = {
   },
   colorAt: (x, z, target) => target.copy(groundColors[z < 0 ? 0 : 1]),
 };
-const probes = createLightProbes({ground}), rig = createLightRig({shadows: {renderer}}), shadows = createSunShadows({renderer});
+const probes = createLightProbes({ground}), rig = createLightRig({shadows: {renderer, translucent: true}}), shadows = createSunShadows({renderer, translucent: true});
 const stage = createBasicStage({scene, ground: false, ambient: probes.ambient, lights: rig.lights, sun: shadows.sun});
 
 const groundGeometry = new THREE.PlaneGeometry(GROUND.size, GROUND.size, GROUND.cells, GROUND.cells).rotateX(-Math.PI / 2);
@@ -94,8 +100,33 @@ const spot = new THREE.SpotLight(SPOT.color, SPOT.intensity, SPOT.distance, THRE
 spot.position.set(OBJECT.flat, ground.heightAt(OBJECT.flat) + SPOT.height, OBJECT.side);
 spot.target.position.set(OBJECT.flat, ground.heightAt(OBJECT.flat), OBJECT.side);
 scene.add(point, spot, spot.target);
-rig.add(point, {shadow: true}); rig.add(spot, {shadow: true});
-const casts = {point: true, spot: true};
+const moving = new THREE.PointLight(MOVING.color, MOVING.intensity, MOVING.distance, MOVING.decay);
+scene.add(moving);
+rig.add(point, {shadow: true}); rig.add(spot, {shadow: true}); rig.add(moving, {shadow: true});
+const casts = {point: true, spot: true, moving: true};
+const movingSettings = {speed: MOVING.speed, radius: MOVING.radius, height: MOVING.height};
+let movingAngle = 0;
+function placeMoving(dt) {
+  movingAngle += movingSettings.speed * dt;
+  const x = MOVING.centre[0] + Math.cos(movingAngle) * movingSettings.radius, z = MOVING.centre[1] + Math.sin(movingAngle) * movingSettings.radius;
+  moving.position.set(x, movingSettings.height, z);
+}
+placeMoving(0);
+
+// Coloured glass: transparent, so it casts no dark shadow but tints the light that goes through it.
+const glassMaterials = GLASS.colors.map(color => new THREE.MeshStandardMaterial({color, transparent: true, opacity: GLASS.opacity, side: THREE.DoubleSide, roughness: .2}));
+const spotGlass = new THREE.MeshStandardMaterial({color: GLASS.spotColor, transparent: true, opacity: GLASS.opacity, side: THREE.DoubleSide, roughness: .2});
+const paneGeometry = new THREE.PlaneGeometry(...GLASS.size).rotateY(Math.PI / 2), spotPaneGeometry = new THREE.PlaneGeometry(...GLASS.spotPane).rotateX(-Math.PI / 2);
+const panes = glassMaterials.map((material, index) => {
+  const pane = new THREE.Mesh(paneGeometry, material);
+  pane.position.set(GLASS.at[0], ground.heightAt(GLASS.at[0]) + GLASS.size[1] / 2, GLASS.at[1] + index * GLASS.gap);
+  return pane;
+});
+const spotPane = new THREE.Mesh(spotPaneGeometry, spotGlass);
+spotPane.position.set(OBJECT.flat + GLASS.spotPane[0] / 2, spot.position.y - GLASS.under, OBJECT.side);
+panes.push(spotPane);
+for (const pane of panes) { pane.castShadow = true; scene.add(pane); }
+const glassSettings = {visible: true, opacity: GLASS.opacity};
 const spotSettings = {angle: SPOT.angle};
 
 const albedo = new THREE.Color();
@@ -125,6 +156,16 @@ spotFolder.add(spotSettings, 'angle', 5, 80, 1).name('cone · °').onChange(angl
 spotFolder.add(spot, 'penumbra', 0, 1, .01).name('soft edge');
 spotFolder.add(spot.target.position, 'x', OBJECT.flat - 10, OBJECT.flat + 10, .1).name('aim x · m');
 spotFolder.addColor(spot, 'color').name('colour');
+const movingFolder = gui.addFolder('Moving light');
+movingFolder.add(moving, 'visible').name('on');
+movingFolder.add(casts, 'moving').name('casts shadow').onChange(on => rig.setShadow(moving, on));
+movingFolder.add(movingSettings, 'speed', 0, 6, .05).name('speed · rad/s');
+movingFolder.add(movingSettings, 'radius', 2, 30, .5).name('circle · m');
+movingFolder.add(movingSettings, 'height', .5, 12, .1).name('height · m');
+movingFolder.add(moving, 'intensity', 0, 200, 1).name('intensity · cd');
+const glassFolder = gui.addFolder('Glass (tinted light)');
+glassFolder.add(glassSettings, 'visible').name('panes').onChange(visible => { for (const pane of panes) pane.visible = visible; });
+glassFolder.add(glassSettings, 'opacity', 0, 1, .01).name('opacity').onChange(opacity => { for (const material of [...glassMaterials, spotGlass]) material.opacity = opacity; });
 const shadowFolder = gui.addFolder('Sun shadows (cascades)');
 const shadowSlider = (name, step, label) => shadowFolder.add(shadows.settings, name, ...SUN_SHADOW_LIMITS[name], step).name(label);
 shadowSlider('strength', .01, 'strength');
@@ -153,6 +194,7 @@ let lastStatus = 0;
 startFrameLoop(renderer, (dt, now) => {
   controls.update(); stage.update(camera);
   probes.update(controls.target.x, controls.target.z);
+  placeMoving(dt);
   const lit = rig.update(camera.position);
   camera.updateMatrixWorld();
   const drawn = shadows.render(scene, camera, stage.environment.sun.direction);
@@ -165,5 +207,5 @@ startFrameLoop(renderer, (dt, now) => {
   }
 });
 document.body.dataset.ready = 'true';
-onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); stage.dispose(); probes.dispose(); rig.dispose(); shadows.dispose(); scene.remove(point, spot, spot.target); point.dispose(); spot.dispose(); for (const item of [standard, hooked, groundMaterial, groundGeometry, sphere, pillar]) item.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });
-window.lightingBench = {stage, probes, rig, shadows, point, spot, settings, applyGround, scene, camera, controls, renderer};
+onLeave(() => { renderer.setAnimationLoop(null); unbindResize(); stage.dispose(); probes.dispose(); rig.dispose(); shadows.dispose(); scene.remove(point, spot, spot.target, moving, ...panes); point.dispose(); spot.dispose(); moving.dispose(); for (const item of [...glassMaterials, spotGlass, paneGeometry, spotPaneGeometry]) item.dispose(); for (const item of [standard, hooked, groundMaterial, groundGeometry, sphere, pillar]) item.dispose(); controls.dispose(); gui.destroy(); renderer.dispose(); });
+window.lightingBench = {stage, probes, rig, shadows, point, spot, moving, panes, settings, applyGround, scene, camera, controls, renderer};

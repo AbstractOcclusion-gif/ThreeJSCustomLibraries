@@ -204,7 +204,8 @@ function recordingRenderer() {
  return {calls, autoClear: true, capabilities: {}, render: (scene, camera) => calls.push(['render', camera.layers.mask]), clear: () => calls.push(['clear']),
   setRenderTarget: target => calls.push(['target', target ? target.viewport.toArray() : null]), getRenderTarget: () => null, getActiveCubeFace: () => 0,
   getActiveMipmapLevel: () => 0, getScissorTest: () => false, getViewport: v => v, getScissor: v => v, getClearColor: c => c, getClearAlpha: () => 1,
-  setScissorTest() {}, setViewport() {}, setScissor() {}, setClearColor() {}};
+  setScissorTest() {}, setViewport() {}, setScissor() {}, setClearColor: color => calls.push(['clearColor', color?.isColor ? color.toArray() : null]),
+  state: {buffers: {color: {setMask: mask => calls.push(['colorMask', mask]), setLocked: locked => calls.push(['colorLock', locked])}}}};
 }
 
 test('sun shadows draw their cascades into the tiles of one atlas and give both lighting paths the same read', () => {
@@ -293,4 +294,47 @@ test('light shadows give each caster a block of the atlas, draw a spot once and 
  for (const kind of ['point', 'spot']) assert.ok(new RegExp(`get${kind[0].toUpperCase()}${kind.slice(1)}LightInfo\\( ${kind}Light, geometryPosition, directLight \\);\\s*\\{[^\\n]*\\s*if \\(directLight\\.visible\\) directLight\\.color \\*= lightShadowNear\\(${kind}Light\\.position`).test(shader.fragmentShader));
  assert.equal(shader.uniforms.uLightShadowAtlas.value, rig.shadows.atlas);
  rig.dispose(); assert.equal(rig.renderShadows(scene), 0);
+});
+
+test('with translucent shadows a transparent caster tints the light: a second draw behind the opaque depth, into the colour of the atlas', () => {
+ const renderer = recordingRenderer(), shadows = createSunShadows({renderer, cascades: 1, resolution: 64, translucent: true});
+ const rig = createLightRig({shadows: {renderer, casters: 1, resolution: 64, translucent: true}});
+ assert.throws(() => shadows.set('translucent', false), /fixed at creation/);
+ for (const [glsl, uniforms, name] of [[shadows.sun.glsl, shadows.sun.uniforms, 'uSunShadowGlass'], [rig.lights.glsl, rig.lights.uniforms, 'uLightShadowGlass']]) {
+  assert.ok(glsl.includes(`uniform sampler2D ${name};`) && uniforms[name].value.isTexture && uniforms[name].value.type === THREE.HalfFloatType);
+ }
+ assert.ok(!createSunShadows({renderer}).sun.glsl.includes('uniform sampler2D uSunShadowGlass') && !('uSunShadowGlass' in createSunShadows({renderer}).sun.uniforms));
+ const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(45, 1, .1, 100), sun = new THREE.Vector3(0, 1, 0);
+ const paneMaterial = new THREE.MeshStandardMaterial({color: 0xff0000, transparent: true, opacity: .5, side: THREE.DoubleSide});
+ const pane = new THREE.Mesh(new THREE.PlaneGeometry(), paneMaterial), box = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial());
+ pane.castShadow = box.castShadow = true; scene.add(pane, box); camera.updateMatrixWorld(true);
+ const seen = [];
+ renderer.render = (drawn, lightCamera) => seen.push({layers: lightCamera.layers.mask, pane: pane.material, paneLayers: pane.layers.mask, box: box.material.isMeshDepthMaterial});
+ assert.equal(shadows.render(scene, camera, sun), 1);
+ // Two draws of the tile: the opaque casters with the colour locked, then the glass alone.
+ assert.equal(seen.length, 2);
+ assert.ok(seen[0].layers !== seen[1].layers && seen[0].box && (seen[1].paneLayers & seen[1].layers) !== 0 && (seen[0].paneLayers & seen[0].layers) === 0);
+ const glass = seen[1].pane;
+ assert.ok(glass.isMeshBasicMaterial && glass !== paneMaterial && glass.opacity === .5 && glass.color.equals(paneMaterial.color) && glass.side === THREE.DoubleSide);
+ assert.ok(glass.blending === THREE.CustomBlending && glass.blendDst === THREE.SrcColorFactor && glass.blendEquationAlpha === THREE.MinEquation && glass.depthWrite === false);
+ const order = renderer.calls.filter(call => ['clearColor', 'clear', 'colorMask', 'colorLock'].includes(call[0])).map(call => call.join(':'));
+ assert.deepEqual(order.slice(0, 6), ['clearColor:1,1,1', 'clear', 'colorMask:false', 'colorLock:true', 'colorLock:false', 'colorMask:true']);
+ assert.ok(pane.material === paneMaterial && pane.layers.mask === 1);
+ // The glass follows its source, and its shader writes what it lets through and its depth.
+ paneMaterial.opacity = .8; shadows.render(scene, camera, sun);
+ assert.equal(glass.opacity, .8);
+ const shader = {uniforms: {}, vertexShader: THREE.ShaderLib.basic.vertexShader, fragmentShader: THREE.ShaderLib.basic.fragmentShader};
+ glass.onBeforeCompile(shader);
+ assert.ok(shader.fragmentShader.includes('1.0 - diffuseColor.a + diffuseColor.a * diffuseColor.rgb') && !shader.fragmentShader.includes('#include <opaque_fragment>') && shader.vertexShader.includes('vGlassDepth = -mvPosition.z;'));
+ // Without glass in sight a tile is drawn once.
+ pane.visible = false; seen.length = 0; shadows.render(scene, camera, sun);
+ assert.equal(seen.length, 1);
+ // A light: the far plane of its camera reaches the glass, so its depth is written over it.
+ pane.visible = true; const spot = new THREE.SpotLight(0xffffff, 10, 25); spot.position.set(0, 5, 0); scene.add(spot, spot.target);
+ rig.add(spot, {shadow: true}); rig.update(); seen.length = 0;
+ assert.equal(rig.renderShadows(scene), 1); assert.equal(seen.length, 2);
+ const lightShader = {uniforms: {}, vertexShader: THREE.ShaderLib.basic.vertexShader, fragmentShader: THREE.ShaderLib.basic.fragmentShader};
+ seen[1].pane.onBeforeCompile(lightShader);
+ assert.equal(lightShader.uniforms.uGlassFar.value, 25); assert.equal(shader.uniforms.uGlassFar.value, 0);
+ shadows.dispose(); rig.dispose();
 });

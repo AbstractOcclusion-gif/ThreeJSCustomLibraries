@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import {addLightSlot} from '../core/light-slots.js';
 import {createRenderScope} from '../core/render-state.js';
 import {cascadeSplits, createCascadeFitter} from './cascades.js';
-import {createShadowCasters, withShadowCasters, SHADOW_LAYER} from './shadow-casters.js';
+import {createShadowCasters, withShadowCasters, shadowAtlasTarget, SHADOW_LAYER} from './shadow-casters.js';
 
 export const SUN_SHADOW_DEFAULTS = Object.freeze({
   cascades: 4,        // slices of the view, each with its own tile
@@ -24,6 +24,7 @@ export const SUN_SHADOW_DEFAULTS = Object.freeze({
   blend: .1,          // share of a tile, from its edge, over which a cascade gives way to the next
   every: Object.freeze([1, 1, 2, 4]),   // frames between two draws of each cascade: the far ones can wait
   debug: false,       // tints each cascade: red, green, blue, yellow
+  translucent: false, // transparent meshes cast too, as coloured glass (the atlas then holds colour: more memory)
 });
 export const SUN_SHADOW_LIMITS = Object.freeze({
   cascades: [1, 4] /* the per-cascade uniforms are vec4 */, resolution: [64, 4096], distance: [1, 10000], near: [.01, 100], lambda: [0, 1], reach: [0, 10000],
@@ -35,10 +36,15 @@ const SLOT = 'sun-shadows';
 const TO_UV = new THREE.Matrix4().set(.5, 0, 0, .5, 0, .5, 0, .5, 0, 0, .5, .5, 0, 0, 0, 1);   // clip space -> 0..1
 
 // `vec3 sunShadowAt(vec3 worldPosition, vec3 n)`: the share of the sunlight that reaches a surface facing n.
-// Written once per shader, whoever brings it (the hook, a light slot).
-export const sunShadowGLSL = cascades => /* glsl */`
+// Written once per shader, whoever brings it (the hook, a light slot). translucent: the light is also tinted by the
+// transparent casters it went through.
+export const sunShadowGLSL = (cascades, translucent = false) => /* glsl */`
 #ifndef SUN_SHADOWS
 #define SUN_SHADOWS
+${translucent ? `#define SUN_SHADOW_GLASS
+// Depth by which a surface must be behind a glass to take its tint: the glass must not tint itself.
+#define SUN_SHADOW_GLASS_BIAS 0.001
+uniform sampler2D uSunShadowGlass;   // rgb: light let through by the glass, a: depth of the nearest glass` : ''}
 #define SUN_SHADOW_CASCADES ${cascades}
 // Cosine above which a directional light is the sun.
 #define SUN_SHADOW_SAME_DIRECTION 0.99999
@@ -63,7 +69,7 @@ float sunShadowTaps(vec2 uv, float depth, vec4 tile) {
 }
 vec3 sunShadowAt(vec3 worldPosition, vec3 n) {
   float lit = 0.0, left = 1.0;
-  vec3 tint = vec3(0.0);
+  vec3 tint = vec3(0.0), through = vec3(0.0);
   for (int i = 0; i < SUN_SHADOW_CASCADES; i++) {
     vec3 origin = worldPosition + n * (uSunShadowTexel[i] * uSunShadowLook.y);
     vec3 coord = (uSunShadowMatrix[i] * vec4(origin, 1.0)).xyz;
@@ -74,12 +80,18 @@ vec3 sunShadowAt(vec3 worldPosition, vec3 n) {
     if (edge <= 0.0 || coord.z <= 0.0 || coord.z >= 1.0) continue;
     float share = left * smoothstep(0.0, uSunShadowLook.w, edge);
     lit += share * sunShadowTaps(coord.xy, coord.z - uSunShadowBias[i], tile);
+    #ifdef SUN_SHADOW_GLASS
+    vec4 glass = textureLod(uSunShadowGlass, clamp(coord.xy, tile.xy, tile.zw), 0.0);
+    through += share * (coord.z - SUN_SHADOW_GLASS_BIAS > glass.a ? glass.rgb : vec3(1.0));
+    #else
+    through += vec3(share);
+    #endif
     tint += share * sunShadowTint(i);
     left -= share;
     if (left < 0.001) break;
   }
   // Outside every cascade: in the sun.
-  float visibility = mix(1.0, lit + left, uSunShadowLook.x);
+  vec3 visibility = mix(vec3(1.0), (lit + left) * (through + left), uSunShadowLook.x);
   return visibility * mix(vec3(1.0), tint + left, uSunShadowAtlasTexel.z);
 }
 #endif`;
@@ -94,7 +106,7 @@ function validate(settings) {
   if (!Array.isArray(every) || every.length < cascades || every.slice(0, cascades).some(frames => !Number.isInteger(frames) || frames < 1)) throw new RangeError('Invalid sun shadow every');
 }
 
-// renderer: the THREE.WebGLRenderer the cascades are drawn with. cascades and resolution are fixed at creation; the
+// renderer: the THREE.WebGLRenderer the cascades are drawn with. cascades, resolution and translucent are fixed at creation; the
 // other settings are live in `settings` (set(name, value) checks them).
 // Returns {settings, sun: {glsl, uniforms}, atlas, set(name, value), applyTo(material) -> detach,
 // render(scene, camera, sunDirection) -> cascades drawn, dispose()}.
@@ -103,13 +115,12 @@ export function createSunShadows({renderer, ...overrides} = {}) {
   if (renderer.capabilities?.reversedDepthBuffer) throw Error('Sun shadows do not read a reversed depth buffer');
   const settings = {...SUN_SHADOW_DEFAULTS, ...overrides};
   validate(settings);
-  const {cascades, resolution} = settings;
+  const {cascades, resolution} = settings, translucent = Boolean(settings.translucent);
   const columns = Math.min(cascades, ATLAS_COLUMNS), rows = Math.ceil(cascades / columns);
   const width = columns * resolution, height = rows * resolution;
   const depth = new THREE.DepthTexture(width, height, THREE.UnsignedIntType);
   depth.minFilter = depth.magFilter = THREE.NearestFilter;
-  const target = new THREE.WebGLRenderTarget(width, height, {depthTexture: depth, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter});
-  target.scissorTest = true;
+  const target = shadowAtlasTarget(width, height, depth, translucent);
   const perCascade = make => Array.from({length: cascades}, make);
   const look = new THREE.Vector4(), atlasTexel = new THREE.Vector3(1 / width, 1 / height, 0), sunDir = new THREE.Vector3(0, 1, 0);
   const uniforms = {
@@ -117,15 +128,16 @@ export function createSunShadows({renderer, ...overrides} = {}) {
     uSunShadowTile: {value: perCascade(() => new THREE.Vector4())},
     uSunShadowTexel: {value: new THREE.Vector4()}, uSunShadowBias: {value: new THREE.Vector4()},
     uSunShadowLook: {value: look}, uSunShadowAtlasTexel: {value: atlasTexel}, uSunShadowDir: {value: sunDir},
+    ...(translucent && {uSunShadowGlass: {value: target.texture}}),
   };
-  const glsl = sunShadowGLSL(cascades);
+  const glsl = sunShadowGLSL(cascades, translucent);
   // Tiles in pixels, and in uv half a texel inside their edge so a blurred read never crosses into the next tile.
   const tiles = perCascade((_, index) => ({x: (index % columns) * resolution, y: Math.floor(index / columns) * resolution}));
   tiles.forEach(({x, y}, index) => uniforms.uSunShadowTile.value[index].set((x + .5) / width, (y + .5) / height, (x + resolution - .5) / width, (y + resolution - .5) / height));
   const toTile = tiles.map(({x, y}) => new THREE.Matrix4().makeScale(resolution / width, resolution / height, 1).setPosition(x / width, y / height, 0).multiply(TO_UV));
   const cameras = perCascade(() => { const camera = new THREE.OrthographicCamera(); camera.layers.set(SHADOW_LAYER); return camera; });
   const fitter = createCascadeFitter(), scope = createRenderScope(renderer), splits = [];
-  const casters = createShadowCasters();
+  const casters = createShadowCasters({translucent});
   let frame = 0, disposed = false;
 
   function draw(index, scene, camera, sunDirection) {
@@ -135,11 +147,7 @@ export function createSunShadows({renderer, ...overrides} = {}) {
     uniforms.uSunShadowMatrix.value[index].multiplyMatrices(toTile[index], lightCamera.projectionMatrix).multiply(lightCamera.matrixWorldInverse);
     uniforms.uSunShadowTexel.value.setComponent(index, texel);
     uniforms.uSunShadowBias.value.setComponent(index, texel * depthBias / (lightCamera.far - lightCamera.near));
-    const {x, y} = tiles[index];
-    target.viewport.set(x, y, resolution, resolution); target.scissor.set(x, y, resolution, resolution);
-    renderer.setRenderTarget(target);
-    renderer.clear();
-    renderer.render(scene, lightCamera);
+    casters.drawTile(renderer, scene, lightCamera, target, tiles[index].x, tiles[index].y, resolution, 0);
   }
 
   const shadows = {
@@ -147,7 +155,7 @@ export function createSunShadows({renderer, ...overrides} = {}) {
     atlas: depth,
     // Changes a live setting (everything but cascades and resolution).
     set(name, value) {
-      if (name === 'cascades' || name === 'resolution') throw Error(`Sun shadow ${name} is fixed at creation`);
+      if (name === 'cascades' || name === 'resolution' || name === 'translucent') throw Error(`Sun shadow ${name} is fixed at creation`);
       if (!(name in SUN_SHADOW_DEFAULTS)) throw Error(`Unknown sun shadow setting ${name}`);
       const next = {...settings, [name]: value};
       validate(next); settings[name] = value;

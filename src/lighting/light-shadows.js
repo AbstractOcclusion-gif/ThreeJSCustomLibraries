@@ -3,7 +3,7 @@
 // Used through the light rig (rig.js), which decides which of its lights cast and gives both lighting paths the read.
 import * as THREE from 'three';
 import {createRenderScope} from '../core/render-state.js';
-import {createShadowCasters, withShadowCasters, SHADOW_LAYER} from './shadow-casters.js';
+import {createShadowCasters, withShadowCasters, shadowAtlasTarget, SHADOW_LAYER} from './shadow-casters.js';
 
 export const LIGHT_SHADOW_DEFAULTS = Object.freeze({
   casters: 4,         // lights that cast at once
@@ -14,6 +14,7 @@ export const LIGHT_SHADOW_DEFAULTS = Object.freeze({
   softness: 1.5,      // texels: radius of the blur of the shadow edge
   normalOffset: 1.5,  // texels a surface is read away from itself, along its normal
   depthBias: 1.5,     // texels a surface is read nearer the light
+  translucent: false, // transparent meshes cast too, as coloured glass (the atlas then holds colour: more memory)
 });
 export const LIGHT_SHADOW_LIMITS = Object.freeze({
   casters: [1, 8], resolution: [64, 2048], perFrame: [1, 8], range: [1, 10000], strength: [0, 1], softness: [0, 8], normalOffset: [0, 16], depthBias: [0, 16],
@@ -30,12 +31,17 @@ const UP_LIMIT = .99;                    // |y| of a spot direction above which 
 const FACES = Object.freeze([[1, 0, 0, UP], [-1, 0, 0, UP], [0, 1, 0, SIDE], [0, -1, 0, SIDE], [0, 0, 1, UP], [0, 0, -1, UP]]
   .map(([x, y, z, up]) => ({forward: new THREE.Vector3(x, y, z), up})));
 
-// `float lightShadowOf(int caster, vec3 worldPosition, vec3 n)`: the share of a casting light that reaches a surface
-// facing n, and `float lightShadowNear(vec3 lightViewPosition, ...)`: the same for the light standing at a place,
-// for Three's own light loop. Written once per shader, whoever brings it.
-export const lightShadowGLSL = casters => /* glsl */`
+// `vec3 lightShadowOf(int caster, vec3 worldPosition, vec3 n)`: the share of a casting light that reaches a surface
+// facing n, per colour, and `vec3 lightShadowNear(vec3 lightViewPosition, ...)`: the same for the light standing at a
+// place, for Three's own light loop. Written once per shader, whoever brings it. translucent: the light is also
+// tinted by the transparent casters it went through.
+export const lightShadowGLSL = (casters, translucent = false) => /* glsl */`
 #ifndef LIGHT_SHADOWS
 #define LIGHT_SHADOWS
+${translucent ? `#define LIGHT_SHADOW_GLASS
+// Share of the far plane by which a surface must be behind a glass to take its tint: the glass must not tint itself.
+#define LIGHT_SHADOW_GLASS_BIAS 0.002
+uniform sampler2D uLightShadowGlass;   // rgb: light let through by the glass, a: depth of the nearest glass over the far plane` : ''}
 #define LIGHT_SHADOW_CASTERS ${casters}
 #define LIGHT_SHADOW_NEAR ${NEAR.toFixed(4)}
 // Metres within which a light of Three's loop is the caster drawn at that place (a moving light is drawn a few frames late).
@@ -47,9 +53,9 @@ uniform vec4 uLightShadowBlock[LIGHT_SHADOW_CASTERS];      // first tile of the 
 uniform vec2 uLightShadowKind[LIGHT_SHADOW_CASTERS];       // 1 = point light (six tiles), 0 = spot; tangent of half the view of a tile
 uniform vec4 uLightShadowLook;       // strength, normal offset (texels), softness (texels), depth bias (texels)
 uniform vec3 uLightShadowTexel;      // 1 / atlas width, 1 / atlas height, texels across a tile
-float lightShadowOf(int caster, vec3 worldPosition, vec3 n) {
+vec3 lightShadowOf(int caster, vec3 worldPosition, vec3 n) {
   vec4 place = uLightShadowPlace[caster];
-  if (place.w <= 0.0) return 1.0;
+  if (place.w <= 0.0) return vec3(1.0);
   vec3 toLight = place.xyz - worldPosition;
   float lightDistance = max(length(toLight), 0.0001);
   vec2 kind = uLightShadowKind[caster];
@@ -57,7 +63,7 @@ float lightShadowOf(int caster, vec3 worldPosition, vec3 n) {
   vec3 origin = worldPosition + n * (texel * uLightShadowLook.y) + toLight * (texel * uLightShadowLook.w / lightDistance);
   vec4 block = uLightShadowBlock[caster];
   vec2 tile = block.xy, inTile;
-  float depth;
+  float depth, away;   // away: distance from the light along its view, over the far plane
   if (kind.x > 0.5) {
     // The face of the cube the surface is seen through, and where on it.
     vec3 d = origin - place.xyz, a = abs(d);
@@ -70,15 +76,16 @@ float lightShadowOf(int caster, vec3 worldPosition, vec3 n) {
     inTile = across / along * 0.5 + 0.5;
     tile += vec2(mod(face, 3.0), floor(face / 3.0)) * block.zw;
     float farPlane = place.w;
+    away = along / farPlane;
     depth = ((farPlane + LIGHT_SHADOW_NEAR) / (farPlane - LIGHT_SHADOW_NEAR) - 2.0 * farPlane * LIGHT_SHADOW_NEAR / ((farPlane - LIGHT_SHADOW_NEAR) * along)) * 0.5 + 0.5;
   } else {
     vec4 clip = uLightShadowMatrix[caster] * vec4(origin, 1.0);
-    if (clip.w <= 0.0) return 1.0;
+    if (clip.w <= 0.0) return vec3(1.0);
     vec3 seen = clip.xyz / clip.w * 0.5 + 0.5;
-    inTile = seen.xy; depth = seen.z;
-    if (inTile.x <= 0.0 || inTile.y <= 0.0 || inTile.x >= 1.0 || inTile.y >= 1.0) return 1.0;
+    inTile = seen.xy; depth = seen.z; away = clip.w / place.w;
+    if (inTile.x <= 0.0 || inTile.y <= 0.0 || inTile.x >= 1.0 || inTile.y >= 1.0) return vec3(1.0);
   }
-  if (depth >= 1.0) return 1.0;
+  if (depth >= 1.0) return vec3(1.0);
   // Half a texel inside the tile, so a blurred read never crosses into the next one.
   vec2 inset = 0.5 * uLightShadowTexel.xy, low = tile + inset, high = tile + block.zw - inset;
   vec2 uv = tile + inTile * block.zw;
@@ -87,14 +94,19 @@ float lightShadowOf(int caster, vec3 worldPosition, vec3 n) {
     vec2 tap = clamp(uv + vec2(float(x), float(y)) * uLightShadowLook.z * uLightShadowTexel.xy, low, high);
     lit += step(depth, textureLod(uLightShadowAtlas, tap, 0.0).r);
   }
-  return mix(1.0, lit / 9.0, uLightShadowLook.x);
+  vec3 through = vec3(1.0);
+  #ifdef LIGHT_SHADOW_GLASS
+  vec4 glass = textureLod(uLightShadowGlass, clamp(uv, low, high), 0.0);
+  if (away - LIGHT_SHADOW_GLASS_BIAS > glass.a) through = glass.rgb;
+  #endif
+  return mix(vec3(1.0), through * (lit / 9.0), uLightShadowLook.x);
 }
-float lightShadowNear(vec3 lightViewPosition, mat4 view, vec3 worldPosition, vec3 n) {
+vec3 lightShadowNear(vec3 lightViewPosition, mat4 view, vec3 worldPosition, vec3 n) {
   for (int caster = 0; caster < LIGHT_SHADOW_CASTERS; caster++) {
     vec4 place = uLightShadowPlace[caster];
     if (place.w > 0.0 && distance((view * vec4(place.xyz, 1.0)).xyz, lightViewPosition) < LIGHT_SHADOW_SAME_PLACE) return lightShadowOf(caster, worldPosition, n);
   }
-  return 1.0;
+  return vec3(1.0);
 }
 #endif`;
 
@@ -105,7 +117,7 @@ function validate(settings) {
   }
 }
 
-// renderer: the THREE.WebGLRenderer the shadows are drawn with. casters and resolution are fixed at creation, the
+// renderer: the THREE.WebGLRenderer the shadows are drawn with. casters, resolution and translucent are fixed at creation, the
 // other settings are live. Returns {settings, glsl, uniforms, atlas, set(name, value), assign(lights) -> block of each,
 // blockOf(light), render(scene) -> lights drawn, dispose()}.
 export function createLightShadows({renderer, ...overrides} = {}) {
@@ -113,14 +125,13 @@ export function createLightShadows({renderer, ...overrides} = {}) {
   if (renderer.capabilities?.reversedDepthBuffer) throw Error('Light shadows do not read a reversed depth buffer');
   const settings = {...LIGHT_SHADOW_DEFAULTS, ...overrides};
   validate(settings);
-  const {casters: capacity, resolution} = settings;
+  const {casters: capacity, resolution} = settings, translucent = Boolean(settings.translucent);
   // Blocks side by side, in as square an atlas as they allow.
   const columns = Math.ceil(Math.sqrt(capacity * BLOCK[1] / BLOCK[0])), rows = Math.ceil(capacity / columns);
   const blockWidth = BLOCK[0] * resolution, blockHeight = BLOCK[1] * resolution, width = columns * blockWidth, height = rows * blockHeight;
   const depth = new THREE.DepthTexture(width, height, THREE.UnsignedIntType);
   depth.minFilter = depth.magFilter = THREE.NearestFilter;
-  const target = new THREE.WebGLRenderTarget(width, height, {depthTexture: depth, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter});
-  target.scissorTest = true;
+  const target = shadowAtlasTarget(width, height, depth, translucent);
   const each = make => Array.from({length: capacity}, make);
   const look = new THREE.Vector4();
   const uniforms = {
@@ -128,22 +139,20 @@ export function createLightShadows({renderer, ...overrides} = {}) {
     uLightShadowPlace: {value: each(() => new THREE.Vector4())}, uLightShadowBlock: {value: each(() => new THREE.Vector4())},
     uLightShadowKind: {value: each(() => new THREE.Vector2())},
     uLightShadowLook: {value: look}, uLightShadowTexel: {value: new THREE.Vector3(1 / width, 1 / height, resolution)},
+    ...(translucent && {uLightShadowGlass: {value: target.texture}}),
   };
   const origins = each((_, block) => ({x: (block % columns) * blockWidth, y: Math.floor(block / columns) * blockHeight}));
   origins.forEach(({x, y}, block) => uniforms.uLightShadowBlock.value[block].set(x / width, y / height, resolution / width, resolution / height));
   const holders = each(() => null);     // the light of each block
   const fresh = each(() => false);      // true: the block has a new light, not drawn yet
   const camera = new THREE.PerspectiveCamera(); camera.layers.set(SHADOW_LAYER);
-  const scope = createRenderScope(renderer), shadowCasters = createShadowCasters();
+  const scope = createRenderScope(renderer), shadowCasters = createShadowCasters({translucent});
   const position = new THREE.Vector3(), aim = new THREE.Vector3(), toward = new THREE.Vector3(), due = [];
   let turn = 0, disposed = false;
 
   function drawTile(scene, block, face) {
-    const {x, y} = origins[block], left = x + (face % BLOCK[0]) * resolution, bottom = y + Math.floor(face / BLOCK[0]) * resolution;
-    target.viewport.set(left, bottom, resolution, resolution); target.scissor.set(left, bottom, resolution, resolution);
-    renderer.setRenderTarget(target);
-    renderer.clear();
-    renderer.render(scene, camera);
+    const {x, y} = origins[block];
+    shadowCasters.drawTile(renderer, scene, camera, target, x + (face % BLOCK[0]) * resolution, y + Math.floor(face / BLOCK[0]) * resolution, resolution, camera.far);
   }
   function draw(scene, block) {
     const light = holders[block], far = light.distance > 0 ? light.distance : settings.range;
@@ -170,9 +179,9 @@ export function createLightShadows({renderer, ...overrides} = {}) {
   }
 
   const shadows = {
-    settings, glsl: lightShadowGLSL(capacity), uniforms, atlas: depth, capacity,
+    settings, glsl: lightShadowGLSL(capacity, translucent), uniforms, atlas: depth, capacity,
     set(name, value) {
-      if (name === 'casters' || name === 'resolution') throw Error(`Light shadow ${name} is fixed at creation`);
+      if (name === 'casters' || name === 'resolution' || name === 'translucent') throw Error(`Light shadow ${name} is fixed at creation`);
       if (!(name in LIGHT_SHADOW_DEFAULTS)) throw Error(`Unknown light shadow setting ${name}`);
       validate({...settings, [name]: value}); settings[name] = value;
       return shadows;
