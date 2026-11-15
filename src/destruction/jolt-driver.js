@@ -7,6 +7,11 @@ const WAKE_MARGIN=.05;
 // m/s. Jolt's point-velocity sleep threshold. It is above one step of free fall, so
 // a body whose support leaves is caught through the removed contact instead.
 const NATIVE_SLEEP_SPEED=.25;
+// Samples per side of a Jolt height field block; the sample count is padded up to a multiple of it with the edge row.
+const HEIGHTFIELD_BLOCK=4;
+// A Cannon height field has its heights along local +Z, a Jolt one along +Y: the native field is turned +120 degrees
+// about (1, 1, 1), which takes Jolt X, Y, Z onto Cannon local y, z, x, so a body keeps its Cannon rotation.
+const HEIGHTFIELD_TURN=Object.freeze([.5,.5,.5,.5]);
 
 // Uses the existing Cannon data objects as the structural model only. Jolt owns
 // integration and contacts; there is no second body solver or render dependency.
@@ -54,6 +59,7 @@ export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIsland
   if(s instanceof C.Box)return owned(new J.BoxShape(put(vector,s.halfExtents),.005,null));
   if(s instanceof C.Sphere)return owned(new J.SphereShape(s.radius,null));
   if(s instanceof C.Plane){vector.Set(0,0,1);const plane=new J.Plane(vector,0),shape=owned(new J.PlaneShape(plane,null,100000));J.destroy(plane);return shape;}
+  if(s instanceof C.Heightfield)return heightfield(s);
   if(s instanceof C.ConvexPolyhedron){
    // Shape data is copied into the key on every request: changing a source hull
    // later cannot silently reuse the previous immutable native geometry.
@@ -67,6 +73,21 @@ export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIsland
    finally{J.destroy(setup);}
   }
   throw Error('Unsupported Jolt structure collision shape');
+ }
+ // Cannon data[i][j] (i along local x, j along local y) becomes Jolt sample (column j, row i) of a square field,
+ // padded with the last row and column.
+ function heightfield(s){
+  const rows=s.data.length,columns=s.data[0]?.length??0;
+  if(rows<2||columns<2||!s.data.every(row=>row.length===columns))throw Error('A Jolt height field needs at least 2 x 2 samples in equal rows');
+  const count=Math.ceil(Math.max(rows,columns)/HEIGHTFIELD_BLOCK)*HEIGHTFIELD_BLOCK;
+  const setup=new J.HeightFieldShapeSettings();setup.mSampleCount=count;setup.mBlockSize=HEIGHTFIELD_BLOCK;
+  vector.Set(s.elementSize,1,s.elementSize);setup.mScale=vector;
+  setup.mHeightSamples.resize(count*count);
+  const heights=J.HEAPF32.subarray(J.getPointer(setup.mHeightSamples.data())>>2,(J.getPointer(setup.mHeightSamples.data())>>2)+count*count);
+  for(let row=0;row<count;row++){const source=s.data[Math.min(row,rows-1)];for(let column=0;column<count;column++)heights[row*count+column]=source[Math.min(column,columns-1)];}
+  vector.Set(0,0,0);rotation.Set(...HEIGHTFIELD_TURN);
+  const turned=new J.RotatedTranslatedShapeSettings(vector,rotation,setup);
+  try{return created(turned,'Invalid Jolt height field');}finally{J.destroy(turned);}
  }
  function centred(shape){
   // Cannon pivots and supplied inertia are relative to its body origin. A hull
@@ -196,6 +217,9 @@ export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIsland
   // Explicit fixed attachment motion; ordinary static scenery is untouched.
   moveFixedBody(body){const r=bodies.get(body);if(!r||body.mass!==0)throw Error('Unknown fixed attachment');put(position,body.position);rotation.Set(body.quaternion.x,body.quaternion.y,body.quaternion.z,body.quaternion.w);api.SetPositionAndRotation(r.native.GetID(),position,rotation,J.EActivation_DontActivate);releaseAround(body,{reason:'attachment-moved'});for(const [c]of joints)if(c.bodyA===body||c.bodyB===body){const other=c.bodyA===body?c.bodyB:c.bodyA;other.wakeUp();const o=bodies.get(other);if(o)api.ActivateBody(o.native.GetID());}},
   get frozen(){return frozenCount;},
+  // Rebuilds the native shape of a body after its Cannon shape changed in place (a height field the terrain edited,
+  // e.g. under a crater), and wakes the bodies around it.
+  reshape(body){const r=bodies.get(body);if(!r)throw Error('Unknown body to reshape');const next=shapeFor(body);try{api.SetShape(r.native.GetID(),next.shape,true,J.EActivation_DontActivate);r.partIDs=next.partIDs;r.partMask=next.partMask;}finally{next.shape.Release();}releaseAround(body,{reason:'reshaped'});},
   describeBody(b){const r=bodies.get(b);return r?{frozen:!!r.frozen,active:r.native.IsActive(),motion:r.native.IsStatic()?'static':r.native.IsDynamic()?'dynamic':'kinematic',quiet:+(r.quiet??0).toFixed(2),log:r.log??[]}:null;},
   get profile(){return metrics?{...metrics,frozen:frozenCount,hullCacheEntries:hullCache.size,engineExclusiveMs:Math.max(0,metrics.engineMs-metrics.validateMs-metrics.addedMs-metrics.persistedMs)}:null;},
   resetProfile(){if(metrics)for(const key of Object.keys(metrics))metrics[key]=0;},

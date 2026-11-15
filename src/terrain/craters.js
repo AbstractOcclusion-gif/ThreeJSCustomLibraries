@@ -90,6 +90,25 @@ export function craterStrataPaint(roles, dig, ejecta, strata = CRATER_STRATA) {
   return exposed + ejecta - exposed * ejecta;
 }
 
+// Adds to `out` {topsoil, subsoil, scree, rock} the thickness of each stratum within [from, to] m below the
+// original surface, times `weight` (e.g. a sample's area, for volumes).
+export function addStrataVolumes(out, from, to, weight, strata = CRATER_STRATA) {
+  const bands = [['topsoil', 0, strata.topsoil], ['subsoil', strata.topsoil, strata.subsoil], ['scree', strata.subsoil, strata.scree], ['rock', strata.scree, Infinity]];
+  for (const [name, top, bottom] of bands) out[name] += Math.max(0, Math.min(to, bottom) - Math.max(from, top)) * weight;
+  return out;
+}
+// The 'terrain:crater' event both crater sources emit to their subscribers. x, z: centre; height: the ground at the
+// centre before the blast (null where the source does not know it: the host reads its world); reach: the outline's
+// reach, m; outer: how far the crater changed the ground (thrown soil included), m; volume, rim, ejecta: dug, piled
+// into the rim and thrown out, m³; strata: share of the dug volume from each stratum; rect: the rectangle changed.
+export function craterEvent({x, z, height = null, shape, depth, footprint, volume, rim, strata, rect}) {
+  const total = strata.topsoil + strata.subsoil + strata.scree + strata.rock;
+  const shares = Object.freeze(Object.fromEntries(Object.entries(strata).map(([name, value]) => [name, total > 0 ? value / total : 0])));
+  return Object.freeze({type: 'terrain:crater', x, z, height, shape, depth, reach: footprint.reach,
+    outer: footprint.reach * Math.max(CRATER_RIM.end, CRATER_EJECTA.reach), volume, rim, ejecta: volume - rim, strata: shares, rect: Object.freeze(rect)});
+}
+const emptyStrata = () => ({topsoil: 0, subsoil: 0, scree: 0, rock: 0});
+
 export function validateCraterSettings(settings) {
   const {depthLimit, rimShare, rimMaxShare} = settings;
   if (!(depthLimit >= 0 && depthLimit <= CRATER_FIELDS.depth.max)) throw new RangeError(`Crater depth limit must be within 0..${CRATER_FIELDS.depth.max} m`);
@@ -121,8 +140,12 @@ export function craterFootprint(shape) {
 // Craters of an endless world, as stamps: {x, z, shape, depth, rimShare}. Each digs its bowl and piles rimShare of the
 // dug volume into its rim; overlapping stamps add, the sum kept within depthLimit below and the rim cap above the
 // original relief. stamps: saved stamps to start from (toJSON). Pass the layer to createTerrainWorld as `craters`.
-export function createCraterLayer({stamps = [], ...overrides} = {}) {
+// strata: what the emitted events count the dug volume in (CRATER_STRATA by default: the layer knows no biome).
+// subscribe(listener) hears a 'terrain:crater' event (craterEvent) for every stamp added after it; returns unsubscribe.
+export function createCraterLayer({stamps = [], strata = CRATER_STRATA, ...overrides} = {}) {
   const settings = validateCraterSettings({...CRATER_DEFAULTS, ...overrides});
+  validateStrata(strata);
+  const listeners = new Set();
   const rimCap = settings.depthLimit * settings.rimMaxShare;
   const entries = [], grid = new Map();
   const cellOf = value => Math.floor(value / CRATER_GRID);
@@ -140,12 +163,14 @@ export function createCraterLayer({stamps = [], ...overrides} = {}) {
     // Rim height at its peak: rimShare of the bowl volume spread by the rim weight over the same area.
     const step = 2 * outer / CRATER_INTEGRATION;
     let bowl = 0, rim = 0;
+    const area = step * step, dug = emptyStrata();
     for (let j = 0; j < CRATER_INTEGRATION; j++) for (let i = 0; i < CRATER_INTEGRATION; i++) {
-      const t = footprint.distance(-outer + (i + .5) * step, -outer + (j + .5) * step);
-      bowl += footprint.bowl(t);
+      const t = footprint.distance(-outer + (i + .5) * step, -outer + (j + .5) * step), share = footprint.bowl(t);
+      bowl += share;
       rim += craterRimWeight(t);
+      if (share > 0) addStrataVolumes(dug, 0, Math.min(settings.depthLimit, depth * share), area, strata);
     }
-    const area = step * step, volume = bowl * area * depth;
+    const volume = bowl * area * depth;
     const entry = {stamp: Object.freeze({x, z, shape: typeof shape === 'number' ? shape : Object.freeze({...shape}), depth, rimShare}),
       x, z, outer, footprint, depth, rimShare, phase: craterRayPhase(x, z), rimPeak: rim > 0 ? rimShare * volume / (rim * area) : 0, volume};
     entries.push(entry);
@@ -155,7 +180,12 @@ export function createCraterLayer({stamps = [], ...overrides} = {}) {
       if (!list) grid.set(key, list = []);
       list.push(entry);
     }
-    return rectOf(entry);
+    const rect = rectOf(entry);
+    if (listeners.size) {
+      const event = craterEvent({x, z, shape: entry.stamp.shape, depth, footprint, volume, rim: rimShare * volume, strata: dug, rect});
+      for (const listener of listeners) listener(event);
+    }
+    return rect;
   }
   for (const stamp of stamps) add(stamp);
 
@@ -199,6 +229,11 @@ export function createCraterLayer({stamps = [], ...overrides} = {}) {
     settings,
     get count() { return entries.length; },
     add, offsetAt, exposureAt,
+    subscribe(listener) {
+      if (typeof listener !== 'function') throw new TypeError('A crater listener must be a function');
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     // Rectangle covering every stamp, or null without any.
     bounds() {
       if (!entries.length) return null;

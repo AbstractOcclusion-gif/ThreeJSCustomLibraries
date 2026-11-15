@@ -162,3 +162,21 @@ test('masonry houses retain native dynamics while moving slowly and require a lo
   for(let i=0;i<60;i++)world.step(1/60);assert.ok(!native(body).IsActive(),'native sleep remains available after sustained rest');assert.ok(native(body).IsDynamic(),'native sleep does not turn the body static');assert.equal(driver.frozen,0);
  });
 });
+
+test('a Cannon height field collides natively where Cannon draws it, and a reshape drops bodies into a new hollow',()=>fixture(({world,driver})=>{
+ world.gravity.set(0,-9.82,0);
+ // 9 x 9 samples 1 m apart, flat at 1 m, laid like the terrain colliders: local x along world z, y along world x.
+ const data=Array.from({length:9},()=>Array(9).fill(1)),shape=new C.Heightfield(data,{elementSize:1});
+ const ground=new C.Body({mass:0,shape,position:new C.Vec3(-4,0,-4)});
+ ground.quaternion.setFromAxisAngle(new C.Vec3(1,1,1).unit(),-2*Math.PI/3);
+ const ball=new C.Body({mass:1,shape:new C.Sphere(.3),position:new C.Vec3(1,3,-1)});
+ world.addBody(ground);world.addBody(ball);driver.attach(world);
+ for(let i=0;i<180;i++)world.step(1/60);
+ assert.ok(Math.abs(ball.position.y-1.3)<.03,`rests on the field: ${ball.position.y}`);
+ // A 2 m deep pit around the ball's sample (world x = 1, z = -1: data[3][5]).
+ for(let i=2;i<=4;i++)for(let j=4;j<=6;j++)data[i][j]=-1;
+ driver.reshape(ground);
+ for(let i=0;i<180;i++)world.step(1/60);
+ assert.ok(ball.position.y<0,`falls into the pit: ${ball.position.y}`);
+ assert.throws(()=>driver.reshape(new C.Body({mass:0})),/Unknown body/);
+}));

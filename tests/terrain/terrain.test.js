@@ -349,3 +349,27 @@ test('craters paint the strata they cut and the soil they throw, and tracks keep
  assert.ok(field.layerWeightAt(12, 12, rock) < .05, 'reset restores the paint');
  field.dispose();
 });
+
+test('a crater tells its subscribers where it is, how much it threw out and what it was made of', async () => {
+ const {createCraterLayer} = await import('../../src/terrain/index.js');
+ const nx = 81, field = createTerrainField({origin: [0, 0], size: [40, 40], resolution: [nx, nx], heights: new Float32Array(nx * nx).fill(2), seed: 3});
+ const events = [];
+ assert.throws(() => field.subscribe(null), TypeError);
+ const unsubscribe = field.subscribe(event => events.push(event));
+ const result = field.crater(20, 20, 3, 4);
+ const [event] = events;
+ assert.equal(event.type, 'terrain:crater');
+ assert.equal(event.height, 2);
+ assert.ok(Math.abs(event.volume - result.volume) < 1e-9 && Math.abs(event.ejecta - result.ejecta) < 1e-9);
+ const shares = Object.values(event.strata);
+ assert.ok(Math.abs(shares.reduce((a, b) => a + b) - 1) < 1e-9 && event.strata.rock > 0 && event.strata.topsoil > 0);
+ unsubscribe();
+ field.crater(5, 5, 1, .2);
+ assert.equal(events.length, 1);
+ field.dispose();
+ const layer = createCraterLayer(), heard = [];
+ layer.subscribe(event => heard.push(event));
+ layer.add({x: 1, z: 2, shape: {halfX: 2, halfZ: 1}, depth: 1});
+ assert.equal(heard[0].height, null);
+ assert.ok(heard[0].volume > 0 && heard[0].strata.rock === 0, 'a 1 m crater reaches no bedrock');
+});
