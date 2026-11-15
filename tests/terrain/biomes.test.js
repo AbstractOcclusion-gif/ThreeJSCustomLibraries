@@ -101,3 +101,10 @@ test('every catalogue biome is valid, builds finite relief and clones to an edit
  assert.throws(() => validateBiome({...copy, paint}), /no paint setting: sandBelow/);
  assert.throws(() => validateBiome({...copy, paint: {...copy.paint, rockSlope: 99}}), /rockSlope/);
 });
+
+test('a biome may carry the strata its craters cut into', async () => {
+ const {CRATER_STRATA} = await import('../../src/terrain/index.js');
+ assert.doesNotThrow(() => validateBiome({...cloneBiome('hills'), strata: {...CRATER_STRATA, scree: 4}}));
+ assert.throws(() => validateBiome({...cloneBiome('hills'), strata: {...CRATER_STRATA, subsoil: 3.5}}), /deepen/);
+ assert.throws(() => validateBiome({...cloneBiome('hills'), strata: {topsoil: .3}}), /strata/);
+});

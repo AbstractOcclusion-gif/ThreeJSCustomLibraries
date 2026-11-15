@@ -1,6 +1,7 @@
 import {TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_DEFAULTS, TERRAIN_PAINT_FIELDS, validateTerrainPaint} from './terrain-rules.js';
 import {reliefShape as shape, validateRelief} from './relief.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from './textures.js';
+import {validateStrata} from './craters.js';
 
 // A biome is plain data: how the ground rises (relief recipe, see relief.js), where each layer lies (paint rules,
 // see terrain-rules.js) and which texture set each palette role shows (TERRAIN_PALETTE_ROLES; catalogue ids, see textures.js). Copy one, change
@@ -9,6 +10,7 @@ import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from './textures.js';
 // `climate` {temperature: [min, max], moisture: [min, max]}, the climate it lives in, each from 0 (cold, dry) to 1
 // (hot, wet). A biome without a climate lives anywhere. Along a corridor (corridor.js): `next`, the ids of the biomes
 // that may follow it; any, when left out.
+// What its craters cut into: `strata` (see CRATER_STRATA in craters.js), the default strata when left out.
 export const BIOME_WEIGHT_FIELD = Object.freeze({label: 'How common', min: 0, max: 10, step: .1});
 export const BIOME_CLIMATE_AXES = Object.freeze(['temperature', 'moisture']);
 const ANYWHERE = Object.freeze([0, 1]);
@@ -84,6 +86,7 @@ export function validateBiome(value) {
     }
   }
   if (value.next !== undefined && (!Array.isArray(value.next) || !value.next.length || value.next.some(id => typeof id !== 'string' || !id))) throw new RangeError(`Biome ${value.id} needs its next biomes as a list of ids`);
+  if (value.strata !== undefined) validateStrata(value.strata);
   validateRelief(value.relief);
   for (const key of PAINT_KEYS) if (!Object.hasOwn(value.paint ?? {}, key)) throw new RangeError(`Biome ${value.id} has no paint setting: ${key}`);
   validateTerrainPaint(value.paint);

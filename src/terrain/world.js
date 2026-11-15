@@ -3,7 +3,8 @@ import {hash2} from '../core/hash.js';
 import {validateBiome, BIOME_CLIMATE_AXES} from './biomes.js';
 import {createRelief} from './relief.js';
 import {createCorridor} from './corridor.js';
-import {createTerrainRules, PAINT_REACH, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
+import {createTerrainRules, PAINT_REACH, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_ROLE_LAYER} from './terrain-rules.js';
+import {CRATER_STRATA, craterStrataPaint} from './craters.js';
 
 // A world lays biomes out in square regions and stitches them: across a border the relief and the layer paint of
 // the two biomes blend, along a line that wanders so the grid of regions does not show. A region takes the biome
@@ -35,8 +36,6 @@ const REGION_SEED = 97;
 const CLIMATE = Object.freeze({seeds: [401, 409], gain: 1.2});
 const REGION_CACHE = 4096;   // regions whose biome is remembered: enough for every ring of a clipmap
 const REGION_SPAN = 2 ** 20;  // regions each way from the origin that the memory can tell apart
-// The terrain layer each palette role counts as where only the layers are known.
-const LEGACY_LAYER = TERRAIN_PALETTE_ROLES.map(role => TERRAIN_LAYERS.indexOf({scree: 'rock', soil: 'mud'}[role] ?? role));
 const smooth = (from, to, value) => {
   const t = Math.max(0, Math.min(1, (value - from) / (to - from)));
   return t * t * (3 - 2 * t);
@@ -199,9 +198,14 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
   // order, scree counted as rock and soil as mud) and `sand` are what createTerrainField's paintAt callback takes;
   // `palette` holds one weight per palette set, so each biome keeps its own textures; `moisture` is 0 dry .. 1 wet.
   // `palette` is reused: read it before the next call.
-  const paintScratch = new Float32Array(count), paletteWeights = new Float32Array(palette.size);
+  // Craters show what they cut and threw out: the world's own (the crater layer) and a host's at the sample
+  // (sample.crater: {dig, ejecta}, see craterStrataPaint), painted with each biome's strata.
+  const paintScratch = new Float32Array(count), paletteWeights = new Float32Array(palette.size), exposure = {dig: 0, ejecta: 0};
   function paintAt(sample) {
     weightsAt(sample.x, sample.z, paintScratch);
+    exposure.dig = exposure.ejecta = 0;
+    if (craters) craters.exposureAt(sample.x, sample.z, exposure);
+    if (sample.crater) { exposure.dig += sample.crater.dig; exposure.ejecta = Math.min(1, exposure.ejecta + sample.crater.ejecta); }
     sample.water = water ? settings.waterLevel - sample.height : -Infinity;
     const layers = new Array(TERRAIN_LAYERS.length).fill(0);
     paletteWeights.fill(0);
@@ -210,11 +214,12 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
       const share = paintScratch[i];
       if (share <= 0) continue;
       const painted = rules[i].paint(sample);
+      const cover = craterStrataPaint(painted.roles, exposure.dig, exposure.ejecta, biomes[i].strata ?? CRATER_STRATA);
       painted.roles.forEach((weight, role) => {
-        layers[LEGACY_LAYER[role]] += weight * share;
+        layers[TERRAIN_ROLE_LAYER[role]] += weight * share;
         paletteWeights[slices[i][role]] += weight * share;
       });
-      sand += painted.sand * share;
+      sand += painted.sand * (1 - cover) * share;
       moisture += painted.moisture * share;
     }
     return {layers, sand, moisture, palette: paletteWeights};

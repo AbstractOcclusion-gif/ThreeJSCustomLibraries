@@ -320,3 +320,32 @@ test('water crosses a hollow to its outlet and is counted as held back by it', (
   field.dispose();
  }
 });
+
+test('craters paint the strata they cut and the soil they throw, and tracks keep their paint', async () => {
+ const {craterStrataPaint, CRATER_STRATA, TERRAIN_PALETTE_ROLES, TERRAIN_LAYERS} = await import('../../src/terrain/index.js');
+ const role = name => TERRAIN_PALETTE_ROLES.indexOf(name), grassOnly = () => TERRAIN_PALETTE_ROLES.map(name => name === 'grass' ? 1 : 0);
+ const sum = roles => roles.reduce((a, b) => a + b, 0);
+ assert.equal(craterStrataPaint(grassOnly(), 0, 0), 0);
+ for (const [dig, shown] of [[.9, 'soil'], [2.4, 'scree'], [4.5, 'rock']]) {
+  const roles = grassOnly();
+  assert.equal(craterStrataPaint(roles, dig, 0, CRATER_STRATA), 1);
+  assert.ok(roles[role(shown)] > .99 && Math.abs(sum(roles) - 1) < 1e-6, `${dig} m shows ${shown}`);
+ }
+ const thrown = grassOnly();
+ craterStrataPaint(thrown, 0, .5);
+ assert.ok(Math.abs(thrown[role('soil')] - .5) < 1e-6 && Math.abs(sum(thrown) - 1) < 1e-6);
+
+ const nx = 129, heights = new Float32Array(nx * nx);
+ const field = createTerrainField({origin: [0, 0], size: [32, 32], resolution: [nx, nx], heights, seed: 3, rules: {rockSlope: 3, snowLine: 300, mudBelow: -20, bareSoil: 0}});
+ const mud = TERRAIN_LAYERS.indexOf('mud'), rock = TERRAIN_LAYERS.indexOf('rock');
+ field.deform(26, 26, 1, .4);
+ assert.ok(field.layerWeightAt(26, 26, mud) < .05, 'a track keeps the surface paint');
+ field.crater(12, 12, 3, 4);
+ assert.ok(field.layerWeightAt(12, 12, rock) > .9, 'bedrock at the bottom of a 4 m crater');
+ assert.ok(field.layerWeightAt(14.5, 12, mud) > .5, 'subsoil on the upper wall');
+ assert.ok(field.layerWeightAt(16, 12, mud) + field.layerWeightAt(12, 16, mud) > .2, 'thrown soil beyond the rim');
+ assert.ok(field.layerWeightAt(2, 30, mud) < .05, 'untouched ground far away');
+ field.resetDeformation();
+ assert.ok(field.layerWeightAt(12, 12, rock) < .05, 'reset restores the paint');
+ field.dispose();
+});

@@ -23,6 +23,8 @@ export const TERRAIN_LAYERS=Object.freeze(['grass','rock','snow','mud','forest']
 // The roles a palette set can play (createTerrainWorld): the layers, then scree (rock debris below steep rock) and
 // soil (bare earth on dry ground). paint() returns one weight per role, in this order.
 export const TERRAIN_PALETTE_ROLES=Object.freeze([...TERRAIN_LAYERS,'scree','soil']);
+// The terrain layer each palette role counts as where only the layers are known (scree as rock, soil as mud).
+export const TERRAIN_ROLE_LAYER=Object.freeze(TERRAIN_PALETTE_ROLES.map(role=>TERRAIN_LAYERS.indexOf({scree:'rock',soil:'mud'}[role]??role)));
 // Distances the terrain signals of a paint sample are measured over, in metres: `slope` is the rise/run between points
 // this far either side, `hollow` how far the ground lies below the mean of four points this far away (negative on a
 // ridge). Fixed sizes, so the same ground paints the same whatever the mesh that asks.

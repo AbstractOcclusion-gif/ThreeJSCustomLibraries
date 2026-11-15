@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import {createTerrainRules} from './terrain-rules.js';
 import {createDataTexture} from '../core/data-texture.js';
 import {valueNoise} from '../core/value-noise.js';
-import {CRATER_DEFAULTS, CRATER_RIM, craterFootprint, validateCraterSettings} from './craters.js';
+import {CRATER_DEFAULTS, CRATER_EJECTA, CRATER_RIM, CRATER_STRATA, craterEjecta, craterFootprint, craterRayPhase, craterStrataPaint, validateCraterSettings, validateStrata} from './craters.js';
+import {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_ROLE_LAYER} from './terrain-rules.js';
 
 const MAX_RESOLUTION = 1025;   // samples per side
 const BYTE = 255;              // 8-bit weight and coverage scale
@@ -57,13 +58,16 @@ const SNOW_DRIFT = Object.freeze({flatness: [.55, .95], stretch: 2.6, octave: 2.
 // Heights are row-major along +X and +Z, in metres. The mesh and shaders share this grid.
 // paletteSize (a multiple of four, with paintAt): the field also keeps paletteMap, the weight of each palette set that
 // paintAt returns in `palette`, four per slice, and climateMap, its `moisture` (see createTerrainWorld).
-// crater: overrides of CRATER_DEFAULTS (depthLimit, rimShare, rimMaxShare).
+// crater: overrides of CRATER_DEFAULTS (depthLimit, rimShare, rimMaxShare), and `strata`: what craters cut into
+// (overrides of CRATER_STRATA; with paintAt, the paint's own strata apply).
 export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, paintAt, paletteSize = 0, snow: snowOverrides, snowTrackRims = false, crater: craterOverrides} = {}) {
  const [nx, nz] = resolution ?? [];
  if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
      !size.every(n => Number.isFinite(n) && n > 0) || !Number.isInteger(seed)) throw Error('Invalid terrain grid');
- const craterSettings = validateCraterSettings({...CRATER_DEFAULTS, ...craterOverrides});
+ const {strata: strataOverrides, ...craterValues} = craterOverrides ?? {};
+ const craterSettings = validateCraterSettings({...CRATER_DEFAULTS, ...craterValues});
+ const strata = validateStrata({...CRATER_STRATA, ...strataOverrides});
  const craterRimRise = craterSettings.depthLimit * craterSettings.rimMaxShare;
  const samples = Float32Array.from(heights);
  const original = samples.slice();
@@ -107,11 +111,12 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   climateMap = createDataTexture(climate, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
  }
  const bounds = new THREE.Vector4(...origin, ...size);
- function updateRules(values = {}) {
-  if (!forestMap && values.forestCover > 0) throw Error('Enable forest cover when creating the terrain field');
-  if (!sandMap && values.sandBelow !== undefined) throw Error('Enable sand when creating the terrain field');
-  rules.configure(values);
-  for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+ // Depth each sample was dug by craters (m) and the share of thrown soil on it: what the paint shows them cut and
+ // throw out. Laid by the first crater.
+ let craterDig = null, ejecta = null, paintDirty = false;
+ const exposedLayers = new Array(TERRAIN_LAYERS.length), exposedRoles = new Array(TERRAIN_PALETTE_ROLES.length);
+ // Paints sample (x, z) from its current shape: the rules or paintAt, then what craters exposed there.
+ function paintSample(x, z) {
    const index = z * nx + x, height = samples[index];
    const left = samples[z * nx + Math.max(0, x - 1)], right = samples[z * nx + Math.min(nx - 1, x + 1)];
    const north = samples[Math.max(0, z - 1) * nx + x], south = samples[Math.min(nz - 1, z + 1) * nx + x];
@@ -119,11 +124,26 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    const dz = (south - north) / (stepZ * (z === 0 || z === nz - 1 ? 1 : 2));
    const curvature = (left + right - 2 * height) / (stepX * stepX) + (north + south - 2 * height) / (stepZ * stepZ);
    const sample = {x: bounds.x + x * stepX, z: bounds.y + z * stepZ, height, slope: Math.hypot(dx, dz), curvature};
+   const dig = craterDig ? Math.min(craterSettings.depthLimit, craterDig[index]) : 0, thrown = ejecta ? ejecta[index] : 0;
+   const exposed = dig > 0 || thrown > 0;
+   // paintAt paints the exposure itself (sample.crater, as createTerrainWorld's paintAt does); the rules are painted here.
+   if (paintAt && exposed) sample.crater = {dig, ejecta: thrown};
    const paint = paintAt?.(sample);
-   const layers = paint?.layers ?? rules.weights(sample);
+   let layers = paint?.layers, sand = paint?.sand;
+   if (!paint && exposed) {
+    // On the same layer weights as untouched samples, so the exposure fades into them without a seam.
+    const base = rules.weights(sample);
+    for (let role = 0; role < exposedRoles.length; role++) exposedRoles[role] = role < base.length ? base[role] : 0;
+    const cover = craterStrataPaint(exposedRoles, dig, thrown, strata);
+    exposedLayers.fill(0);
+    for (let role = 0; role < exposedRoles.length; role++) exposedLayers[TERRAIN_ROLE_LAYER[role]] += exposedRoles[role];
+    layers = exposedLayers;
+    sand = rules.sand(sample) * (1 - cover);
+   }
+   layers ??= rules.weights(sample);
    for (let i = 0; i < BASE_LAYERS; i++) weights[index * BASE_LAYERS + i] = Math.round(layers[i] * BYTE);
    if (forestWeights) forestWeights[index] = Math.round((layers[FOREST_LAYER] ?? 0) * BYTE);
-   if (sandWeights) sandWeights[index] = Math.round((paint?.sand ?? rules.sand(sample)) * BYTE);
+   if (sandWeights) sandWeights[index] = Math.round((sand ?? rules.sand(sample)) * BYTE);
    if (paletteWeights) {
     if (paint?.palette?.length !== paletteSize) throw Error('paintAt must return one palette weight per palette set');
     // Slice `group` of the palette map holds weights group x 4 .. group x 4 + 3 of every sample.
@@ -132,11 +152,20 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
     }
     climate[index] = Math.round((paint.moisture ?? 0) * BYTE);
    }
-  }
+ }
+ function uploadPaint() {
   if (paletteMap) paletteMap.needsUpdate = climateMap.needsUpdate = true;
   weightMap.needsUpdate = true;
   if (forestMap) forestMap.needsUpdate = true;
   if (sandMap) sandMap.needsUpdate = true;
+  paintDirty = false;
+ }
+ function updateRules(values = {}) {
+  if (!forestMap && values.forestCover > 0) throw Error('Enable forest cover when creating the terrain field');
+  if (!sandMap && values.sandBelow !== undefined) throw Error('Enable sand when creating the terrain field');
+  rules.configure(values);
+  for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) paintSample(x, z);
+  uploadPaint();
  }
  function heightAt(x, z) {
   const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ;
@@ -248,6 +277,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   if (!(rimShare >= 0 && rimShare <= 1)) throw Error('A crater needs a rim share from zero to one');
   const footprint = craterFootprint(shape), reach = footprint.reach;
   const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ, cellArea = stepX * stepZ;
+  craterDig ??= new Float32Array(samples.length);
+  ejecta ??= new Float32Array(samples.length);
   let volume = 0;
   for (let j = Math.max(0, Math.ceil(gz - reach / stepZ)); j <= Math.min(nz - 1, Math.floor(gz + reach / stepZ)); j++) {
    for (let i = Math.max(0, Math.ceil(gx - reach / stepX)); i <= Math.min(nx - 1, Math.floor(gx + reach / stepX)); i++) {
@@ -256,7 +287,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
     const index = j * nx + i;
     const next = Math.fround(Math.max(original[index] - craterSettings.depthLimit, soil[index] - depth * footprint.bowl(t)));
     let changed = false;
-    if (next < soil[index]) { volume += (soil[index] - next) * cellArea; soil[index] = next; changed = true; }
+    if (next < soil[index]) { volume += (soil[index] - next) * cellArea; craterDig[index] += soil[index] - next; soil[index] = next; changed = true; }
     if (snowEnabled && snow[index] > 0) {
      const kept = THREE.MathUtils.smoothstep(t, CRATER_SNOW_CLEAR.from, CRATER_SNOW_CLEAR.to);
      if (kept < 1) { snow[index] *= kept; freshSnow[index] = Math.min(freshSnow[index], snow[index]); changed = true; }
@@ -274,6 +305,16 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    soil[index] = next;
    writeHeight(index, Math.fround(soil[index] + (snowEnabled ? snow[index] : 0)), onSample);
   }, CRATER_RIM, footprint.distance);
+  // Thrown soil out to the ejecta reach, then the paint of everything the crater touched (one cell more: slopes).
+  const phase = craterRayPhase(x, z), outer = reach * Math.max(CRATER_RIM.end, CRATER_EJECTA.reach);
+  const columns = [Math.max(0, Math.floor(gx - outer / stepX) - 1), Math.min(nx - 1, Math.ceil(gx + outer / stepX) + 1)];
+  const rows = [Math.max(0, Math.floor(gz - outer / stepZ) - 1), Math.min(nz - 1, Math.ceil(gz + outer / stepZ) + 1)];
+  for (let j = rows[0]; j <= rows[1]; j++) for (let i = columns[0]; i <= columns[1]; i++) {
+   const dx = (i - gx) * stepX, dz = (j - gz) * stepZ, index = j * nx + i;
+   ejecta[index] = Math.min(1, ejecta[index] + craterEjecta(dx, dz, footprint.distance(dx, dz), rimShare, phase));
+  }
+  for (let j = rows[0]; j <= rows[1]; j++) for (let i = columns[0]; i <= columns[1]; i++) paintSample(i, j);
+  paintDirty = true;
   return {volume, rim, ejecta: volume - rim};
  }
  // Packs the snow under a contact. load (0..1) is the share of the packable depth pressed out at the centre, so the sink
@@ -326,7 +367,10 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   for (const {index, weight} of candidates) raise(index, rimDepth * weight / totalWeight);
  }
  function flushDeformation() {
-  if (maxX < 0) return false;
+  if (maxX < 0) {
+   if (paintDirty) uploadPaint();
+   return false;
+  }
   positions.addUpdateRange(minZ * nx * 3, (maxZ - minZ + 1) * nx * 3);
   positions.needsUpdate = true;
   // Every changed face also affects the normals of its immediate neighbors.
@@ -355,6 +399,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   heightMap.needsUpdate = true;
   if (snowMaskDirty) snowMap.needsUpdate = true;
   snowMaskDirty = false;
+  if (paintDirty) uploadPaint();
   return true;
  }
  function resetDeformation(onSample) {
@@ -366,6 +411,11 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   for (let index = 0; index < samples.length; index++) {
    if (samples[index] === original[index]) continue;
    writeHeight(index, original[index], onSample);
+  }
+  if (craterDig) {
+   craterDig = ejecta = null;
+   for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) paintSample(x, z);
+   paintDirty = true;
   }
   if (restoreSnow) return setSnowCover(true, onSample);
   return flushDeformation();

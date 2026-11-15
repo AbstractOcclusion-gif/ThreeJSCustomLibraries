@@ -208,7 +208,8 @@ test('a crater layer digs object-shaped bowls into the world, fades them on coar
  assert.equal(world.heightAt(20, 30), plain.heightAt(20, 30));
  assert.throws(() => craters.add({x: 0, z: 0, shape: 2, depth: 0}), RangeError);
  const rect = craters.add({x: 20, z: 30, shape: 4, depth: 2});
- assert.deepEqual(rect, {minX: 20 - 7, minZ: 30 - 7, maxX: 20 + 7, maxZ: 30 + 7});
+ const outer = 4 * 2.8;   // reach of the thrown soil: 2.8 times the outline
+ assert.deepEqual(rect, {minX: 20 - outer, minZ: 30 - outer, maxX: 20 + outer, maxZ: 30 + outer});
  assert.ok(Math.abs(world.heightAt(20, 30) - (plain.heightAt(20, 30) - 2)) < 1e-4);
  assert.ok(world.heightAt(24.3, 30) > plain.heightAt(24.3, 30), 'rim stands above the relief');
  assert.equal(world.heightAt(40, 30), plain.heightAt(40, 30), 'nothing changes past the rim');
