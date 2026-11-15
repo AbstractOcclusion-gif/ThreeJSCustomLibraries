@@ -6,11 +6,13 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import initJolt from 'jolt-physics';
 import {Body, Box, Sphere, Vec3, World} from 'cannon-es';
 import {createBenchPanel} from '../panel.js';
-import {cloneBiome, craterFromImpact, createTerrainAppearance, createTerrainField, createTerrainMaterial, createTerrainWorld, CRATER_DEFAULTS, TERRAIN_ROLE_TINTS} from '../../src/terrain/index.js';
+import {cloneBiome, craterFootprint, craterFromImpact, createTerrainAppearance, createTerrainField, createTerrainMaterial, createTerrainWorld, CRATER_DEFAULTS, TERRAIN_ROLE_TINTS} from '../../src/terrain/index.js';
 import {createSurfaceWeather} from '../../src/surface/index.js';
 import {createChips, createPuffs} from '../../src/particles/index.js';
+import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
+import {LeavedTrees, meanLeafLuminance} from '../../src/trees/index.js';
 import {createJoltDriver} from '../../src/destruction/jolt-driver.js';
-import {createFixedStep} from '../../src/core/index.js';
+import {createFixedStep, FREE_ATLAS_RECTS, hash2, seededRandom} from '../../src/core/index.js';
 import {createSunShadows} from '../../src/lighting/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
@@ -40,6 +42,14 @@ const DUST = {pool: 120, perMetre: .9, maxSize: 7, ring: 6, ringShare: .55};
 const CLODS = {perCubicMetre: 1.1, perBlast: 22, hardShare: .6, max: 90, life: 14, stayShare: .45, sizeShare: .1, minSize: .12, maxSize: .6,
   speed: 1, spread: [.55, 1.5], rise: .72, density: 1600, spin: 6};
 const GRAVITY = 9.82;
+const TREE_VARIANT_SEED = 9;   // the hash seed leaved trees draw a silhouette variant with (leaved-trees.js)
+// Plants on the ground: `grass` clumps and `trees` (height range in m; the crown radius is `crown` x the height),
+// kept `edge` m inside the field. A crater removes the grass inside its outline, thins it under the thrown soil out
+// to `grassThinTo` (normalised distance) and lays the rest back on the new ground. A tree inside the outline is
+// blown to `chips` wood chips; one within `fellTo` tips over away from the crater in `fallSeconds`, to `fallAngle`
+// degrees; at most `felled` lie on the ground, the oldest making room.
+const PLANTS = {seed: 23, grass: 9000, trees: 16, edge: 2, treeHeight: [4.5, 7.5], crown: .34, grassThinTo: 2, grassSink: .02,
+  fellTo: 2.4, fallSeconds: 1.6, fallAngle: 84, felled: 10, chips: 30, woodColor: 0x6b4a2b};
 // Launched objects. Each: its collider (a sphere `radius` or a box `half` extents, m, at size 1), the outline it
 // lands on (`squareness` of craterFootprint; a box lands on its X and Z extents, `footprint` overrides them: the
 // plane's wings), its density (kg/m³ of its collider) and its default launch. A plane is a fuselage collider drawn
@@ -105,6 +115,82 @@ const chips = createChips(scene, {pool: SHARDS.pool});
 chips.setGround(field.heightAt);
 const puffs = await createPuffs(scene, {pool: DUST.pool, environment: weather.view.environment});
 
+// Plants: the vegetation module's grass and the trees module's leaved trees. Neither knows about craters: this page
+// takes them out, lays them back or tips them over when the terrain reports one.
+const plantRandom = seededRandom(PLANTS.seed), spot = () => (plantRandom() * 2 - 1) * (half - PLANTS.edge);
+const meadow = createFreeVegetation({meadowBlades: true});
+const grassSites = Array.from({length: PLANTS.grass}, () => {
+  const x = spot(), z = spot();
+  return {x, y: field.heightAt(x, z) - PLANTS.grassSink, z, yaw: plantRandom() * Math.PI * 2, scale: .7 + plantRandom() * .9};
+});
+const treeSites = Array.from({length: PLANTS.trees}, () => {
+  const h = THREE.MathUtils.lerp(...PLANTS.treeHeight, plantRandom());
+  return {x: spot(), z: spot(), yaw: plantRandom() * Math.PI * 2, h, r: h * PLANTS.crown};
+});
+const layGrass = placements => createGrassField({scene, geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff, tileSize: 8, flatColorMix: .75, placements});
+let grassPlacements = grassSites.map(site => ({...site})), grass = layGrass(grassPlacements);
+const trees = new LeavedTrees({scene, profile: 'tree', sampleGround: (x, z) => field.heightAt(x, z) ?? 0});
+trees.setEnvironment(weather.view.environment);
+let standing = [...treeSites];
+trees.place(standing);
+// A felled tree is drawn by leaved trees of its own, on the standing trees' atlas, so it can be turned about its foot.
+const leafLuminance = meanLeafLuminance(trees.leafTexture, FREE_ATLAS_RECTS.leaf), felled = [];
+const fallAxis = new THREE.Vector3();
+function fell(site, awayX, awayZ) {
+  if (felled.length >= PLANTS.felled) felled.shift().tree.dispose();
+  const tree = new LeavedTrees({scene, profile: 'tree', leafTexture: trees.leafTexture, leafRect: FREE_ATLAS_RECTS.leaf, barkTexture: trees.leafTexture, barkRect: FREE_ATLAS_RECTS.bark, leafLuminance});
+  tree.setEnvironment(weather.view.environment);
+  // The same silhouette it stood with: leaved trees draw the variant from the position.
+  const variants = trees.profile.variants;
+  tree.place([{...site, x: 0, z: 0, variant: Math.floor(hash2(site.x, site.z, TREE_VARIANT_SEED) * variants) % variants}]);
+  tree.group.position.set(site.x, field.heightAt(site.x, site.z) ?? 0, site.z);
+  const length = Math.hypot(awayX, awayZ) || 1;
+  // Turning about this axis lowers the crown away from the crater.
+  felled.push({tree, axis: new THREE.Vector3(awayZ / length, 0, -awayX / length), age: 0});
+}
+function plantsReact(event, y) {
+  const footprint = craterFootprint(event.shape), sink = PLANTS.grassSink;
+  grassPlacements = grassPlacements.filter(site => {
+    const dx = site.x - event.x, dz = site.z - event.z;
+    if (Math.abs(dx) > event.outer || Math.abs(dz) > event.outer) return true;
+    const t = footprint.distance(dx, dz);
+    if (t < 1 || Math.random() < 1 - (t - 1) / (PLANTS.grassThinTo - 1)) return false;
+    site.y = (field.heightAt(site.x, site.z) ?? site.y + sink) - sink;
+    return true;
+  });
+  grass.dispose();
+  grass = layGrass(grassPlacements);
+  const before = standing.length;
+  standing = standing.filter(site => {
+    const dx = site.x - event.x, dz = site.z - event.z, t = footprint.distance(dx, dz);
+    if (t >= PLANTS.fellTo) return true;
+    if (t < 1) chips.emit(origin.set(site.x, y + site.h / 2, site.z), {color: PLANTS.woodColor, chips: PLANTS.chips, size: SHARDS.size}, SHARDS.maxShock);
+    else fell(site, dx, dz);
+    return false;
+  });
+  if (standing.length !== before) trees.place(standing);
+}
+function updatePlants(dt) {
+  grass.update(dt, {camera, environment: weather.view.environment});
+  trees.update(dt);
+  for (const entry of felled) {
+    entry.tree.update(dt);
+    if (entry.age >= PLANTS.fallSeconds) continue;
+    entry.age = Math.min(PLANTS.fallSeconds, entry.age + dt);
+    // Slow to start, fast to land, as a trunk falls.
+    entry.tree.group.quaternion.setFromAxisAngle(fallAxis.copy(entry.axis), THREE.MathUtils.degToRad(PLANTS.fallAngle) * (entry.age / PLANTS.fallSeconds) ** 2);
+  }
+}
+function resetPlants() {
+  for (const {tree} of felled) tree.dispose();
+  felled.length = 0;
+  standing = [...treeSites];
+  trees.place(standing);
+  grassPlacements = grassSites.map(site => ({...site}));
+  grass.dispose();
+  grass = layGrass(grassPlacements);
+}
+
 // Clods and dropped objects: Jolt bodies with a mesh each.
 const clodGeometry = new THREE.DodecahedronGeometry(.5 * Math.sqrt(3) / 1.2, 0);   // about a unit box, rounded
 const strataMaterials = Object.fromEntries(Object.entries(STRATA_TINT).map(([name, tint]) => [name, new THREE.MeshStandardMaterial({color: tint, roughness: .95, flatShading: true})]));
@@ -124,7 +210,7 @@ function removeMoving(index) {
 const clodCount = () => moving.reduce((count, entry) => count + (entry.clod ? 1 : 0), 0);
 
 // The wiring: what a crater throws out, by the strata it cut.
-const effects = {shards: true, dust: true, clods: true};
+const effects = {shards: true, dust: true, clods: true, plants: true};
 const origin = new THREE.Vector3();
 const rimPoint = new THREE.Vector3(), outward = new THREE.Vector3();
 // Point k of n around the crater, `share` of its reach from the centre, on the ground; `outward` points away.
@@ -182,6 +268,7 @@ field.subscribe(event => {
   if (effects.shards) throwShards(event, y);
   if (effects.dust) throwDust(event, y);
   if (effects.clods) throwClods(event, y);
+  if (effects.plants) plantsReact(event, y);
 });
 
 // A launched object makes its own crater: the terrain's craterFromImpact turns its mass, velocity and outline into
@@ -258,6 +345,7 @@ const effectsFolder = gui.addFolder('Wired effects');
 effectsFolder.add(effects, 'shards').name('Shards (particles)');
 effectsFolder.add(effects, 'dust').name('Dust (particles)');
 effectsFolder.add(effects, 'clods').name('Clods (Jolt bodies)');
+effectsFolder.add(effects, 'plants').name('Grass and trees react');
 effectsFolder.add(CLODS, 'perBlast', 0, 40, 1).name('Clods per crater, at most');
 effectsFolder.add(CLODS, 'stayShare', 0, 1, .05).name('Clods that stay');
 gui.add({reset() {
@@ -265,6 +353,7 @@ gui.add({reset() {
   pendingImpacts.length = 0;
   chips.clear();
   field.resetDeformation(onHeightSample);
+  resetPlants();
   groundChanged = true;
 }}, 'reset').name('Reset ground and bodies');
 const weatherUI = mountWeatherControls(weather);
@@ -303,6 +392,7 @@ startFrameLoop(renderer, (dt, now) => {
   }
   chips.update(dt);
   puffs.update(dt);
+  updatePlants(dt);
   weather.system.update(dt);
   weather.view.update(dt);
   weatherUI.sync();
@@ -324,6 +414,10 @@ onLeave(() => {
   for (let i = moving.length - 1; i >= 0; i--) removeMoving(i);
   driver.dispose?.();
   chips.dispose(); puffs.dispose();
+  for (const {tree} of felled) tree.dispose();
+  trees.dispose(); grass.dispose();
+  for (const geometry of Object.values(meadow.grassGeometries ?? {})) geometry.dispose?.();
+  meadow.atlas?.dispose?.();
   clodGeometry.dispose(); unitSphere.dispose(); unitBox.dispose();
   Object.values(strataMaterials).forEach(material => material.dispose()); objectMaterial.dispose();
   shadowReceivers.dispose(); weather.view.dispose(); weatherUI.dispose();
