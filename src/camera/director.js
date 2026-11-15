@@ -39,3 +39,15 @@ export function createFollowRig({offset=[8,5,-10],lookAhead=[0,0,0],smoothing=5,
  const pose=new PerspectiveCamera(),desired=new Vector3(),look=new Vector3();let initialized=false;
  const rig=({dt,data})=>{desired.fromArray(offset).multiplyScalar(data.distance??1).add(data.target);if(!initialized)pose.position.copy(desired);else pose.position.lerp(desired,1-Math.exp(-dt*smoothing));look.fromArray(lookAhead).add(data.target);pose.lookAt(look);pose.fov=fov;initialized=true;return pose;};rig.reset=()=>initialized=false;return rig;
 }
+// Third-person rig the player turns: the camera sits `distance` m behind the target along the look direction.
+// yaw is the heading looked toward (0 = +Z, positive toward +X), pitch the angle above the target; both in radians.
+// look(yaw, pitch) adds to them (mouse or stick deltas); `yaw` gives the heading for camera-relative movement.
+const THIRD_PERSON_PITCH=Object.freeze([-.35,1.3]);   // radians, default lowest and highest camera angle
+export function createThirdPersonRig({distance=6,yaw=0,pitch=.4,minPitch=THIRD_PERSON_PITCH[0],maxPitch=THIRD_PERSON_PITCH[1],fov=RIG_FOV}={}){
+ const pose=new PerspectiveCamera();let heading=yaw,tilt=pitch;
+ const rig=({data})=>{const arm=distance*(data.distance??1),flat=Math.cos(tilt)*arm;pose.position.set(data.target.x-Math.sin(heading)*flat,data.target.y+Math.sin(tilt)*arm,data.target.z-Math.cos(heading)*flat);pose.lookAt(data.target);pose.fov=fov;return pose;};
+ rig.look=(deltaYaw,deltaPitch)=>{heading+=deltaYaw;tilt=MathUtils.clamp(tilt+deltaPitch,minPitch,maxPitch);};
+ rig.reset=()=>{heading=yaw;tilt=pitch;};
+ Object.defineProperty(rig,'yaw',{get:()=>heading});
+ return rig;
+}

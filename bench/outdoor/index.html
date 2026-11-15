@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outdoor controller bench</title>
+<style>
+ body { margin: 0; background: #253b3a; color: white; font: 15px system-ui; }
+ canvas { display: block; }
+ aside { position: fixed; top: 1rem; left: 1rem; padding: 1rem; background: #121c20ed; border-radius: .5rem; }
+ p { margin: .5rem 0; }
+ button { padding: .35rem .65rem; }
+</style>
+<aside>
+ <strong>Outdoor controller bench</strong>
+ <p>Click the view to look around (Esc to release) · WASD or arrows to move · Shift to run · Space to jump (hold for higher) · E to interact · R to reset</p>
+ <p id="status" role="status">Loading character…</p>
+ <p id="interaction" aria-live="polite"></p>
+ <button id="idle" disabled>Preview idle</button>
+ <button id="walk" disabled>Preview walk</button>
+ <button id="play">Player control</button>
+</aside>
+<script type="module" src="./main.js"></script>
+</html>

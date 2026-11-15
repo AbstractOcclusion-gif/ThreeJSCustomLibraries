@@ -199,7 +199,9 @@ export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIsland
    if(r.dynamic&&b.mass===0){const id=r.native.GetID();put(position,b.position);rotation.Set(b.quaternion.x,b.quaternion.y,b.quaternion.z,b.quaternion.w);api.SetPositionAndRotation(id,position,rotation,J.EActivation_DontActivate);vector.Set(0,0,0);spin.Set(0,0,0);api.SetLinearAndAngularVelocity(id,vector,spin);r.native.ResetForce();r.native.ResetTorque();api.SetMotionType(id,J.EMotionType_Static,J.EActivation_DontActivate);r.dynamic=false;if(r.frozen){r.frozen=false;frozenCount--;}b.velocity.setZero();b.angularVelocity.setZero();r.v.setZero();r.w.setZero();}
    const targetLayer=layer(b);if(targetLayer!==r.layer){api.SetObjectLayer(r.native.GetID(),targetLayer);r.layer=targetLayer;}if(b.mass===0)continue;
    if(b.shapes[0] instanceof C.Sphere&&b.shapes[0].radius!==r.radius){const next=shapeFor(b);try{api.SetShape(r.native.GetID(),next.shape,false,J.EActivation_DontActivate);r.partIDs=next.partIDs;r.partMask=next.partMask;}finally{next.shape.Release();}r.radius=b.shapes[0].radius;}
-   if(b.sleepState===C.Body.SLEEPING){if(r.native.IsActive())api.DeactivateBody(r.native.GetID());r.wasActive=false;continue;}if(r.frozen)unfreeze(b,r);r.wasActive=true;
+   // A sleeping mirror takes its native body to sleep. One whose native body woke again since (pushed from outside the
+   // driver, e.g. by a character controller) follows it awake instead of cancelling the push.
+   if(b.sleepState===C.Body.SLEEPING){if(r.wasActive===false&&r.native.IsActive())b.wakeUp();else{if(r.native.IsActive())api.DeactivateBody(r.native.GetID());r.wasActive=false;continue;}}if(r.frozen)unfreeze(b,r);r.wasActive=true;
    if(!r.native.IsActive())api.ActivateBody(r.native.GetID());if(r.linearDamping!==b.linearDamping||r.angularDamping!==b.angularDamping){const motion=r.native.GetMotionProperties();motion.SetLinearDamping(-Math.log(1-b.linearDamping));motion.SetAngularDamping(-Math.log(1-b.angularDamping));r.linearDamping=b.linearDamping;r.angularDamping=b.angularDamping;}if(!b.velocity.almostEquals(r.v,1e-12)||!b.angularVelocity.almostEquals(r.w,1e-12))api.SetLinearAndAngularVelocity(r.native.GetID(),put(vector,b.velocity),put(spin,b.angularVelocity));if(b.force.lengthSquared())r.native.AddForce(put(vector,b.force));if(b.torque.lengthSquared())r.native.AddTorque(put(vector,b.torque));
   }
   if(metrics){const now=performance.now();metrics.inputMs+=now-phaseStart;phaseStart=now;}
@@ -213,7 +215,9 @@ export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIsland
   if(metrics){const now=performance.now();metrics.dispatchMs+=now-phaseStart;metrics.stepMs+=now-stepStart;metrics.steps++;}
  }
  return{
-  name:'Jolt',heavyStep:1/120,rigidStep:1/60,optimizeBroadPhase(){physics.OptimizeBroadPhase();},
+  name:'Jolt',heavyStep:1/120,rigidStep:1/60,
+  // For hosts that add their own Jolt objects (a character controller): the native interface and the object layers bodies get.
+  native:engine,layers:Object.freeze({fixed:0,moving:1}),optimizeBroadPhase(){physics.OptimizeBroadPhase();},
   // Explicit fixed attachment motion; ordinary static scenery is untouched.
   moveFixedBody(body){const r=bodies.get(body);if(!r||body.mass!==0)throw Error('Unknown fixed attachment');put(position,body.position);rotation.Set(body.quaternion.x,body.quaternion.y,body.quaternion.z,body.quaternion.w);api.SetPositionAndRotation(r.native.GetID(),position,rotation,J.EActivation_DontActivate);releaseAround(body,{reason:'attachment-moved'});for(const [c]of joints)if(c.bodyA===body||c.bodyB===body){const other=c.bodyA===body?c.bodyB:c.bodyA;other.wakeUp();const o=bodies.get(other);if(o)api.ActivateBody(o.native.GetID());}},
   get frozen(){return frozenCount;},
