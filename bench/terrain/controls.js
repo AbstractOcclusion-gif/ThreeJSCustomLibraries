@@ -112,13 +112,15 @@ export function textureSetControls(gui, {sets, catalogue, onChange}) {
   return folder;
 }
 
-// Click-to-blast craters (field.crater). tool: {blast, shape, radius, width, yaw, depth, rimShare}; onBlast toggles the
+// Click-to-blast craters (field.crater). tool: {blast, shape, radius, width, yaw, depth, rimShare, ragged, rays}; onBlast toggles the
 // click mode. Shapes: a round body, a box (flat floor, steep walls) and an oval (a body arriving at a slant).
 export const CRATER_SHAPES = Object.freeze({Round: 'round', Box: 'box', Oval: 'oval'});
 export function craterTool(tool) {
   if (tool.shape === 'round') return tool.radius;
   return {halfX: tool.radius, halfZ: tool.radius * tool.width, yaw: tool.yaw * Math.PI / 180, squareness: tool.shape === 'box' ? 1 : 0};
 }
+// The look options of the tool, for field.crater or a crater layer stamp.
+export const craterLook = ({rimShare, ragged, rays}) => ({rimShare, ragged, rays});
 export function craterControls(gui, tool, {onBlast} = {}) {
   const folder = gui.addFolder('Craters');
   folder.add(tool, 'blast').name('Blast craters (click)').listen().onChange(onBlast);
@@ -127,7 +129,7 @@ export function craterControls(gui, tool, {onBlast} = {}) {
   folder.add(tool, 'width', .2, 1, .05).name('Width share (box, oval)');
   folder.add(tool, 'yaw', 0, 180, 5).name('Heading · °');
   folder.add(tool, 'depth', CRATER_FIELDS.depth.min, CRATER_FIELDS.depth.max, CRATER_FIELDS.depth.step).name(CRATER_FIELDS.depth.label);
-  folder.add(tool, 'rimShare', CRATER_FIELDS.rimShare.min, CRATER_FIELDS.rimShare.max, CRATER_FIELDS.rimShare.step).name(CRATER_FIELDS.rimShare.label);
+  for (const key of ['rimShare', 'ragged', 'rays']) folder.add(tool, key, CRATER_FIELDS[key].min, CRATER_FIELDS[key].max, CRATER_FIELDS[key].step).name(CRATER_FIELDS[key].label);
   return folder;
 }
 

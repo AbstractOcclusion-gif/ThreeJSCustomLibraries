@@ -5,7 +5,7 @@ import {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
 import {createRunoffLook} from './runoff.js';
 export {createRunoffLook, createTerrainRunoff} from './runoff.js';
 export {createTerrainField, SNOW_DEPTH_SCALE, SNOW_DEFAULTS, SNOW_FIELDS, validateSnow} from './field.js';
-export {CRATER_DEFAULTS, CRATER_FIELDS, CRATER_STRATA, CRATER_STRATA_FIELDS, CRATER_EJECTA, craterFootprint, craterStrataPaint, createCraterLayer, validateStrata, addStrataVolumes, craterEvent} from './craters.js';
+export {CRATER_DEFAULTS, CRATER_FIELDS, CRATER_STRATA, CRATER_STRATA_FIELDS, CRATER_EJECTA, craterFootprint, craterStrataPaint, createCraterLayer, createCraterStamp, craterFromImpact, CRATER_IMPACT, validateStrata, addStrataVolumes, craterEvent} from './craters.js';
 export {createTerrainDrainage} from './drainage.js';
 export {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_ROLE_LAYER, PAINT_REACH, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
 export {valueNoise} from '../core/value-noise.js';

@@ -9,7 +9,7 @@ import {createTerrainPlay, PLAY} from './play.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchPanel} from '../panel.js';
 import {loadTerrainPalette} from './textures.js';
-import {appearanceControls, craterControls, craterTool, sandLookControls, textureSetControls} from './controls.js';
+import {appearanceControls, craterControls, craterLook, craterTool, sandLookControls, textureSetControls} from './controls.js';
 import {aimRay} from '../kit/input.js';
 import '../bench.css';
 
@@ -108,7 +108,7 @@ export async function mountValley() {
   let world, clipmap;
   // The craters blasted into the world: they outlive rebuilds of the world, so a reroll keeps them where they are.
   const craters = createCraterLayer();
-  const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare};
+  const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays};
   // Vertex colours are only worked out for the views that show them.
   const debugView = () => settings.view === VIEWS[1] || settings.view === VIEWS[2];
   // Time spent keeping the terrain around the focus, per frame, over the last status period.
@@ -476,7 +476,7 @@ export async function mountValley() {
     if (!crater.blast || !(event.buttons & 1)) return;
     const hit = aimRay(raycaster, event, renderer.domElement, camera).intersectObject(clipmap.group, true)[0]?.point;
     if (!hit) return;
-    try { reground(craters.add({x: hit.x, z: hit.z, shape: craterTool(crater), depth: crater.depth, rimShare: crater.rimShare})); report(); } catch (error) { report(error); }
+    try { reground(craters.add({x: hit.x, z: hit.z, shape: craterTool(crater), depth: crater.depth, ...craterLook(crater)})); report(); } catch (error) { report(error); }
   }, {signal: craterEvents.signal});
   const view = gui.addFolder('View');
   view.add(settings, 'density', ...CONTROLS.density).name('Dressing density').onFinishChange(clearDressing);

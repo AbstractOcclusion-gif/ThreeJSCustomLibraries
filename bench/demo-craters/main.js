@@ -1,12 +1,12 @@
 // Crater demo: the terrain field's craters wired to other modules through its 'terrain:crater' event. The terrain
 // digs, paints and reports; particles throw the shards and dust; the destruction module's Jolt driver flies the clods
-// and carries the boulders and crates whose own shape makes the crater they land in. This page only wires them.
+// and carries the launched objects, whose mass, speed and outline make the crater they land in. This page only wires them.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import initJolt from 'jolt-physics';
 import {Body, Box, Sphere, Vec3, World} from 'cannon-es';
 import {createBenchPanel} from '../panel.js';
-import {createTerrainAppearance, createTerrainField, createTerrainMaterial, CRATER_DEFAULTS, TERRAIN_ROLE_TINTS} from '../../src/terrain/index.js';
+import {craterFromImpact, createTerrainAppearance, createTerrainField, createTerrainMaterial, CRATER_DEFAULTS, TERRAIN_ROLE_TINTS} from '../../src/terrain/index.js';
 import {createSurfaceWeather} from '../../src/surface/index.js';
 import {createChips, createPuffs} from '../../src/particles/index.js';
 import {createJoltDriver} from '../../src/destruction/jolt-driver.js';
@@ -18,7 +18,7 @@ import {createShadowReceivers} from '../kit/shadow-receivers.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from '../terrain/textures.js';
 import {createTerrainCollider} from '../terrain/heightfield.js';
-import {craterControls, craterTool} from '../terrain/controls.js';
+import {craterControls, craterLook, craterTool} from '../terrain/controls.js';
 import '../bench.css';
 
 // Ground: a square `span` m wide, `resolution` samples a side (25 cm cells), rolling `relief` m over `reliefSize` m.
@@ -34,14 +34,26 @@ const DUST = {perMetre: .45, maxSize: 4};
 // living `life` s. Edge size in m (a share of the crater reach, within [min, max]); thrown from the rim at `speed`
 // x sqrt(depth) m/s, `rise` of it upward; `density` kg/m³.
 const CLODS = {perCubicMetre: .8, perBlast: 18, max: 64, life: 14, sizeShare: .09, minSize: .12, maxSize: .55, speed: 3.2, rise: .75, density: 1600, spin: 6};
-// Dropped objects: from `height` m above the clicked point, at `speed` m/s down. They crater on their first ground
-// contact over `minSpeed` m/s: depth = `depthPerRootJoule` x cbrt(impact energy), within [minDepth, maxDepth]; the
-// footprint is `footprintShare` x the object's own outline. Removed after `life` s.
-const DROPS = {height: 26, speed: 18, minSpeed: 4, depthPerRootJoule: .028, minDepth: .2, maxDepth: 4.5, footprintShare: 1.35, life: 30, density: 2400,
-  sphere: {radius: 1.1}, box: {half: [1.4, .8, .9]}};
+// Launched objects. Each: its collider (a sphere `radius` or a box `half` extents, m, at size 1), the outline it
+// lands on (`squareness` of craterFootprint; a box lands on its X and Z extents, `footprint` overrides them: the
+// plane's wings), its density (kg/m³ of its collider) and its default launch. A plane is a fuselage collider drawn
+// with wings and a tail.
+const OBJECTS = {
+  rock: {label: 'Small rock', radius: .35, density: 2600, launch: {speed: 30, angle: 10}},
+  boulder: {label: 'Boulder', radius: 1.1, density: 2400, launch: {speed: 22, angle: 0}},
+  crate: {label: 'Crate', half: [1.4, .8, .9], squareness: 1, density: 700, launch: {speed: 20, angle: 0}},
+  beam: {label: 'Steel beam', half: [2.6, .18, .18], squareness: 1, density: 7800, launch: {speed: 25, angle: 30}},
+  slab: {label: 'Concrete slab', half: [1.7, .14, 1.2], squareness: 1, density: 2400, launch: {speed: 18, angle: 0}},
+  plane: {label: 'Plane', half: [3.2, .5, .5], footprint: [3.2, 2.6], squareness: .3, density: 350, launch: {speed: 55, angle: 72},
+    wings: {half: [.55, .06, 2.6], offset: [.3, 0, 0]}, tail: {half: [.35, .5, .05], offset: [-2.8, .6, 0]}},
+};
+// Launch: the object starts `distance` m back along its path from the clicked point. It craters on a ground contact
+// (craterFromImpact, from its mass, its velocity before the contact and its outline as it lies), at most `craters`
+// times, `cooldown` s apart: a sliding plane ploughs more than once. Removed after `life` s.
+const LAUNCH = {distance: 34, craters: 3, cooldown: .3, life: 30, speed: [2, 80], angle: [0, 82], size: [.4, 2.5], density: [.2, 4]};
 const STEP = 1 / 60;   // the Jolt driver's rigid step
 const RECEIVER_SCAN_SECONDS = 2;   // how often new lit materials (clods, drops) are given the sun shadows
-const ACTIONS = {None: 'none', 'Blast a crater': 'blast', 'Drop a boulder': 'sphere', 'Drop a crate': 'box'};
+const ACTIONS = {None: 'none', 'Blast a crater': 'blast', 'Launch the object': 'launch'};
 
 const $ = id => document.getElementById(id);
 const renderer = benchRenderer();
@@ -90,8 +102,8 @@ const puffs = await createPuffs(scene, {pool: 48, environment: weather.view.envi
 // Clods and dropped objects: Jolt bodies with a mesh each.
 const clodGeometry = new THREE.DodecahedronGeometry(.5 * Math.sqrt(3) / 1.2, 0);   // about a unit box, rounded
 const strataMaterials = Object.fromEntries(Object.entries(STRATA_TINT).map(([name, tint]) => [name, new THREE.MeshStandardMaterial({color: tint, roughness: .95, flatShading: true})]));
-const dropMaterial = new THREE.MeshStandardMaterial({color: '#8d8a84', roughness: .8});
-const dropGeometries = {sphere: new THREE.SphereGeometry(DROPS.sphere.radius, 24, 16), box: new THREE.BoxGeometry(...DROPS.box.half.map(h => h * 2))};
+const objectMaterial = new THREE.MeshStandardMaterial({color: '#8d8a84', roughness: .8});
+const unitSphere = new THREE.SphereGeometry(1, 24, 16), unitBox = new THREE.BoxGeometry(2, 2, 2);   // scaled per object
 const moving = [];   // {body, mesh, age, life, owned geometry?}
 function addMoving(body, mesh, life) {
   world.addBody(body);
@@ -145,41 +157,55 @@ field.subscribe(event => {
   if (effects.clods) throwClods(event, y);
 });
 
-// Craters made by a dropped object take its outline at impact: a round boulder, or a crate turned as it landed.
+// A launched object makes its own crater: the terrain's craterFromImpact turns its mass, velocity and outline into
+// the crater's shape, depth and travel.
+const launch = {object: 'boulder', size: 1, density: 1, ...OBJECTS.boulder.launch};
 const pendingImpacts = [];
-function drop(kind, point) {
-  const isSphere = kind === 'sphere';
-  const shape = isSphere ? new Sphere(DROPS.sphere.radius) : new Box(new Vec3(...DROPS.box.half));
-  const volume = isSphere ? 4 / 3 * Math.PI * DROPS.sphere.radius ** 3 : DROPS.box.half.reduce((a, b) => a * b * 2, 1);
-  const body = new Body({mass: DROPS.density * volume, shape, position: new Vec3(point.x, point.y + DROPS.height, point.z), angularDamping: .2});
-  body.velocity.set(0, -DROPS.speed, 0);
-  if (!isSphere) body.quaternion.setFromEuler(Math.random() * .3, Math.random() * Math.PI, Math.random() * .3);
-  const mesh = new THREE.Mesh(dropGeometries[kind], dropMaterial);
+function boxMesh(half, offset = [0, 0, 0]) {
+  const mesh = new THREE.Mesh(unitBox, objectMaterial);
+  mesh.scale.set(...half); mesh.position.set(...offset);
   mesh.castShadow = mesh.receiveShadow = true;
-  addMoving(body, mesh, DROPS.life);
-  const entry = moving.at(-1);
-  body.addEventListener('collide', ({body: other, contact}) => {
-    if (other !== groundBody || entry.cratered) return;
-    const speed = Math.abs(contact.getImpactVelocityAlongNormal());
-    if (speed < DROPS.minSpeed) return;
-    entry.cratered = true;   // the physics callback only records it; the ground changes between steps
-    pendingImpacts.push({entry, kind, energy: .5 * body.mass * speed * speed});
+  return mesh;
+}
+function launchObject(point) {
+  const spec = OBJECTS[launch.object], size = launch.size;
+  const half = spec.half?.map(h => h * size), radius = spec.radius && spec.radius * size;
+  const volume = radius ? 4 / 3 * Math.PI * radius ** 3 : half.reduce((a, b) => a * b * 2, 1);
+  // Flies away from the camera, `angle` degrees off the vertical, to arrive at the clicked point.
+  const away = Math.atan2(point.z - camera.position.z, point.x - camera.position.x), tilt = THREE.MathUtils.degToRad(launch.angle);
+  const direction = new Vec3(Math.cos(away) * Math.sin(tilt), -Math.cos(tilt), Math.sin(away) * Math.sin(tilt));
+  const body = new Body({mass: spec.density * launch.density * volume, shape: radius ? new Sphere(radius) : new Box(new Vec3(...half)), angularDamping: .2,
+    position: new Vec3(point.x - direction.x * LAUNCH.distance, point.y - direction.y * LAUNCH.distance, point.z - direction.z * LAUNCH.distance)});
+  body.velocity.copy(direction.scale(launch.speed));
+  if (half) body.quaternion.setFromEuler(0, -away, 0);   // its length along its path
+  let mesh;
+  if (radius) { mesh = new THREE.Mesh(unitSphere, objectMaterial); mesh.scale.setScalar(radius); mesh.castShadow = mesh.receiveShadow = true; }
+  else {
+    mesh = new THREE.Group();
+    mesh.add(boxMesh(half));
+    for (const part of [spec.wings, spec.tail]) if (part) mesh.add(boxMesh(part.half.map(h => h * size), part.offset.map(o => o * size)));
+  }
+  addMoving(body, mesh, LAUNCH.life);
+  const entry = Object.assign(moving.at(-1), {spec, size, radius, half, craters: 0, nextCrater: 0, before: new Vec3()});
+  body.addEventListener('collide', ({body: other}) => {
+    if (other !== groundBody || entry.craters >= LAUNCH.craters || world.time < entry.nextCrater) return;
+    entry.craters++; entry.nextCrater = world.time + LAUNCH.cooldown;
+    pendingImpacts.push(entry);   // the physics callback only records it; the ground changes between steps
   });
 }
-const yawAxis = new THREE.Vector3(), turned = new THREE.Quaternion();
-function footprintOf({entry, kind}) {
-  if (kind === 'sphere') return DROPS.sphere.radius * DROPS.footprintShare;
-  // The crate's footprint: its half extents along its own X and Z, turned by its heading (yaw of its X axis).
-  turned.set(entry.body.quaternion.x, entry.body.quaternion.y, entry.body.quaternion.z, entry.body.quaternion.w);
-  yawAxis.set(1, 0, 0).applyQuaternion(turned);
-  const [hx, , hz] = DROPS.box.half;
-  return {halfX: hx * DROPS.footprintShare, halfZ: hz * DROPS.footprintShare, yaw: Math.atan2(yawAxis.z, yawAxis.x), squareness: 1};
+const lengthAxis = new THREE.Vector3(), turned = new THREE.Quaternion();
+// The outline an object lies on: a sphere's circle; a box's X and Z extents turned by the heading of its length.
+function footprintOf({spec, size, radius, half, body}) {
+  if (radius) return radius;
+  lengthAxis.set(1, 0, 0).applyQuaternion(turned.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w));
+  const [halfX, halfZ] = spec.footprint ? spec.footprint.map(h => h * size) : [half[0], half[2]];
+  return {halfX, halfZ, yaw: Math.atan2(lengthAxis.z, lengthAxis.x), squareness: spec.squareness};
 }
 function landImpacts() {
-  for (const impact of pendingImpacts) {
-    const {x, z} = impact.entry.body.position;
-    const depth = THREE.MathUtils.clamp(DROPS.depthPerRootJoule * Math.cbrt(impact.energy), DROPS.minDepth, DROPS.maxDepth);
-    field.crater(x, z, footprintOf(impact), depth, onHeightSample);
+  for (const entry of pendingImpacts) {
+    const {before, body} = entry;
+    const impact = craterFromImpact({footprint: footprintOf(entry), mass: body.mass, velocity: [before.x, before.y, before.z]});
+    if (impact) field.crater(body.position.x, body.position.z, impact.shape, impact.depth, onHeightSample, {...craterLook(crater), travel: impact.travel});
   }
   pendingImpacts.length = 0;
 }
@@ -187,10 +213,19 @@ function landImpacts() {
 // Panel.
 const gui = createBenchPanel('Craters');
 const action = {mode: 'blast'};
-const crater = {blast: true, shape: 'round', radius: 3, width: .5, yaw: 0, depth: 2.5, rimShare: CRATER_DEFAULTS.rimShare};
+const crater = {blast: true, shape: 'round', radius: 3, width: .5, yaw: 0, depth: 2.5, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays};
 const clickFolder = gui.addFolder('Click action');
 clickFolder.add(action, 'mode', ACTIONS).name('Click does').onChange(mode => { orbit.enabled = mode === 'none'; crater.blast = mode === 'blast'; });
 orbit.enabled = false;
+const launchFolder = gui.addFolder('Launched object');
+launchFolder.add(launch, 'object', Object.fromEntries(Object.entries(OBJECTS).map(([id, {label}]) => [label, id]))).name('Object').onChange(id => {
+  Object.assign(launch, OBJECTS[id].launch);
+  launchFolder.controllers.forEach(controller => controller.updateDisplay());
+});
+launchFolder.add(launch, 'size', ...LAUNCH.size, .05).name('Size ×');
+launchFolder.add(launch, 'density', ...LAUNCH.density, .05).name('Weight ×');
+launchFolder.add(launch, 'speed', ...LAUNCH.speed, 1).name('Speed · m/s');
+launchFolder.add(launch, 'angle', ...LAUNCH.angle, 1).name('Angle from vertical · °');
 craterControls(gui, crater, {onBlast(on) { action.mode = on ? 'blast' : 'none'; orbit.enabled = !on; gui.controllersRecursive().forEach(c => c.updateDisplay()); }});
 const effectsFolder = gui.addFolder('Wired effects');
 effectsFolder.add(effects, 'shards').name('Shards (particles)');
@@ -212,8 +247,8 @@ renderer.domElement.addEventListener('pointerdown', event => {
   const hit = aimRay(raycaster, event, renderer.domElement, camera).intersectObject(ground)[0]?.point;
   if (!hit) return;
   try {
-    if (action.mode === 'blast') field.crater(hit.x, hit.z, craterTool(crater), crater.depth, onHeightSample, {rimShare: crater.rimShare});
-    else drop(action.mode, hit);
+    if (action.mode === 'blast') field.crater(hit.x, hit.z, craterTool(crater), crater.depth, onHeightSample, craterLook(crater));
+    else launchObject(hit);
     $('error').hidden = true;
   } catch (error) { $('error').hidden = false; $('error').textContent = error.message; }
 }, {signal: pointerEvents.signal});
@@ -223,6 +258,7 @@ let lastStatus = 0, receiverScan = RECEIVER_SCAN_SECONDS;
 startFrameLoop(renderer, (dt, now) => {
   orbit.update();
   fixedStep.advance(dt, step => {
+    for (const entry of moving) entry.before?.copy(entry.body.velocity);   // the velocity an impact arrives with
     world.step(step);
     landImpacts();
   });
@@ -249,7 +285,7 @@ startFrameLoop(renderer, (dt, now) => {
   weather.view.render();
   if (now - lastStatus > STATUS_REFRESH_MS) {
     lastStatus = now;
-    $('status').textContent = `${clodCount()} clods · ${moving.length - clodCount()} dropped objects · ${chips.active} shards`;
+    $('status').textContent = `${clodCount()} clods · ${moving.length - clodCount()} launched objects · ${chips.active} shards`;
   }
 });
 document.body.dataset.ready = 'true';
@@ -260,8 +296,8 @@ onLeave(() => {
   for (let i = moving.length - 1; i >= 0; i--) removeMoving(i);
   driver.dispose?.();
   chips.dispose(); puffs.dispose();
-  clodGeometry.dispose(); Object.values(dropGeometries).forEach(geometry => geometry.dispose());
-  Object.values(strataMaterials).forEach(material => material.dispose()); dropMaterial.dispose();
+  clodGeometry.dispose(); unitSphere.dispose(); unitBox.dispose();
+  Object.values(strataMaterials).forEach(material => material.dispose()); objectMaterial.dispose();
   shadowReceivers.dispose(); weather.view.dispose(); weatherUI.dispose();
   field.dispose(); groundMaterial.dispose();
   orbit.dispose(); gui.destroy(); renderer.dispose();

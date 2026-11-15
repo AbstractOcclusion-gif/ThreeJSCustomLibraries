@@ -48,7 +48,7 @@ test('digging bare soil pushes a share of it up into a rim and validates the sha
 
 test('a crater digs a bowl in the outline of the object, piles a rim, deepens up to its limit and blows snow out', () => {
  const nx = 81, nz = 81, heights = new Float32Array(nx * nz);
- const field = createTerrainField({origin: [0, 0], size: [40, 40], resolution: [nx, nz], heights, seed: 3, crater: {depthLimit: 3}});
+ const field = createTerrainField({origin: [0, 0], size: [40, 40], resolution: [nx, nz], heights, seed: 3, crater: {depthLimit: 3, ragged: 0}});
  assert.ok(field.geometry.boundingBox.min.y <= -3);
  assert.equal(field.crater(10, 10, 2, 0), null);
  assert.throws(() => field.crater(10, 10, {halfX: 0, halfZ: 1}, 1), /footprint/);
@@ -336,7 +336,7 @@ test('craters paint the strata they cut and the soil they throw, and tracks keep
  assert.ok(Math.abs(thrown[role('soil')] - .5) < 1e-6 && Math.abs(sum(thrown) - 1) < 1e-6);
 
  const nx = 129, heights = new Float32Array(nx * nx);
- const field = createTerrainField({origin: [0, 0], size: [32, 32], resolution: [nx, nx], heights, seed: 3, rules: {rockSlope: 3, snowLine: 300, mudBelow: -20, bareSoil: 0}});
+ const field = createTerrainField({origin: [0, 0], size: [32, 32], resolution: [nx, nx], heights, seed: 3, rules: {rockSlope: 3, snowLine: 300, mudBelow: -20, bareSoil: 0}, crater: {ragged: 0}});
  const mud = TERRAIN_LAYERS.indexOf('mud'), rock = TERRAIN_LAYERS.indexOf('rock');
  field.deform(26, 26, 1, .4);
  assert.ok(field.layerWeightAt(26, 26, mud) < .05, 'a track keeps the surface paint');
@@ -352,7 +352,7 @@ test('craters paint the strata they cut and the soil they throw, and tracks keep
 
 test('a crater tells its subscribers where it is, how much it threw out and what it was made of', async () => {
  const {createCraterLayer} = await import('../../src/terrain/index.js');
- const nx = 81, field = createTerrainField({origin: [0, 0], size: [40, 40], resolution: [nx, nx], heights: new Float32Array(nx * nx).fill(2), seed: 3});
+ const nx = 81, field = createTerrainField({origin: [0, 0], size: [40, 40], resolution: [nx, nx], heights: new Float32Array(nx * nx).fill(2), seed: 3, crater: {ragged: 0}});
  const events = [];
  assert.throws(() => field.subscribe(null), TypeError);
  const unsubscribe = field.subscribe(event => events.push(event));
@@ -372,4 +372,42 @@ test('a crater tells its subscribers where it is, how much it threw out and what
  layer.add({x: 1, z: 2, shape: {halfX: 2, halfZ: 1}, depth: 1});
  assert.equal(heard[0].height, null);
  assert.ok(heard[0].volume > 0 && heard[0].strata.rock === 0, 'a 1 m crater reaches no bedrock');
+});
+
+test('a ragged crater is irregular but the same crater every time, and its rays differ from one another', async () => {
+ const {createCraterStamp} = await import('../../src/terrain/index.js');
+ const make = (ragged, x = 3) => createCraterStamp({x, z: -7, shape: 4, depth: 2, ragged, rays: 6});
+ const exact = make(0), ragged = make(1), again = make(1), elsewhere = make(1, 40), out = {t: 0, dig: 0, rise: 0};
+ const around = (stamp, read, radius) => Array.from({length: 36}, (_, i) => read(stamp, Math.cos(i / 36 * 2 * Math.PI) * radius, Math.sin(i / 36 * 2 * Math.PI) * radius));
+ const spread = values => Math.max(...values) - Math.min(...values);
+ const outline = (stamp, dx, dz) => stamp.relief(dx, dz, out).t, thrown = (stamp, dx, dz) => stamp.thrown(dx, dz);
+ assert.ok(spread(around(exact, outline, 4)) < 1e-9, 'ragged 0 keeps the exact outline');
+ assert.ok(spread(around(ragged, outline, 4)) > .1, 'the outline strays');
+ assert.deepEqual(around(ragged, outline, 4), around(again, outline, 4));
+ assert.notDeepEqual(around(ragged, thrown, 9), around(elsewhere, thrown, 9));
+ assert.equal(ragged.relief(0, 0, out).dig, 2);
+ // No ninefold (or any regular) star: the soil at 1.7 radii is not the same pattern turned by one ray gap.
+ const ring = around(ragged, thrown, 6.8), turnedRing = ring.map((_, i) => ring[(i + 6) % 36]);
+ assert.ok(ring.some((value, i) => Math.abs(value - turnedRing[i]) > .1));
+ assert.ok(around(make(1), thrown, 4 * 2.9).every(value => value === 0), 'nothing past the ejecta reach');
+ assert.throws(() => createCraterStamp({x: 0, z: 0, shape: 2, depth: 1, travel: {heading: 0, obliquity: 2}}), RangeError);
+ const forward = createCraterStamp({x: 0, z: 0, shape: 3, depth: 1, ragged: 0, rays: 0, travel: {heading: 0, obliquity: 1}});
+ assert.ok(forward.thrown(4.5, 0) > .3 && forward.thrown(-4.5, 0) === 0, 'an oblique impact throws its soil forward');
+});
+
+test('an impact makes a crater from the weight, speed, angle and outline of the object', async () => {
+ const {craterFromImpact} = await import('../../src/terrain/index.js');
+ assert.throws(() => craterFromImpact({footprint: 1, mass: 0, velocity: [0, -1, 0]}), RangeError);
+ assert.equal(craterFromImpact({footprint: 1, mass: 1, velocity: [0, -1, 0]}), null, 'a light tap leaves no crater');
+ const boulder = craterFromImpact({footprint: 1.1, mass: 13000, velocity: [0, -28, 0]});
+ const faster = craterFromImpact({footprint: 1.1, mass: 13000, velocity: [0, -56, 0]});
+ const lighter = craterFromImpact({footprint: 1.1, mass: 1300, velocity: [0, -28, 0]});
+ assert.ok(boulder.depth > 1.5 && boulder.depth < 4 && faster.depth > boulder.depth && lighter.depth < boulder.depth);
+ assert.ok(faster.shape.halfX > boulder.shape.halfX && boulder.shape.halfX > 1.1);
+ assert.equal(boulder.travel.obliquity, 0);
+ const slab = craterFromImpact({footprint: {halfX: 1.7, halfZ: 1.2, yaw: .4, squareness: 1}, mass: 2700, velocity: [0, -20, 0]});
+ assert.ok(slab.depth < boulder.depth && slab.shape.yaw === .4 && slab.shape.squareness === 1, 'a wide slab dents in its own outline');
+ const plane = craterFromImpact({footprint: {halfX: 3.2, halfZ: 2.6, yaw: 1, squareness: .3}, mass: 1100, velocity: [0, -17, 52]});
+ assert.ok(Math.abs(plane.shape.yaw - Math.PI / 2) < 1e-9 && plane.shape.halfX > 2 * plane.shape.halfZ, 'a flat impact ploughs a furrow along its heading');
+ assert.ok(plane.travel.obliquity > .9 && plane.depth < boulder.depth);
 });

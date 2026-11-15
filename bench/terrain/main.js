@@ -10,7 +10,7 @@ import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
-import {craterControls, craterTool, groundTrackControls, runoffControls, textureSetControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
+import {craterControls, craterLook, craterTool, groundTrackControls, runoffControls, textureSetControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
 import {createTerrainBasins} from './basins.js';
 import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from './footsteps.js';
 import {CONTACT_SURFACES, createTerrainImpacts} from './impacts.js';
@@ -60,7 +60,7 @@ const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forest
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
 // Live copies of the defaults, edited from the panel.
 const paint = {radius: TRACK.radius, depth: TRACK.depth, load: TRACK.load};
-const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare};
+const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays};
 const footstep = {...FOOTSTEP_DEFAULTS};
 const contactSurfaces = structuredClone(CONTACT_SURFACES);
 const melt = {metresPerSecond: SNOW_MELT.metresPerSecond};
@@ -260,7 +260,7 @@ function blastCrater(event) {
   if (!crater.blast || !(event.buttons & 1)) return;
   aimRay(raycaster, event, canvas, camera);
   const hit = raycaster.intersectObject(ground)[0]?.point;
-  if (hit) field.crater(hit.x, hit.z, craterTool(crater), crater.depth, impacts.onHeightSample, {rimShare: crater.rimShare});
+  if (hit) field.crater(hit.x, hit.z, craterTool(crater), crater.depth, impacts.onHeightSample, craterLook(crater));
 }
 canvas.addEventListener('pointerdown', blastCrater, {signal: trackEvents.signal});
 function paintTrack(event) {

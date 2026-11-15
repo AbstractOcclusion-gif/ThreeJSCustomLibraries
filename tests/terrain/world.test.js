@@ -201,7 +201,7 @@ test('a terrain field keeps the palette weights and moisture a world paints', ()
 
 test('a crater layer digs object-shaped bowls into the world, fades them on coarse meshes and saves its stamps', async () => {
  const {createCraterLayer} = await import('../../src/terrain/index.js');
- const craters = createCraterLayer({depthLimit: 3});
+ const craters = createCraterLayer({depthLimit: 3, ragged: 0});
  assert.throws(() => createTerrainWorld({seed: 4, biomes: [cloneBiome('hills')], craters: {}}), /crater layer/);
  const plain = createTerrainWorld({seed: 4, biomes: [cloneBiome('hills')]});
  const world = createTerrainWorld({seed: 4, biomes: [cloneBiome('hills')], craters});
@@ -216,7 +216,7 @@ test('a crater layer digs object-shaped bowls into the world, fades them on coar
  assert.equal(world.heightAt(20, 30, 8), plain.heightAt(20, 30, 8), 'a mesh with cells wider than the crater does not show it');
  craters.add({x: 20, z: 30, shape: 4, depth: 2});
  assert.ok(Math.abs(world.heightAt(20, 30) - (plain.heightAt(20, 30) - 3)) < 1e-4, 'stacked stamps stop at the depth limit');
- const restored = createCraterLayer({depthLimit: 3, stamps: JSON.parse(JSON.stringify(craters))});
+ const restored = createCraterLayer({depthLimit: 3, ragged: 0, stamps: JSON.parse(JSON.stringify(craters))});
  assert.equal(restored.count, 2);
  assert.equal(restored.offsetAt(21, 31), craters.offsetAt(21, 31));
  assert.deepEqual(craters.clear(), rect);
