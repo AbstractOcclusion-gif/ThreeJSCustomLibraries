@@ -198,3 +198,26 @@ test('a terrain field keeps the palette weights and moisture a world paints', ()
  assert.equal(createTerrainField(options).paletteMap, null);
  field.dispose();
 });
+
+test('a crater layer digs object-shaped bowls into the world, fades them on coarse meshes and saves its stamps', async () => {
+ const {createCraterLayer} = await import('../../src/terrain/index.js');
+ const craters = createCraterLayer({depthLimit: 3});
+ assert.throws(() => createTerrainWorld({seed: 4, biomes: [cloneBiome('hills')], craters: {}}), /crater layer/);
+ const plain = createTerrainWorld({seed: 4, biomes: [cloneBiome('hills')]});
+ const world = createTerrainWorld({seed: 4, biomes: [cloneBiome('hills')], craters});
+ assert.equal(world.heightAt(20, 30), plain.heightAt(20, 30));
+ assert.throws(() => craters.add({x: 0, z: 0, shape: 2, depth: 0}), RangeError);
+ const rect = craters.add({x: 20, z: 30, shape: 4, depth: 2});
+ assert.deepEqual(rect, {minX: 20 - 7, minZ: 30 - 7, maxX: 20 + 7, maxZ: 30 + 7});
+ assert.ok(Math.abs(world.heightAt(20, 30) - (plain.heightAt(20, 30) - 2)) < 1e-4);
+ assert.ok(world.heightAt(24.3, 30) > plain.heightAt(24.3, 30), 'rim stands above the relief');
+ assert.equal(world.heightAt(40, 30), plain.heightAt(40, 30), 'nothing changes past the rim');
+ assert.equal(world.heightAt(20, 30, 8), plain.heightAt(20, 30, 8), 'a mesh with cells wider than the crater does not show it');
+ craters.add({x: 20, z: 30, shape: 4, depth: 2});
+ assert.ok(Math.abs(world.heightAt(20, 30) - (plain.heightAt(20, 30) - 3)) < 1e-4, 'stacked stamps stop at the depth limit');
+ const restored = createCraterLayer({depthLimit: 3, stamps: JSON.parse(JSON.stringify(craters))});
+ assert.equal(restored.count, 2);
+ assert.equal(restored.offsetAt(21, 31), craters.offsetAt(21, 31));
+ assert.deepEqual(craters.clear(), rect);
+ assert.equal(world.heightAt(20, 30), plain.heightAt(20, 30));
+});

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {createTerrainRules} from './terrain-rules.js';
 import {createDataTexture} from '../core/data-texture.js';
 import {valueNoise} from '../core/value-noise.js';
+import {CRATER_DEFAULTS, CRATER_RIM, craterFootprint, validateCraterSettings} from './craters.js';
 
 const MAX_RESOLUTION = 1025;   // samples per side
 const BYTE = 255;              // 8-bit weight and coverage scale
@@ -48,39 +49,6 @@ const SNOW_RIM = Object.freeze({start: .7, peak: .95, end: 1.2});
 const SOIL_RIM_MAX_RISE = .1;  // m a rim of soil (mud, sand) may stand above the original ground
 const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
 const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: recompute all normals at once
-// Craters (field.crater). depthLimit: deepest a crater may dig below the original surface, m (fixed when the field is
-// made: it sets the envelope of the mesh and of colliders built from it). rimShare: share of the dug volume piled
-// into the rim, the rest is thrown out (ejecta). rimMaxShare: highest the rim may stand above the original surface,
-// as a share of depthLimit. Rim profile in shares of the crater radius: rises from start, peaks, and ends.
-export const CRATER_DEFAULTS = Object.freeze({depthLimit: 5, rimShare: .45, rimMaxShare: .25});
-export const CRATER_FIELDS = Object.freeze({
- radius: {label: 'Crater radius · m', min: .3, max: 12, step: .1},
- depth: {label: 'Crater depth · m', min: .05, max: 8, step: .05},
- rimShare: {label: 'Dug soil piled into the rim', min: 0, max: 1, step: .01},
-});
-const CRATER_RIM = Object.freeze({start: .8, peak: 1.06, end: 1.75});
-// Footprint exponent: squareness 0 is an ellipse with a parabolic bowl (a round body), 1 a rectangle with a flat floor
-// and steep walls (a box). The same exponent shapes the outline and the bowl.
-const CRATER_POWER = Object.freeze({round: 2, square: 8});
-// The shape an object leaves: a radius (round), or {halfX, halfZ, yaw, squareness} — half sizes in m along the
-// object's own X and Z once turned by yaw (radians, from +X toward +Z). Returns the normalised distance of a world
-// offset from the centre (1 on the outline), the bowl depth share at that distance, and the reach in m.
-export function craterFootprint(shape) {
- const {halfX, halfZ, yaw = 0, squareness = 0} = typeof shape === 'number' ? {halfX: shape, halfZ: shape} : shape ?? {};
- if (![halfX, halfZ, yaw, squareness].every(Number.isFinite) || halfX <= 0 || halfZ <= 0 || squareness < 0 || squareness > 1) {
-  throw Error('A crater footprint needs positive half sizes, a yaw and a squareness from zero to one');
- }
- const power = CRATER_POWER.round + (CRATER_POWER.square - CRATER_POWER.round) * squareness;
- const cos = Math.cos(yaw), sin = Math.sin(yaw);
- // Bounds the outline: the long axis of an ellipse; a squarer outline reaches toward the corner of its rectangle.
- const reach = squareness > 0 ? Math.hypot(halfX, halfZ) : Math.max(halfX, halfZ);
- return {power, reach,
-  distance(dx, dz) {
-   const u = Math.abs(dx * cos + dz * sin) / halfX, v = Math.abs(dz * cos - dx * sin) / halfZ;
-   return (u ** power + v ** power) ** (1 / power);
-  },
-  bowl: t => t >= 1 ? 0 : 1 - t ** power};
-}
 const CRATER_SNOW_CLEAR = Object.freeze({from: .75, to: 1.05});   // shares of the radius: snow blown out inside `from`, kept past `to`
 // Snow cover: depth = (driftDepth + driftVariation x noise) x smoothstep(flatness). The noise is two octaves (the second
 // `octave` x finer and weighted `detail`), `stretch` x longer along the wind than across; seed is an offset from the terrain seed.
@@ -95,9 +63,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
      !size.every(n => Number.isFinite(n) && n > 0) || !Number.isInteger(seed)) throw Error('Invalid terrain grid');
- const craterSettings = {...CRATER_DEFAULTS, ...craterOverrides};
- if (!(craterSettings.depthLimit >= 0 && craterSettings.depthLimit <= CRATER_FIELDS.depth.max) || !(craterSettings.rimShare >= 0 && craterSettings.rimShare <= 1) ||
-     !(craterSettings.rimMaxShare >= 0 && craterSettings.rimMaxShare <= 1)) throw Error('Invalid crater settings');
+ const craterSettings = validateCraterSettings({...CRATER_DEFAULTS, ...craterOverrides});
  const craterRimRise = craterSettings.depthLimit * craterSettings.rimMaxShare;
  const samples = Float32Array.from(heights);
  const original = samples.slice();

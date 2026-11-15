@@ -152,3 +152,19 @@ test('far rings bake their normals in the background, finer than their mesh, and
  assert.equal(off.bakePending, 0);
  baked.dispose(); fresh.dispose(); off.dispose();
 });
+
+test('a clipmap regenerates the rings over a crater to match rings built with it', async () => {
+ const {createCraterLayer} = await import('../../src/terrain/index.js');
+ const craters = createCraterLayer();
+ const withCraters = () => createTerrainWorld({seed: 9, biomes: [cloneBiome('hills'), cloneBiome('desert')], regionSize: 40, craters});
+ const clipmap = createTerrainClipmap({world: withCraters(), createMaterial: () => new THREE.MeshBasicMaterial(), ...CONFIG});
+ clipmap.update(3, -2);
+ assert.throws(() => clipmap.invalidate({minX: 0, minZ: 0, maxX: -1, maxZ: 0}), RangeError);
+ const rect = craters.add({x: 4, z: -1, shape: {halfX: 2, halfZ: 1, yaw: .4, squareness: 1}, depth: 1.5});
+ assert.ok(clipmap.invalidate(rect) > 0);
+ assert.equal(clipmap.invalidate({minX: 900, minZ: 900, maxX: 901, maxZ: 901}), 0);
+ const fresh = createTerrainClipmap({world: withCraters(), createMaterial: () => new THREE.MeshBasicMaterial(), ...CONFIG});
+ fresh.update(3, -2);
+ clipmap.rings.forEach((ring, level) => maps(ring).forEach((data, map) => assert.deepEqual(data, maps(fresh.rings[level])[map], `ring ${level} map ${map}`)));
+ clipmap.dispose(); fresh.dispose();
+});

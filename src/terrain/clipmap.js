@@ -371,6 +371,20 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     return spent;
   }
 
+  // Index range [first, last] of the samples (spacing m apart, from `start`) within [min - margin, max + margin], clamped
+  // to 0..side; null when the range misses the array.
+  function spanOf(start, spacing, side, min, max, margin) {
+    const first = Math.max(0, Math.floor((min - margin - start) / spacing)), last = Math.min(side, Math.ceil((max + margin - start) / spacing));
+    return first <= last ? [first, last] : null;
+  }
+  // Queues the texels of a baked map over a world rectangle, ahead of the other jobs.
+  function queueRect(bake, origin, rect, margin) {
+    if (!bake) return;
+    const last = bake.side - 1;
+    const columns = spanOf(origin[0], bake.spacing, last, rect.minX, rect.maxX, margin), rows = spanOf(origin[1], bake.spacing, last, rect.minZ, rect.maxZ, margin);
+    if (columns && rows) bake.jobs.unshift([columns[0], columns[1], rows[0], rows[1]]);
+  }
+
   let samplesGenerated = 0;
   return {
     group, levels, cells, cellSize,
@@ -438,6 +452,34 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
         });
       }
       return moved;
+    },
+    // Regenerates what lies over a world rectangle {minX, minZ, maxX, maxZ} (m) on every ring, after the world's relief
+    // changed there (a crater stamp): heights, then paint, normals and tint as far as the paint signals reach, and
+    // queues the baked normals and sky visibility again. Returns the samples regenerated.
+    invalidate(rect) {
+      const {minX, minZ, maxX, maxZ} = rect ?? {};
+      if (![minX, minZ, maxX, maxZ].every(Number.isFinite) || minX > maxX || minZ > maxZ) throw new RangeError('A clipmap refresh needs a finite rectangle {minX, minZ, maxX, maxZ}');
+      let regenerated = 0;
+      for (const ring of rings) {
+        const {cell, origin, heights, signals} = ring;
+        if (!origin) continue;
+        // A sample's paint and normal read neighbours up to the paint signal strides away.
+        const reachCells = 1 + (signals ? Math.max(signals.slopeStride, signals.hollowStride) : 0);
+        const columns = spanOf(origin[0], cell, cells, minX, maxX, cell), rows = spanOf(origin[1], cell, cells, minZ, maxZ, cell);
+        if (!columns || !rows) continue;
+        for (let j = rows[0]; j <= rows[1]; j++) for (let i = columns[0]; i <= columns[1]; i++) {
+          heights[j * n + i] = world.heightAt(origin[0] + i * cell, origin[1] + j * cell, cell);
+        }
+        signals?.lattice?.clear();
+        const shadeColumns = spanOf(origin[0], cell, cells, minX, maxX, reachCells * cell), shadeRows = spanOf(origin[1], cell, cells, minZ, maxZ, reachCells * cell);
+        for (let j = shadeRows[0]; j <= shadeRows[1]; j++) for (let i = shadeColumns[0]; i <= shadeColumns[1]; i++) shade(ring, i, j);
+        regenerated += (columns[1] - columns[0] + 1) * (rows[1] - rows[0] + 1);
+        lift(ring);
+        upload(ring);
+        queueRect(ring.bake, origin, rect, cell);
+        queueRect(ring.skyBake, origin, rect, ring.skyBake?.spacing ?? 0);
+      }
+      return regenerated;
     },
     // Recomputes paint, normals and tint everywhere, e.g. after the tint or the paint rules changed.
     reshade(nextTint = tint) {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {terrainGroundColor, CORRIDOR_DEFAULTS, CORRIDOR_FIELDS, BIOME_CLIMATE_AXES, BIOME_WEIGHT_FIELD, CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
+import {terrainGroundColor, CORRIDOR_DEFAULTS, CORRIDOR_FIELDS, BIOME_CLIMATE_AXES, BIOME_WEIGHT_FIELD, CLIPMAP_DEFAULTS, cloneBiome, CRATER_DEFAULTS, createCraterLayer, createSandLook, createTerrainAppearance, createTerrainClipmap, createTerrainWorld, createTerrainMaterial, DEFAULT_TERRAIN_BIOME, reliefShape, RELIEF_MAX_SHAPES, RELIEF_SHAPES, SNOW_DEFAULTS, TERRAIN_BIOMES, TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_PAINT_FIELDS, validateBiome, WORLD_DEFAULTS, WORLD_FIELDS, WORLD_MAP_AUTO, WORLD_MAX_BIOMES, WORLD_PALETTE_MAX} from '../../src/terrain/index.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {seededRandom} from '../../src/core/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
@@ -9,7 +9,8 @@ import {createTerrainPlay, PLAY} from './play.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchPanel} from '../panel.js';
 import {loadTerrainPalette} from './textures.js';
-import {appearanceControls, sandLookControls, textureSetControls} from './controls.js';
+import {appearanceControls, craterControls, craterTool, sandLookControls, textureSetControls} from './controls.js';
+import {aimRay} from '../kit/input.js';
 import '../bench.css';
 
 // Terrain rings around the focus (createTerrainClipmap) and the wireframe colour of each ring, inner to outer.
@@ -49,6 +50,8 @@ const VIEWS = ['Textures', 'Layer colours', 'Biome colours', 'LOD wireframe'];
 // (one repeat every 12 m or so with the default tiling) so a cliff reads as one rock face and not as a pattern.
 const TOOL_APPEARANCE = {edgeSharpness: .25, rockScale: .18};
 // Hand-placed biome map: regions per side, and one debug colour per world biome (also the 'Biome colours' view).
+// Starting values of the crater tool: a 4 m round blast, 3 m deep.
+const CRATER = {shape: 'round', radius: 4, width: .5, yaw: 0, depth: 3};
 const MAP = {columns: 8, rows: 8, autoAlpha: .35, focusColor: '#ffffff', focusRadius: 4, font: '11px sans-serif', ink: '#10201f'};
 const BIOME_SWATCHES = [0x7fbf6a, 0xd9b36c, 0x8fa7d9, 0xc98383, 0x6fc7c1, 0xb48fd1, 0xe0d36a, 0x8c9a6b,
   0xd99a5b, 0x5f8fbf, 0xbf6f9f, 0x9fbf5f, 0x7f7fbf, 0xbfa07f, 0x5fbf8f, 0xbf5f5f];
@@ -103,6 +106,9 @@ export async function mountValley() {
   const dressing = new THREE.Group();
   scene.add(dressing);
   let world, clipmap;
+  // The craters blasted into the world: they outlive rebuilds of the world, so a reroll keeps them where they are.
+  const craters = createCraterLayer();
+  const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare};
   // Vertex colours are only worked out for the views that show them.
   const debugView = () => settings.view === VIEWS[1] || settings.view === VIEWS[2];
   // Time spent keeping the terrain around the focus, per frame, over the last status period.
@@ -149,6 +155,17 @@ export async function mountValley() {
   function clearDressing() {
     for (const meshes of dressingTiles.values()) for (const mesh of meshes) { dressing.remove(mesh); mesh.dispose(); }
     dressingTiles.clear();
+  }
+
+  // Drops the dressing tiles over a world rectangle: they are laid again on the new ground by updateDressing.
+  function dropDressing({minX, minZ, maxX, maxZ}) {
+    const size = DRESSING.tileSize;
+    for (const [key, meshes] of dressingTiles) {
+      const [column, row] = key.split(',').map(Number);
+      if ((column + 1) * size < minX || column * size > maxX || (row + 1) * size < minZ || row * size > maxZ) continue;
+      for (const mesh of meshes) { dressing.remove(mesh); mesh.dispose(); }
+      dressingTiles.delete(key);
+    }
   }
 
   function dressTile(column, row) {
@@ -222,7 +239,7 @@ export async function mountValley() {
   async function regenerate() {
     const {seed, regionSize, blend, wander, waterLevel, water, climateSize, byClimate: climate} = settings;
     const corridorNow = corridorOptions();
-    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced && !corridorNow ? map : undefined, regionSize, blend, wander, waterLevel, water, climateSize, climate, corridor: corridorNow});
+    const next = createTerrainWorld({seed, biomes: worldBiomes, map: settings.handPlaced && !corridorNow ? map : undefined, regionSize, blend, wander, waterLevel, water, climateSize, climate, corridor: corridorNow, craters});
     const build = ++building, key = next.palette.sets.join() + '|' + next.palette.roles.join();
     if (key !== texturesKey) {
       const loaded = await loadPalette(next.palette);
@@ -443,6 +460,24 @@ export async function mountValley() {
   playFolder.add(settings, 'ballRadius', PLAY.ball.minRadius, PLAY.ball.maxRadius, .1).name('Ball radius · m');
   playFolder.add({roll: () => { try { play.roll({focus, camera, radius: settings.ballRadius}); report(); } catch (error) { report(error); } }}, 'roll').name('Roll a ball from the focus');
   playFolder.add({clear: () => play.reset()}, 'clear').name('Clear balls, ruts and marks');
+  // A crater (or clearing them) changes the ground over `rect`: the rings and dressing there follow; the play area,
+  // sampled from the world when laid, is cleared when it overlaps and laid again by the next roll.
+  function reground(rect) {
+    if (!rect) return;
+    clipmap.invalidate(rect);
+    dropDressing(rect);
+    const bounds = play.area?.field.bounds;
+    if (bounds && rect.maxX >= bounds.x && rect.minX <= bounds.x + bounds.z && rect.maxZ >= bounds.y && rect.minZ <= bounds.y + bounds.w) play.clear();
+  }
+  const craterFolder = craterControls(gui, crater, {onBlast(on) { orbit.enabled = !on; }});
+  craterFolder.add({clear: () => reground(craters.clear())}, 'clear').name('Clear craters');
+  const raycaster = new THREE.Raycaster(), craterEvents = new AbortController();
+  renderer.domElement.addEventListener('pointerdown', event => {
+    if (!crater.blast || !(event.buttons & 1)) return;
+    const hit = aimRay(raycaster, event, renderer.domElement, camera).intersectObject(clipmap.group, true)[0]?.point;
+    if (!hit) return;
+    try { reground(craters.add({x: hit.x, z: hit.z, shape: craterTool(crater), depth: crater.depth, rimShare: crater.rimShare})); report(); } catch (error) { report(error); }
+  }, {signal: craterEvents.signal});
   const view = gui.addFolder('View');
   view.add(settings, 'density', ...CONTROLS.density).name('Dressing density').onFinishChange(clearDressing);
   view.add({reroll() { settings.dressingSeed = nextSeed(settings.dressingSeed); clearDressing(); }}, 'reroll').name('Reroll dressing');
@@ -518,6 +553,7 @@ export async function mountValley() {
     orbit.dispose();
     gui.destroy();
     mapEvents.abort();
+    craterEvents.abort();
     disposeTerrain();
     clearDressing();
     for (const {geometry, material} of Object.values(props)) { geometry.dispose(); material.dispose(); }

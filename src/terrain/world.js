@@ -57,13 +57,16 @@ export function validateWorld(settings) {
 // climateAt(x, z) -> {temperature, moisture}, each 0..1: the host's climate, in place of the world's own.
 // corridor: CORRIDOR_DEFAULTS overrides (corridor.js; {} for the defaults). The world is then a corridor along +Z:
 // its biomes follow one another in sections along the route instead of lying in regions, and the map is not used.
-export function createTerrainWorld({seed, biomes, map, water = false, climate = true, climateAt, corridor: corridorSettings, ...overrides} = {}) {
+// craters: a crater layer (createCraterLayer) whose stamps the relief carries; the host adds stamps to it and refreshes
+// the meshes over the rectangle each one returns (clipmap.invalidate).
+export function createTerrainWorld({seed, biomes, map, water = false, climate = true, climateAt, corridor: corridorSettings, craters, ...overrides} = {}) {
   const settings = {...WORLD_DEFAULTS, ...overrides};
   validateWorld(settings);
   if (!Number.isSafeInteger(seed)) throw new RangeError('A world needs an integer seed');
   if (!Array.isArray(biomes) || !biomes.length || biomes.length > WORLD_MAX_BIOMES) throw new RangeError(`A world needs 1 to ${WORLD_MAX_BIOMES} biomes`);
   biomes.forEach(validateBiome);
   if (climateAt !== undefined && typeof climateAt !== 'function') throw new TypeError('A world climate is a function of x and z');
+  if (craters !== undefined && typeof craters?.offsetAt !== 'function') throw new TypeError('World craters must be a crater layer (createCraterLayer)');
   if (corridorSettings !== undefined && (corridorSettings === null || typeof corridorSettings !== 'object')) throw new TypeError('A world corridor is a settings object');
   if (corridorSettings && map) throw new RangeError('A corridor world takes no map: its biomes lie in sections along the route');
   const corridor = corridorSettings ? createCorridor(seed, biomes, corridorSettings) : null;
@@ -174,7 +177,8 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
     weightsAt(x, z, scratch);
     let height = 0;
     for (let i = 0; i < count; i++) if (scratch[i] > 0) height += scratch[i] * reliefs[i].heightAt(x, z, cell);
-    return corridor ? corridor.shape(height, x, z) : height;
+    const shaped = corridor ? corridor.shape(height, x, z) : height;
+    return craters ? shaped + craters.offsetAt(x, z, cell) : shaped;
   }
 
   // How far the ground at a point lies below the mean of its surroundings, in metres (negative on a ridge).
@@ -220,6 +224,7 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
     settings, biomes, palette, paintReach: PAINT_REACH,
     waterLevel: water ? settings.waterLevel : null,   // null: a dry world
     heightAt, hollowAt, sampleAt, weightsAt, paintAt, regionBiome,
+    craters: craters ?? null,
     // The climate the regions are drawn by: {temperature, moisture} at a point.
     climateAt: worldClimate,
     // The corridor, when the world is one: {settings, length (null: endless), routeX, sectionAt(z)}.
