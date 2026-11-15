@@ -163,7 +163,8 @@ window.outdoorBench = {controller, world, playerView, reset};
 
 async function selectCharacter() {
  const requested = new URLSearchParams(location.search).get('character');
- for (const variant of requested === 'sci-fi' ? ['sci-fi'] : ['preferred', 'sci-fi']) {
+ // The bot ships with the repo; ?character=preferred or ?character=sci-fi asks for a local drop-in first.
+ for (const variant of new Set([requested, 'bot', 'preferred', 'sci-fi'].filter(Boolean))) {
   try {
    const candidate = await loadCharacter(variant);
    if (disposed) return;

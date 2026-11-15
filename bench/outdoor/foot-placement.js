@@ -7,9 +7,8 @@ const WALK_DROP = .045;
 const EPSILON = .001;
 const UP = new Vector3(0, 1, 0);
 
-export function createFootPlacement(scene) {
- const bones = new Map();
- scene.traverse(node => { if (node.isBone) bones.set(node.name.split('_JNT_')[0], node); });
+// bones: the rig's joints by name ('l_upleg', 'l_leg', 'l_foot' and the right side).
+export function createFootPlacement(bones) {
  const legs = ['l', 'r'].map(side => ['upleg', 'leg', 'foot'].map(name => bones.get(side + '_' + name)));
  const animated = legs.map(leg => leg.map(() => new Quaternion()));
  let applied = false;

@@ -40,10 +40,24 @@ function strideSpeed(mixer, action, root, feet) {
 // 0 at `from`, 1 at `to`; 1 when the two coincide.
 const ramp = (from, to, value) => to > from ? THREE.MathUtils.clamp((value - from) / (to - from), 0, 1) : 1;
 
+// Characters that take the Quaternius locomotion clips. `bot` ships with the repo (assets/character/README.md); the
+// others are local drop-ins served from private-assets.
+const RIGS = {
+ bot: {model: new URL('../../assets/character/mixamo-bot-lowpoly.glb', import.meta.url).href,
+  locomotion: new URL('../../assets/character/locomotion.glb', import.meta.url).href, label: 'Mixamo bot · Quaternius locomotion'},
+ preferred: {model: '/outdoor/character_animated.glb', locomotion: '/outdoor/locomotion.glb', label: 'Character animated · Quaternius locomotion'},
+};
+
+// One name per joint whatever the rig calls it: 'l_upleg_JNT_12' and 'mixamorigLeftUpLeg_047' both give 'l_upleg'.
+function jointKey(name) {
+ return name.split('_JNT_')[0].replace(/^mixamorig:?/, '').replace(/_\d+$/, '')
+  .replace(/^(Left|Right)/, side => side[0].toLowerCase() + '_').toLowerCase();
+}
+
 function retargetLocomotion(source, target) {
  const sourceBones = new Map(), targetBones = new Map();
  source.scene.traverse(node => { if (node.isBone) sourceBones.set(node.name, node); });
- target.scene.traverse(node => { if (node.isBone) targetBones.set(node.name.split('_JNT_')[0], node); });
+ target.scene.traverse(node => { if (node.isBone) targetBones.set(jointKey(node.name), node); });
  source.scene.updateMatrixWorld(true);
  target.scene.updateMatrixWorld(true);
  const bindings = new Map();
@@ -99,12 +113,12 @@ export async function loadCharacter(mode) {
   }));
   label = 'Sci-fi character · native walk';
  } else {
-  const [target, source] = await Promise.all([
-   loader.loadAsync('/outdoor/character_animated.glb'), loader.loadAsync('/outdoor/locomotion.glb'),
-  ]);
+  const rig = RIGS[mode];
+  if (!rig) throw Error('Unknown character ' + mode);
+  const [target, source] = await Promise.all([loader.loadAsync(rig.model), loader.loadAsync(rig.locomotion)]);
   gltf = target;
   [idle, walk, takeoff, airborne, land, jog, sprint] = retargetLocomotion(source, target);
-  label = 'Character animated · Quaternius locomotion';
+  label = rig.label;
  }
  const model = new THREE.Group();
  const bounds = new THREE.Box3().setFromObject(gltf.scene, true);
@@ -123,9 +137,9 @@ export async function loadCharacter(mode) {
   action.setLoop(THREE.LoopOnce, 1);
   action.clampWhenFinished = true;
  }
- const feet = mode === 'sci-fi' ? null : createFootPlacement(gltf.scene);
  const bones = new Map();
- gltf.scene.traverse(node => { if (node.isBone) bones.set(node.name.split('_JNT_')[0], node); });
+ gltf.scene.traverse(node => { if (node.isBone) bones.set(jointKey(node.name), node); });
+ const feet = mode === 'sci-fi' ? null : createFootPlacement(bones);
  const soles = FOOT_BONES.map(name => bones.get(name));
  // Slowest first. Calibrated: every gait's stride speed could be measured, so playback can follow the ground speed.
  const gaits = [actions.walk, actions.jog, actions.sprint].filter(Boolean)
