@@ -48,6 +48,40 @@ const SNOW_RIM = Object.freeze({start: .7, peak: .95, end: 1.2});
 const SOIL_RIM_MAX_RISE = .1;  // m a rim of soil (mud, sand) may stand above the original ground
 const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
 const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: recompute all normals at once
+// Craters (field.crater). depthLimit: deepest a crater may dig below the original surface, m (fixed when the field is
+// made: it sets the envelope of the mesh and of colliders built from it). rimShare: share of the dug volume piled
+// into the rim, the rest is thrown out (ejecta). rimMaxShare: highest the rim may stand above the original surface,
+// as a share of depthLimit. Rim profile in shares of the crater radius: rises from start, peaks, and ends.
+export const CRATER_DEFAULTS = Object.freeze({depthLimit: 5, rimShare: .45, rimMaxShare: .25});
+export const CRATER_FIELDS = Object.freeze({
+ radius: {label: 'Crater radius · m', min: .3, max: 12, step: .1},
+ depth: {label: 'Crater depth · m', min: .05, max: 8, step: .05},
+ rimShare: {label: 'Dug soil piled into the rim', min: 0, max: 1, step: .01},
+});
+const CRATER_RIM = Object.freeze({start: .8, peak: 1.06, end: 1.75});
+// Footprint exponent: squareness 0 is an ellipse with a parabolic bowl (a round body), 1 a rectangle with a flat floor
+// and steep walls (a box). The same exponent shapes the outline and the bowl.
+const CRATER_POWER = Object.freeze({round: 2, square: 8});
+// The shape an object leaves: a radius (round), or {halfX, halfZ, yaw, squareness} — half sizes in m along the
+// object's own X and Z once turned by yaw (radians, from +X toward +Z). Returns the normalised distance of a world
+// offset from the centre (1 on the outline), the bowl depth share at that distance, and the reach in m.
+export function craterFootprint(shape) {
+ const {halfX, halfZ, yaw = 0, squareness = 0} = typeof shape === 'number' ? {halfX: shape, halfZ: shape} : shape ?? {};
+ if (![halfX, halfZ, yaw, squareness].every(Number.isFinite) || halfX <= 0 || halfZ <= 0 || squareness < 0 || squareness > 1) {
+  throw Error('A crater footprint needs positive half sizes, a yaw and a squareness from zero to one');
+ }
+ const power = CRATER_POWER.round + (CRATER_POWER.square - CRATER_POWER.round) * squareness;
+ const cos = Math.cos(yaw), sin = Math.sin(yaw);
+ // Bounds the outline: the long axis of an ellipse; a squarer outline reaches toward the corner of its rectangle.
+ const reach = squareness > 0 ? Math.hypot(halfX, halfZ) : Math.max(halfX, halfZ);
+ return {power, reach,
+  distance(dx, dz) {
+   const u = Math.abs(dx * cos + dz * sin) / halfX, v = Math.abs(dz * cos - dx * sin) / halfZ;
+   return (u ** power + v ** power) ** (1 / power);
+  },
+  bowl: t => t >= 1 ? 0 : 1 - t ** power};
+}
+const CRATER_SNOW_CLEAR = Object.freeze({from: .75, to: 1.05});   // shares of the radius: snow blown out inside `from`, kept past `to`
 // Snow cover: depth = (driftDepth + driftVariation x noise) x smoothstep(flatness). The noise is two octaves (the second
 // `octave` x finer and weighted `detail`), `stretch` x longer along the wind than across; seed is an offset from the terrain seed.
 const SNOW_DRIFT = Object.freeze({flatness: [.55, .95], stretch: 2.6, octave: 2.3, detail: .45, seed: 91});
@@ -55,11 +89,16 @@ const SNOW_DRIFT = Object.freeze({flatness: [.55, .95], stretch: 2.6, octave: 2.
 // Heights are row-major along +X and +Z, in metres. The mesh and shaders share this grid.
 // paletteSize (a multiple of four, with paintAt): the field also keeps paletteMap, the weight of each palette set that
 // paintAt returns in `palette`, four per slice, and climateMap, its `moisture` (see createTerrainWorld).
-export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, paintAt, paletteSize = 0, snow: snowOverrides, snowTrackRims = false} = {}) {
+// crater: overrides of CRATER_DEFAULTS (depthLimit, rimShare, rimMaxShare).
+export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, paintAt, paletteSize = 0, snow: snowOverrides, snowTrackRims = false, crater: craterOverrides} = {}) {
  const [nx, nz] = resolution ?? [];
  if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
      origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
      !size.every(n => Number.isFinite(n) && n > 0) || !Number.isInteger(seed)) throw Error('Invalid terrain grid');
+ const craterSettings = {...CRATER_DEFAULTS, ...craterOverrides};
+ if (!(craterSettings.depthLimit >= 0 && craterSettings.depthLimit <= CRATER_FIELDS.depth.max) || !(craterSettings.rimShare >= 0 && craterSettings.rimShare <= 1) ||
+     !(craterSettings.rimMaxShare >= 0 && craterSettings.rimMaxShare <= 1)) throw Error('Invalid crater settings');
+ const craterRimRise = craterSettings.depthLimit * craterSettings.rimMaxShare;
  const samples = Float32Array.from(heights);
  const original = samples.slice();
  if (!samples.every(Number.isFinite)) throw Error('Terrain heights must be finite');
@@ -81,8 +120,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  geometry.computeVertexNormals();
  // All edits stay inside this envelope, so local edits need no bounds scan.
  geometry.computeBoundingBox();
- geometry.boundingBox.min.y -= MAX_DIG;
- geometry.boundingBox.max.y += MAX_SNOW_RISE * SNOW_DEPTH_SCALE.max;
+ geometry.boundingBox.min.y -= Math.max(MAX_DIG, craterSettings.depthLimit);
+ geometry.boundingBox.max.y += Math.max(SOIL_RIM_MAX_RISE, craterRimRise) + MAX_SNOW_RISE * SNOW_DEPTH_SCALE.max;
  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
  const heightMap = createDataTexture(samples, nx, nz, {format: THREE.RedFormat, type: THREE.FloatType});
  const weights = new Uint8Array(samples.length * 4);
@@ -233,6 +272,44 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    return Math.max(minimum, previous - depth * falloff);
   }, rimShare);
  }
+ // Blasts a bowl `depth` m deep at the centre into the soil under the point, in the footprint of `shape` (a radius or
+ // the outline of the object that made it, see craterFootprint), deeper on each blast
+ // up to depthLimit below the original surface. Lying snow inside the bowl is blown out. A share of the dug volume
+ // (rimShare, default the field's) is piled into a raised rim; the rest counts as thrown out.
+ // Returns {volume, rim, ejecta} in cubic metres, or null when nothing was dug.
+ function crater(x, z, shape, depth, onSample, {rimShare = craterSettings.rimShare} = {}) {
+  if (![x, z, depth].every(Number.isFinite) || depth <= 0) return null;
+  if (!(rimShare >= 0 && rimShare <= 1)) throw Error('A crater needs a rim share from zero to one');
+  const footprint = craterFootprint(shape), reach = footprint.reach;
+  const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ, cellArea = stepX * stepZ;
+  let volume = 0;
+  for (let j = Math.max(0, Math.ceil(gz - reach / stepZ)); j <= Math.min(nz - 1, Math.floor(gz + reach / stepZ)); j++) {
+   for (let i = Math.max(0, Math.ceil(gx - reach / stepX)); i <= Math.min(nx - 1, Math.floor(gx + reach / stepX)); i++) {
+    const t = footprint.distance((i - gx) * stepX, (j - gz) * stepZ);
+    if (t >= 1) continue;
+    const index = j * nx + i;
+    const next = Math.fround(Math.max(original[index] - craterSettings.depthLimit, soil[index] - depth * footprint.bowl(t)));
+    let changed = false;
+    if (next < soil[index]) { volume += (soil[index] - next) * cellArea; soil[index] = next; changed = true; }
+    if (snowEnabled && snow[index] > 0) {
+     const kept = THREE.MathUtils.smoothstep(t, CRATER_SNOW_CLEAR.from, CRATER_SNOW_CLEAR.to);
+     if (kept < 1) { snow[index] *= kept; freshSnow[index] = Math.min(freshSnow[index], snow[index]); changed = true; }
+    }
+    if (changed) writeHeight(index, Math.fround(soil[index] + (snowEnabled ? snow[index] : 0)), onSample);
+   }
+  }
+  if (volume <= 0) return null;
+  const highest = index => original[index] + craterRimRise;
+  let rim = 0;
+  raiseRim(gx, gz, reach, volume / cellArea * rimShare, (index, rise) => {
+   const next = Math.fround(Math.min(highest(index), soil[index] + rise));
+   if (next <= soil[index]) return;
+   rim += (next - soil[index]) * cellArea;
+   soil[index] = next;
+   writeHeight(index, Math.fround(soil[index] + (snowEnabled ? snow[index] : 0)), onSample);
+  }, CRATER_RIM, footprint.distance);
+  return {volume, rim, ejecta: volume - rim};
+ }
  // Packs the snow under a contact. load (0..1) is the share of the packable depth pressed out at the centre, so the sink
  // follows the local snow depth and pressing again with the same load does not sink further.
  function compactSnow(x, z, radius, load, onSample) {
@@ -263,15 +340,17 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   });
  }
  // Spreads rimDepth (summed sample depth, m) over the ring around a track: raise(index, rise) applies each share.
- function raiseRim(gx, gz, radius, rimDepth, raise) {
+ // distance(dx, dz): normalised distance of a world offset (1 on the outline); default: round, of `radius`.
+ // radius bounds the search: the outline must lie within it.
+ function raiseRim(gx, gz, radius, rimDepth, raise, profile = SNOW_RIM, distance = (dx, dz) => Math.hypot(dx, dz) / radius) {
   const candidates = [];
   let totalWeight = 0;
-  const reach = radius * SNOW_RIM.end;
+  const reach = radius * profile.end;
   for (let z = Math.max(0, Math.ceil(gz - reach / stepZ)); z <= Math.min(nz - 1, Math.floor(gz + reach / stepZ)); z++) {
    for (let x = Math.max(0, Math.ceil(gx - reach / stepX)); x <= Math.min(nx - 1, Math.floor(gx + reach / stepX)); x++) {
-    const distance = Math.hypot((x - gx) * stepX, (z - gz) * stepZ) / radius;
-    const weight = THREE.MathUtils.smoothstep(distance, SNOW_RIM.start, SNOW_RIM.peak)
-      * (1 - THREE.MathUtils.smoothstep(distance, SNOW_RIM.peak, SNOW_RIM.end));
+    const t = distance((x - gx) * stepX, (z - gz) * stepZ);
+    const weight = THREE.MathUtils.smoothstep(t, profile.start, profile.peak)
+      * (1 - THREE.MathUtils.smoothstep(t, profile.peak, profile.end));
     if (weight <= 0) continue;
     candidates.push({index: z * nx + x, weight});
     totalWeight += weight;
@@ -386,6 +465,6 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, forestMap, sandMap, paletteMap, climateMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, sandWeightAt, updateRules, deform, compactSnow, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
+ return {geometry, bounds, heightMap, weightMap, forestMap, sandMap, paletteMap, climateMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, sandWeightAt, updateRules, deform, crater, craterSettings, compactSnow, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
   dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); sandMap?.dispose(); paletteMap?.dispose(); climateMap?.dispose(); snowMap.dispose(); }};
 }

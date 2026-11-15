@@ -1,4 +1,4 @@
-import {OCEAN_COAST_WET_DEFAULTS, SNOW_FIELDS, TERRAIN_LAYERS, TERRAIN_PAINT_DEFAULTS, TERRAIN_PAINT_FIELDS} from '../../src/terrain/index.js';
+import {CRATER_FIELDS, OCEAN_COAST_WET_DEFAULTS, SNOW_FIELDS, TERRAIN_LAYERS, TERRAIN_PAINT_DEFAULTS, TERRAIN_PAINT_FIELDS} from '../../src/terrain/index.js';
 
 export function terrainControls(gui, {rules, appearance, onLayersChanged}) {
   const automatic = gui.addFolder('Automatic layers');
@@ -109,6 +109,25 @@ export function textureSetControls(gui, {sets, catalogue, onChange}) {
     });
     controller.domElement.title = 'Texture set of the ' + layer + ' layer';
   }
+  return folder;
+}
+
+// Click-to-blast craters (field.crater). tool: {blast, shape, radius, width, yaw, depth, rimShare}; onBlast toggles the
+// click mode. Shapes: a round body, a box (flat floor, steep walls) and an oval (a body arriving at a slant).
+export const CRATER_SHAPES = Object.freeze({Round: 'round', Box: 'box', Oval: 'oval'});
+export function craterTool(tool) {
+  if (tool.shape === 'round') return tool.radius;
+  return {halfX: tool.radius, halfZ: tool.radius * tool.width, yaw: tool.yaw * Math.PI / 180, squareness: tool.shape === 'box' ? 1 : 0};
+}
+export function craterControls(gui, tool, {onBlast} = {}) {
+  const folder = gui.addFolder('Craters');
+  folder.add(tool, 'blast').name('Blast craters (click)').listen().onChange(onBlast);
+  folder.add(tool, 'shape', CRATER_SHAPES).name('Object shape');
+  folder.add(tool, 'radius', CRATER_FIELDS.radius.min, CRATER_FIELDS.radius.max, CRATER_FIELDS.radius.step).name('Half length · m');
+  folder.add(tool, 'width', .2, 1, .05).name('Width share (box, oval)');
+  folder.add(tool, 'yaw', 0, 180, 5).name('Heading · °');
+  folder.add(tool, 'depth', CRATER_FIELDS.depth.min, CRATER_FIELDS.depth.max, CRATER_FIELDS.depth.step).name(CRATER_FIELDS.depth.label);
+  folder.add(tool, 'rimShare', CRATER_FIELDS.rimShare.min, CRATER_FIELDS.rimShare.max, CRATER_FIELDS.rimShare.step).name(CRATER_FIELDS.rimShare.label);
   return folder;
 }
 

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
-import {createSandLook, createSnowLook, createTerrainAppearance, createTerrainDrainage, createTerrainField, createTerrainMaterial, createTerrainRunoff, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
+import {CRATER_DEFAULTS, createSandLook, createSnowLook, createTerrainAppearance, createTerrainDrainage, createTerrainField, createTerrainMaterial, createTerrainRunoff, SNOW_DEPTH_SCALE} from '../../src/terrain/index.js';
 import {createSurfaceLook, createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
@@ -10,7 +10,7 @@ import {stageControls} from '../kit/controls.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainTextures} from './textures.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
-import {groundTrackControls, runoffControls, textureSetControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
+import {craterControls, craterTool, groundTrackControls, runoffControls, textureSetControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
 import {createTerrainBasins} from './basins.js';
 import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from './footsteps.js';
 import {CONTACT_SURFACES, createTerrainImpacts} from './impacts.js';
@@ -23,6 +23,8 @@ const SNOW_MELT = {metresPerSecond: .025, updateInterval: .3, bakeInterval: 1.5,
 // depth (m) digs bare ground; load is the share of the packable snow depth pressed out when snow lies.
 const TRACK = {radius: .8, spacing: .28, depth: .11, load: .85, contrast: .5, maskResolution: 512};
 const PUDDLE = {maxDepth: .32}; // m, deepest a filled hollow may stand
+// Starting values of the crater tool: a 2.5 m round blast, 1.5 m deep.
+const CRATER = {shape: 'round', radius: 2.5, width: .5, yaw: 0, depth: 1.5};
 const WET_TRACK_BAKE_INTERVAL = 1.25; // seconds between flow-map refreshes while the ball rolls
 const FOOTSTEP_DEMO = {from: {x: 11, z: 11}, to: {x: 2, z: 4}};
 const BOULDER = {radius: 1.25, detail: 2, contactBand: .65, roughness: .87};
@@ -58,6 +60,7 @@ const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forest
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
 // Live copies of the defaults, edited from the panel.
 const paint = {radius: TRACK.radius, depth: TRACK.depth, load: TRACK.load};
+const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare};
 const footstep = {...FOOTSTEP_DEFAULTS};
 const contactSurfaces = structuredClone(CONTACT_SURFACES);
 const melt = {metresPerSecond: SNOW_MELT.metresPerSecond};
@@ -176,7 +179,10 @@ surfaceFolder.add(surface, 'snowDepth', SNOW_DEPTH_SCALE.min, SNOW_DEPTH_SCALE.m
     if (field.setSnowDepthScale(scale, impacts.onHeightSample)) drainageDirty = true;
     resizeSnowCaps();
   });
-surfaceFolder.add(surface, 'paintTracks').name('Paint tracks (drag)').onChange(on => { controls.enabled = !on; endStroke(); });
+surfaceFolder.add(surface, 'paintTracks').name('Paint tracks (drag)').listen().onChange(on => {
+  if (on) crater.blast = false;
+  controls.enabled = !on; endStroke();
+});
 function enableTestSnow() {
   if (surface.snow) return;
   surface.snow = true;
@@ -224,6 +230,10 @@ sandLookControls(gui, sandLook);
 snowBodyControls(gui, {field, onRelay: resetTerrain});
 snowTrackControls(gui, {field, paint, footstep, contact: contactSurfaces.snow});
 groundTrackControls(gui, contactSurfaces);
+craterControls(gui, crater, {onBlast(on) {
+  if (on) surface.paintTracks = false;
+  controls.enabled = !on; endStroke();
+}});
 const rainFolder = gui.addFolder('Rain and runoff');
 rainFolder.add(surface, 'melt', 0, 1, .05).name('Snow melt');
 rainFolder.add(rainAmount, 'value', 0, 1, .05).name('Rain on surfaces');
@@ -246,6 +256,13 @@ function pressTrack(x, z) {
   if (field.snowCover.value) field.compactSnow(x, z, paint.radius, paint.load, impacts.onHeightSample);
   else field.deform(x, z, paint.radius, paint.depth, impacts.onHeightSample);
 }
+function blastCrater(event) {
+  if (!crater.blast || !(event.buttons & 1)) return;
+  aimRay(raycaster, event, canvas, camera);
+  const hit = raycaster.intersectObject(ground)[0]?.point;
+  if (hit) field.crater(hit.x, hit.z, craterTool(crater), crater.depth, impacts.onHeightSample, {rimShare: crater.rimShare});
+}
+canvas.addEventListener('pointerdown', blastCrater, {signal: trackEvents.signal});
 function paintTrack(event) {
   if (!surface.paintTracks || !(event.buttons & 1)) {
     endStroke();

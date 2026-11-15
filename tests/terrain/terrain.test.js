@@ -46,6 +46,30 @@ test('digging bare soil pushes a share of it up into a rim and validates the sha
  field.dispose();
 });
 
+test('a crater digs a bowl in the outline of the object, piles a rim, deepens up to its limit and blows snow out', () => {
+ const nx = 81, nz = 81, heights = new Float32Array(nx * nz);
+ const field = createTerrainField({origin: [0, 0], size: [40, 40], resolution: [nx, nz], heights, seed: 3, crater: {depthLimit: 3}});
+ assert.ok(field.geometry.boundingBox.min.y <= -3);
+ assert.equal(field.crater(10, 10, 2, 0), null);
+ assert.throws(() => field.crater(10, 10, {halfX: 0, halfZ: 1}, 1), /footprint/);
+ const round = field.crater(10, 10, 3, 1.5);
+ assert.ok(Math.abs(field.heightAt(10, 10) + 1.5) < 1e-4);
+ assert.ok(field.heightAt(13.2, 10) > 0, 'rim stands above the ground');
+ assert.ok(round.volume > 0 && Math.abs(round.rim + round.ejecta - round.volume) < 1e-6 && round.rim > 0);
+ field.crater(10, 10, 3, 1.5); field.crater(10, 10, 3, 1.5);
+ assert.ok(Math.abs(field.heightAt(10, 10) + 3) < 1e-4, 'stops at the depth limit');
+ // A box long along its own X, turned 90 degrees: its long side lies along world Z; flat floor.
+ field.crater(28, 28, {halfX: 4, halfZ: 1, yaw: Math.PI / 2, squareness: 1}, 1);
+ assert.ok(field.heightAt(28, 31) < -.85 && field.heightAt(30.5, 28) >= 0, 'outline follows the yaw');
+ assert.ok(Math.abs(field.heightAt(28, 29.5) - field.heightAt(28, 28)) < .05, 'square footprint has a flat floor');
+ field.resetDeformation();
+ field.setSnowCover(true);
+ const before = field.heightAt(28, 10);
+ field.crater(28, 10, 2, .5);
+ assert.ok(field.heightAt(28, 10) < before - .5 - .05, 'snow blown out of the bowl as well as soil dug');
+ field.dispose();
+});
+
 test('terrain material takes per-layer detail only with one slice per packed layer', async () => {
  const {createTerrainMaterial, TERRAIN_LAYERS, TERRAIN_LAYER_ROUGHNESS} = await import('../../src/terrain/index.js');
  assert.deepEqual(Object.keys(TERRAIN_LAYER_ROUGHNESS), TERRAIN_LAYERS);
