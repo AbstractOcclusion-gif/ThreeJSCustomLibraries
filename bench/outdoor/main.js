@@ -13,8 +13,10 @@ import {loadCharacter} from './character.js';
 import {createOutdoorProps} from './props.js';
 
 const COURSE = {span: 32, resolution: 65, step: [.95, .16, .65]};
-// Capsule of the character controller; every other movement setting is the controller's default.
-const PLAYER = {radius: .3, height: 1.7};
+// Capsule of the character controller, and walk and run speeds (m/s) that sit on the locomotion clips: the walk clip
+// strides at about 0.85 m/s and is played up to 1.5x faster, the sprint clip strides at about 3.6 m/s. Every other
+// movement setting is the controller's default.
+const PLAYER = {radius: .3, height: 1.7, walkSpeed: 1.25, runSpeed: 4};
 // Foot IK probes: how far above and below a foot the ground is searched, and the flattest normal a foot rests on.
 const FOOT = {reach: .2, slopeNormal: .65};
 const RUN_KEYS = ['ShiftLeft', 'ShiftRight'];

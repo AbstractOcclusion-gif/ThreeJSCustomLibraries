@@ -14,8 +14,10 @@ const FADE_SECONDS = .1;
 const AIR_STATES = ['takeoff', 'airborne', 'land'];
 // Gait blending. startSpeed (m/s): below it the idle takes over. minRate / maxRate: how far a clip may be slowed or
 // sped up to match the ground speed. samples: poses read per clip to measure its stride. minStride (m/s): a slower
-// measure means the feet could not be read, and the clips then play at their own rate.
-const GAIT = {startSpeed: .5, minRate: .5, maxRate: 1.6, samples: 48, minStride: .1};
+// measure means the feet could not be read, and the clips then play at their own rate. stretch: a gait is kept on its
+// own, played faster, up to this many times its stride speed before the next gait starts to blend in (quicker steps
+// rather than longer ones).
+const GAIT = {startSpeed: .5, minRate: .5, maxRate: 1.6, samples: 48, minStride: .1, stretch: 1.5};
 const FOOT_BONES = ['l_foot', 'r_foot'];
 
 // Ground speed an in-place gait clip was animated for: the planted (lower) foot slides back under the body at that speed.
@@ -76,8 +78,17 @@ function retargetLocomotion(source, target) {
   for (const [name, donor] of Object.entries(LIMBS)) bind(side + '_' + name, donor + '.' + side.toUpperCase());
  }
 
+ // Pelvis height. The gaits bend the knees and count on the pelvis dropping with them; left at standing height, the feet
+ // hang in the air. Only the vertical travel is taken (the physics body owns the rest), scaled by leg length.
+ const pelvis = targetBones.get('hips'), donorPelvis = sourceBones.get(THREE.PropertyBinding.sanitizeNodeName('DEF-hips'));
+ const from = new THREE.Vector3(), to = new THREE.Vector3();
+ const legLength = joints => joints.reduce((length, joint, i) => i ? length + joints[i - 1].getWorldPosition(from).distanceTo(joint.getWorldPosition(to)) : 0, 0);
+ const legRatio = legLength(['l_upleg', 'l_leg', 'l_foot'].map(name => targetBones.get(name)))
+  / legLength(['thigh.L', 'shin.L', 'foot.L'].map(name => sourceBones.get(THREE.PropertyBinding.sanitizeNodeName('DEF-' + name))));
+ const donorToWorld = new THREE.Matrix3().setFromMatrix4(donorPelvis.parent.matrixWorld);
+ const worldToPelvis = new THREE.Matrix3().setFromMatrix4(pelvis.parent.matrixWorld).invert();
+
  // Transfer rotation relative to each bind pose, expressed in the target bone's axes.
- // Pelvis and root translations stay with the target rig and the physics body.
  return CLIPS.map(name => {
   const clip = THREE.AnimationClip.findByName(source.animations, name);
   if (!clip) throw Error('Missing locomotion clip ' + name);
@@ -85,6 +96,15 @@ function retargetLocomotion(source, target) {
   for (const track of clip.tracks) {
    const {nodeName, propertyName} = THREE.PropertyBinding.parseTrackName(track.name);
    const binding = bindings.get(nodeName);
+   if (nodeName === donorPelvis.name && propertyName === 'position') {
+    const values = new Float32Array(track.values.length), travel = new THREE.Vector3();
+    for (let i = 0; i < values.length; i += 3) {
+     const rise = travel.fromArray(track.values, i).sub(donorPelvis.position).applyMatrix3(donorToWorld).y * legRatio;
+     travel.set(0, rise, 0).applyMatrix3(worldToPelvis).add(pelvis.position).toArray(values, i);
+    }
+    tracks.push(new THREE.VectorKeyframeTrack(pelvis.name + '.position', track.times, values));
+    continue;
+   }
    if (!binding || propertyName !== 'quaternion') continue;
    const {bone, axes, sourceRestInverse} = binding;
    const inverseAxes = axes.clone().invert(), rotation = new THREE.Quaternion();
@@ -189,15 +209,17 @@ export async function loadCharacter(mode) {
   }
   ground = approach(ground, state === 'ground' ? 1 : 0);
 
-  // Ground speed picks the gaits: each one is at full weight at its own stride speed and hands over to its neighbours.
+  // Ground speed picks the gaits: each one is at full weight from its own stride speed up to the handover speed, where
+  // the next gait blends in; the handover never passes the midpoint between two gaits.
+  const handover = (slow, fast) => Math.min(slow.speed * GAIT.stretch, (slow.speed + fast.speed) / 2);
   const pace = preview ? (moving ? gaits[0]?.speed ?? GAIT.startSpeed : 0) : speed;
   const moveShare = gaits.length ? Math.min(1, pace / GAIT.startSpeed) : 0;
   let total = 0;
   gaits.forEach((gait, i) => {
    const slower = gaits[i - 1], faster = gaits[i + 1];
    const share = !calibrated ? Number(i === 0)
-    : pace <= gait.speed ? (slower ? ramp(slower.speed, gait.speed, pace) : 1)
-    : (faster ? 1 - ramp(gait.speed, faster.speed, pace) : 1);
+    : pace <= gait.speed ? (slower ? ramp(handover(slower, gait), gait.speed, pace) : 1)
+    : (faster ? 1 - ramp(handover(gait, faster), faster.speed, pace) : 1);
    gait.weight = approach(gait.weight, share);
    total += gait.weight;
   });
