@@ -9,8 +9,36 @@ const BODY = {
 const LIMBS = {shoulder: 'shoulder', arm: 'upper_arm', forearm: 'forearm', hand: 'hand',
  upleg: 'thigh', leg: 'shin', foot: 'foot', toebase: 'toe'};
 const CHARACTER_HEIGHT = 1.75;
-const CLIPS = ['Idle_Loop', 'Walk_Loop', 'Jump_Start', 'Jump_Loop', 'Jump_Land'];
+const CLIPS = ['Idle_Loop', 'Walk_Loop', 'Jump_Start', 'Jump_Loop', 'Jump_Land', 'Jog_Fwd_Loop', 'Sprint_Loop'];
 const FADE_SECONDS = .1;
+const AIR_STATES = ['takeoff', 'airborne', 'land'];
+// Gait blending. startSpeed (m/s): below it the idle takes over. minRate / maxRate: how far a clip may be slowed or
+// sped up to match the ground speed. samples: poses read per clip to measure its stride. minStride (m/s): a slower
+// measure means the feet could not be read, and the clips then play at their own rate.
+const GAIT = {startSpeed: .5, minRate: .5, maxRate: 1.6, samples: 48, minStride: .1};
+const FOOT_BONES = ['l_foot', 'r_foot'];
+
+// Ground speed an in-place gait clip was animated for: the planted (lower) foot slides back under the body at that speed.
+function strideSpeed(mixer, action, root, feet) {
+ if (feet.some(foot => !foot)) return null;
+ const duration = action.getClip().duration, last = feet.map(() => new THREE.Vector3()), now = feet.map(() => new THREE.Vector3());
+ let travelled = 0;
+ action.reset().setEffectiveWeight(1).play();
+ for (let i = 0; i <= GAIT.samples; i++) {
+  action.time = i / GAIT.samples * duration;
+  mixer.update(0);
+  root.updateMatrixWorld(true);
+  feet.forEach((foot, side) => foot.getWorldPosition(now[side]));
+  const planted = now[0].y < now[1].y ? 0 : 1;
+  if (i > 0) travelled += Math.hypot(now[planted].x - last[planted].x, now[planted].z - last[planted].z);
+  feet.forEach((foot, side) => last[side].copy(now[side]));
+ }
+ action.stop();
+ const speed = travelled / duration;
+ return speed > GAIT.minStride ? speed : null;
+}
+// 0 at `from`, 1 at `to`; 1 when the two coincide.
+const ramp = (from, to, value) => to > from ? THREE.MathUtils.clamp((value - from) / (to - from), 0, 1) : 1;
 
 function retargetLocomotion(source, target) {
  const sourceBones = new Map(), targetBones = new Map();
@@ -60,7 +88,7 @@ function retargetLocomotion(source, target) {
 
 export async function loadCharacter(mode) {
  const loader = new GLTFLoader();
- let gltf, idle, walk, takeoff, airborne, land, label;
+ let gltf, idle, walk, takeoff, airborne, land, jog, sprint, label;
  if (mode === 'sci-fi') {
   gltf = await loader.loadAsync('/outdoor/sci-fi_male_character.glb');
   const nativeWalk = THREE.AnimationClip.findByName(gltf.animations, 'Walk_Front');
@@ -75,7 +103,7 @@ export async function loadCharacter(mode) {
    loader.loadAsync('/outdoor/character_animated.glb'), loader.loadAsync('/outdoor/locomotion.glb'),
   ]);
   gltf = target;
-  [idle, walk, takeoff, airborne, land] = retargetLocomotion(source, target);
+  [idle, walk, takeoff, airborne, land, jog, sprint] = retargetLocomotion(source, target);
   label = 'Character animated · Quaternius locomotion';
  }
  const model = new THREE.Group();
@@ -88,7 +116,7 @@ export async function loadCharacter(mode) {
  gltf.scene.traverse(node => { if (node.isMesh) { node.castShadow = true; node.frustumCulled = false; } });
  model.add(gltf.scene);
  const mixer = new THREE.AnimationMixer(gltf.scene);
- const actions = Object.fromEntries(Object.entries({idle, walk, takeoff, airborne, land})
+ const actions = Object.fromEntries(Object.entries({idle, walk, jog, sprint, takeoff, airborne, land})
   .filter(([, clip]) => clip).map(([name, clip]) => [name, mixer.clipAction(clip)]));
  for (const action of [actions.takeoff, actions.land]) {
   if (!action) continue;
@@ -96,44 +124,83 @@ export async function loadCharacter(mode) {
   action.clampWhenFinished = true;
  }
  const feet = mode === 'sci-fi' ? null : createFootPlacement(gltf.scene);
- let active;
- let previousGround, finished = false;
- const fading = new Map();
- mixer.addEventListener('finished', ({action}) => { if (action === active) finished = true; });
- function select(next, immediate = false) {
-  if (active !== next) {
-   if (active && next && !immediate) {
-    active.fadeOut(FADE_SECONDS);
-    fading.set(active, FADE_SECONDS);
-   } else active?.stop();
-   fading.delete(next);
-   next?.reset().play();
-   if (next && active && !immediate) next.fadeIn(FADE_SECONDS);
-   active = next;
-   finished = false;
-  }
- }
- return {model, label, hasIdle: Boolean(idle), reset() {
-  feet?.restore();
+ const bones = new Map();
+ gltf.scene.traverse(node => { if (node.isBone) bones.set(node.name.split('_JNT_')[0], node); });
+ const soles = FOOT_BONES.map(name => bones.get(name));
+ // Slowest first. Calibrated: every gait's stride speed could be measured, so playback can follow the ground speed.
+ const gaits = [actions.walk, actions.jog, actions.sprint].filter(Boolean)
+  .map(action => ({action, duration: action.getClip().duration, speed: strideSpeed(mixer, action, gltf.scene, soles), weight: 0}));
+ const calibrated = gaits.length > 0 && gaits.every(gait => gait.speed);
+ if (calibrated) gaits.sort((a, b) => a.speed - b.speed);
+ // Gait clips are placed by `phase` (0..1 of a stride) so blended gaits stay in step; the mixer never advances them.
+ for (const gait of gaits) gait.action.timeScale = 0;
+ const air = Object.fromEntries(AIR_STATES.map(name => [name, 0]));
+ let state = 'ground', ground = 1, phase = 0, previousGround, finished = false;
+ mixer.addEventListener('finished', ({action}) => { if (action === actions[state]) finished = true; });
+ function start() {
   mixer.stopAllAction();
-  fading.clear();
-  active = previousGround = undefined;
-  finished = false;
- }, update(dt, {moving, grounded, jumped, preview, groundAt}) {
+  for (const action of [actions.idle, ...gaits.map(gait => gait.action)]) action?.setEffectiveWeight(0).play();
+  for (const gait of gaits) gait.weight = 0;
+  for (const name of AIR_STATES) air[name] = 0;
+  state = 'ground'; ground = 1; phase = 0; previousGround = undefined; finished = false;
+ }
+ start();
+ return {model, label, hasIdle: Boolean(idle), gaitSpeeds: gaits.map(gait => gait.speed), reset() {
   feet?.restore();
-  const locomotion = actions[moving ? 'walk' : 'idle'];
-  if (preview || !actions.airborne) select(locomotion, preview);
-  else if (jumped) select(actions.takeoff);
-  else if (!grounded) {
-   if (active !== actions.takeoff || finished) select(actions.airborne);
-  } else if (previousGround === false) select(actions.land);
-  else if (active !== actions.land || finished) select(locomotion);
+  start();
+ }, update(dt, {moving, speed = 0, grounded, jumped, preview, groundAt}) {
+  feet?.restore();
+  let next = state;
+  if (preview || !actions.airborne) next = 'ground';
+  else if (jumped) next = 'takeoff';
+  else if (!grounded) { if (state !== 'takeoff' || finished) next = 'airborne'; }
+  else if (previousGround === false) next = 'land';
+  else if (state !== 'land' || finished) next = 'ground';
   previousGround = preview ? undefined : grounded;
-  mixer.update(dt);
-  for (const [action, remaining] of fading) {
-   if (remaining <= dt) { action.stop(); fading.delete(action); }
-   else fading.set(action, remaining - dt);
+  if (next !== state) {
+   state = next;
+   finished = false;
+   if (state !== 'ground') actions[state]?.reset().play();
   }
+  // Every weight moves toward its target over FADE_SECONDS; previews cut.
+  const step = preview ? 1 : dt / FADE_SECONDS;
+  const approach = (value, target) => value + THREE.MathUtils.clamp(target - value, -step, step);
+  for (const name of AIR_STATES) {
+   const action = actions[name];
+   if (!action) continue;
+   const before = air[name];
+   air[name] = approach(before, state === name ? 1 : 0);
+   action.setEffectiveWeight(air[name]);
+   if (before > 0 && air[name] === 0) action.stop();
+  }
+  ground = approach(ground, state === 'ground' ? 1 : 0);
+
+  // Ground speed picks the gaits: each one is at full weight at its own stride speed and hands over to its neighbours.
+  const pace = preview ? (moving ? gaits[0]?.speed ?? GAIT.startSpeed : 0) : speed;
+  const moveShare = gaits.length ? Math.min(1, pace / GAIT.startSpeed) : 0;
+  let total = 0;
+  gaits.forEach((gait, i) => {
+   const slower = gaits[i - 1], faster = gaits[i + 1];
+   const share = !calibrated ? Number(i === 0)
+    : pace <= gait.speed ? (slower ? ramp(slower.speed, gait.speed, pace) : 1)
+    : (faster ? 1 - ramp(gait.speed, faster.speed, pace) : 1);
+   gait.weight = approach(gait.weight, share);
+   total += gait.weight;
+  });
+  let stride = 0, cycle = 0;
+  for (const gait of gaits) {
+   const share = total > 0 ? gait.weight / total : 0;
+   stride += share * (gait.speed ?? 0);
+   cycle += share * gait.duration;
+  }
+  const rate = calibrated && stride > 0 ? THREE.MathUtils.clamp(pace / stride, GAIT.minRate, GAIT.maxRate) : 1;
+  if (cycle > 0) phase = (phase + dt * rate / cycle) % 1;
+  for (const gait of gaits) {
+   gait.action.time = phase * gait.duration;
+   gait.action.setEffectiveWeight(total > 0 ? ground * moveShare * gait.weight / total : 0);
+  }
+  actions.idle?.setEffectiveWeight(ground * (1 - moveShare));
+  mixer.update(dt);
   if (grounded && !preview) feet?.apply(groundAt, moving);
  }};
 }

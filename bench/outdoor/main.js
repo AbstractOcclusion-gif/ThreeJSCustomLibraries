@@ -151,7 +151,7 @@ startFrameLoop(renderer, dt => {
  playerView.position.copy(controller.position);
  playerView.rotation.y = controller.heading;
  character?.update(dt, {moving: mode === 'walk' || (mode === 'play' && desired.lengthSq() > 0),
-  grounded, jumped, preview: mode !== 'play', groundAt});
+  speed: controller.speed, grounded, jumped, preview: mode !== 'play', groundAt});
  jumped = false;
  props.update(dt, mode === 'play');
  target.copy(playerView.position).y += VIEW.height;
