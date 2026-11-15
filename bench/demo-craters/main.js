@@ -25,14 +25,21 @@ import '../bench.css';
 const TERRAIN = {span: 64, resolution: 257, biome: 'plains', seed: 11};
 // What each stratum's debris looks like: the terrain's own role tints (topsoil is the dark top earth).
 const STRATA_TINT = {topsoil: TERRAIN_ROLE_TINTS.mud, subsoil: TERRAIN_ROLE_TINTS.soil, scree: TERRAIN_ROLE_TINTS.scree, rock: TERRAIN_ROLE_TINTS.rock};
-// Shards (particle chips): count from the thrown volume (m³ x perCubicMetre, at most max a crater), shock (pop speed)
-// from the crater depth. Dust: puff size per metre of crater reach, at most maxSize.
-const SHARDS = {pool: 640, perCubicMetre: 14, max: 160, shockPerMetre: 14, maxShock: 70, size: 1.4};
-const DUST = {perMetre: .45, maxSize: 4};
-// Clods (Jolt bodies): count from the thrown volume (m³ x perCubicMetre, at most perBlast), at most `max` alive, each
-// living `life` s. Edge size in m (a share of the crater reach, within [min, max]); thrown from the rim at `speed`
-// x sqrt(depth) m/s, `rise` of it upward; `density` kg/m³.
-const CLODS = {perCubicMetre: .8, perBlast: 18, max: 64, life: 14, sizeShare: .09, minSize: .12, maxSize: .55, speed: 3.2, rise: .75, density: 1600, spin: 6};
+// Shards (particle chips): count from the thrown volume (m³ x perCubicMetre, at most max a crater), thrown outward
+// from `bursts` points on the rim at `speed` x sqrt(g x reach) m/s, so they clear the crater; shock (pop strength)
+// from the crater depth.
+const SHARDS = {pool: 900, perCubicMetre: 18, max: 240, bursts: 8, speed: 1.1, shockPerMetre: 14, maxShock: 70, size: 1.4};
+// Dust (particle puffs): one cloud over the crater, `perMetre` of its reach in size (at most maxSize), and `ring`
+// smaller ones (`ringShare` of that size) around the rim.
+const DUST = {pool: 120, perMetre: .9, maxSize: 7, ring: 6, ringShare: .55};
+// Clods (Jolt bodies): count from the thrown volume (m³ x perCubicMetre, at most perBlast, `hardShare` more of
+// them on hard ground). Edge size in m: a share of the crater reach, within [minSize, maxSize]. Thrown from the rim
+// at `speed` x sqrt(g x reach) m/s (each between `spread` shares of it), `rise` of it upward, so they land from
+// the rim out to a few crater widths. `stayShare` of them stay where they come to rest, the others are removed after
+// `life` s; at most `max` are alive, the oldest making room.
+const CLODS = {perCubicMetre: 1.1, perBlast: 22, hardShare: .6, max: 90, life: 14, stayShare: .45, sizeShare: .1, minSize: .12, maxSize: .6,
+  speed: 1, spread: [.55, 1.5], rise: .72, density: 1600, spin: 6};
+const GRAVITY = 9.82;
 // Launched objects. Each: its collider (a sphere `radius` or a box `half` extents, m, at size 1), the outline it
 // lands on (`squareness` of craterFootprint; a box lands on its X and Z extents, `footprint` overrides them: the
 // plane's wings), its density (kg/m³ of its collider) and its default launch. A plane is a fuselage collider drawn
@@ -82,7 +89,7 @@ scene.add(ground);
 
 // Physics: Cannon bodies as the model, Jolt solving them (the destruction module's driver).
 const J = await initJolt();
-const physics = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
+const physics = new World({gravity: new Vec3(0, -GRAVITY, 0), allowSleep: true});
 const driver = createJoltDriver(J);
 const groundBody = createTerrainCollider(field);
 const [groundShape] = groundBody.shapes;
@@ -96,7 +103,7 @@ let groundChanged = false;
 // Particles.
 const chips = createChips(scene, {pool: SHARDS.pool});
 chips.setGround(field.heightAt);
-const puffs = await createPuffs(scene, {pool: 48, environment: weather.view.environment});
+const puffs = await createPuffs(scene, {pool: DUST.pool, environment: weather.view.environment});
 
 // Clods and dropped objects: Jolt bodies with a mesh each.
 const clodGeometry = new THREE.DodecahedronGeometry(.5 * Math.sqrt(3) / 1.2, 0);   // about a unit box, rounded
@@ -119,32 +126,53 @@ const clodCount = () => moving.reduce((count, entry) => count + (entry.clod ? 1 
 // The wiring: what a crater throws out, by the strata it cut.
 const effects = {shards: true, dust: true, clods: true};
 const origin = new THREE.Vector3();
+const rimPoint = new THREE.Vector3(), outward = new THREE.Vector3();
+// Point k of n around the crater, `share` of its reach from the centre, on the ground; `outward` points away.
+function aroundCrater(event, k, n, share, y) {
+  const angle = (k + Math.random()) / n * Math.PI * 2;
+  outward.set(Math.cos(angle), 0, Math.sin(angle));
+  rimPoint.set(event.x + outward.x * event.reach * share, 0, event.z + outward.z * event.reach * share);
+  rimPoint.y = field.heightAt(rimPoint.x, rimPoint.z) ?? y;
+  return rimPoint;
+}
+const escapeSpeed = event => Math.sqrt(GRAVITY * event.reach);   // m/s that throws debris about a crater width
 function throwShards(event, y) {
   const shock = Math.min(SHARDS.maxShock, event.depth * SHARDS.shockPerMetre), total = Math.min(SHARDS.max, event.ejecta * SHARDS.perCubicMetre);
-  origin.set(event.x, y, event.z);
   for (const [name, share] of Object.entries(event.strata)) {
-    const count = Math.round(total * share);
-    if (count > 0) chips.emit(origin, {color: new THREE.Color(STRATA_TINT[name]).getHex(), chips: count, size: SHARDS.size}, shock);
+    const count = Math.round(total * share / SHARDS.bursts);
+    if (count <= 0) continue;
+    const style = {color: new THREE.Color(STRATA_TINT[name]).getHex(), chips: count, size: SHARDS.size};
+    for (let k = 0; k < SHARDS.bursts; k++) {
+      aroundCrater(event, k, SHARDS.bursts, 1, y);
+      chips.emit(rimPoint, style, shock, outward.multiplyScalar(SHARDS.speed * escapeSpeed(event)));
+    }
   }
+}
+function throwDust(event, y) {
+  const size = Math.min(DUST.maxSize, event.reach * DUST.perMetre);
+  puffs.dust(origin.set(event.x, y, event.z), size);
+  for (let k = 0; k < DUST.ring; k++) puffs.dust(aroundCrater(event, k, DUST.ring, 1.1, y), size * DUST.ringShare);
 }
 function throwClods(event, y) {
   const strata = Object.entries(event.strata).filter(([, share]) => share > 0);
-  const count = Math.min(CLODS.perBlast, CLODS.max - clodCount(), Math.round(event.ejecta * CLODS.perCubicMetre));
-  const launch = CLODS.speed * Math.sqrt(event.depth), size = THREE.MathUtils.clamp(event.reach * CLODS.sizeShare, CLODS.minSize, CLODS.maxSize);
+  const count = Math.min(CLODS.perBlast, Math.round(event.ejecta * CLODS.perCubicMetre * (1 + CLODS.hardShare * event.hardness)));
+  const launch = CLODS.speed * escapeSpeed(event), size = THREE.MathUtils.clamp(event.reach * CLODS.sizeShare, CLODS.minSize, CLODS.maxSize);
   for (let i = 0; i < count; i++) {
+    // The oldest clod makes room for a new one.
+    if (clodCount() >= CLODS.max) removeMoving(moving.findIndex(entry => entry.clod));
     // Each clod is drawn from a stratum by its share of the dug volume.
     let pick = Math.random(), stratum = strata.at(-1)[0];
     for (const [name, share] of strata) if ((pick -= share) < 0) { stratum = name; break; }
-    const angle = Math.random() * Math.PI * 2, edge = size * (.6 + .8 * Math.random());
-    const x = event.x + Math.cos(angle) * event.reach * .8, z = event.z + Math.sin(angle) * event.reach * .8;
-    const body = new Body({mass: CLODS.density * edge ** 3, shape: new Box(new Vec3(edge / 2, edge / 2, edge / 2)), position: new Vec3(x, (field.heightAt(x, z) ?? y) + edge, z), angularDamping: .3});
-    const out = launch * Math.sqrt(1 - CLODS.rise ** 2) * (.6 + .8 * Math.random());
-    body.velocity.set(Math.cos(angle) * out, launch * CLODS.rise * (.7 + .6 * Math.random()), Math.sin(angle) * out);
+    const edge = size * (.6 + .8 * Math.random());
+    aroundCrater(event, i, count, 1.05, y);
+    const body = new Body({mass: CLODS.density * edge ** 3, shape: new Box(new Vec3(edge / 2, edge / 2, edge / 2)), position: new Vec3(rimPoint.x, rimPoint.y + edge, rimPoint.z), angularDamping: .3});
+    const speed = launch * THREE.MathUtils.lerp(...CLODS.spread, Math.random()), out = speed * Math.sqrt(1 - CLODS.rise ** 2);
+    body.velocity.set(outward.x * out, speed * CLODS.rise, outward.z * out);
     body.angularVelocity.set((Math.random() - .5) * CLODS.spin, (Math.random() - .5) * CLODS.spin, (Math.random() - .5) * CLODS.spin);
     const mesh = new THREE.Mesh(clodGeometry, strataMaterials[stratum]);
     mesh.scale.setScalar(edge);
     mesh.castShadow = mesh.receiveShadow = true;
-    addMoving(body, mesh, CLODS.life);
+    addMoving(body, mesh, Math.random() < CLODS.stayShare ? Infinity : CLODS.life);
     moving.at(-1).clod = true;
   }
 }
@@ -152,7 +180,7 @@ field.subscribe(event => {
   groundChanged = true;
   const y = event.height ?? field.heightAt(event.x, event.z);
   if (effects.shards) throwShards(event, y);
-  if (effects.dust) puffs.dust(origin.set(event.x, y, event.z), Math.min(DUST.maxSize, event.reach * DUST.perMetre));
+  if (effects.dust) throwDust(event, y);
   if (effects.clods) throwClods(event, y);
 });
 
@@ -231,6 +259,7 @@ effectsFolder.add(effects, 'shards').name('Shards (particles)');
 effectsFolder.add(effects, 'dust').name('Dust (particles)');
 effectsFolder.add(effects, 'clods').name('Clods (Jolt bodies)');
 effectsFolder.add(CLODS, 'perBlast', 0, 40, 1).name('Clods per crater, at most');
+effectsFolder.add(CLODS, 'stayShare', 0, 1, .05).name('Clods that stay');
 gui.add({reset() {
   for (let i = moving.length - 1; i >= 0; i--) removeMoving(i);
   pendingImpacts.length = 0;
