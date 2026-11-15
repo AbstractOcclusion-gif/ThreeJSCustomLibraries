@@ -1,14 +1,15 @@
 import {Quaternion, Vector3} from 'three';
 
-const SOLE_HEIGHT = .075;
 const MAX_RISE = .25;
 const MAX_DROP = .12;
 const WALK_DROP = .045;
 const EPSILON = .001;
 const UP = new Vector3(0, 1, 0);
 
-// bones: the rig's joints by name ('l_upleg', 'l_leg', 'l_foot' and the right side).
-export function createFootPlacement(bones) {
+// bones: the rig's joints by name ('l_upleg', 'l_leg', 'l_foot' and the right side). soleHeight (m): how high the ankle
+// joint sits above the sole on this rig; a wrong value drags every step into or off the ground.
+export function createFootPlacement(bones, soleHeight) {
+ if (!(soleHeight > 0)) throw Error('Foot placement needs the ankle height above the sole');
  const legs = ['l', 'r'].map(side => ['upleg', 'leg', 'foot'].map(name => bones.get(side + '_' + name)));
  const animated = legs.map(leg => leg.map(() => new Quaternion()));
  let applied = false;
@@ -42,7 +43,7 @@ export function createFootPlacement(bones) {
     shin.getWorldPosition(knee);
     foot.getWorldPosition(ankle);
     const ground = groundAt(ankle, normal);
-    const offset = ground + SOLE_HEIGHT - ankle.y;
+    const offset = ground + soleHeight - ankle.y;
     if (!Number.isFinite(offset) || offset < -(moving ? WALK_DROP : MAX_DROP) || offset > MAX_RISE) continue;
     foot.getWorldQuaternion(footRotation);
     target.copy(ankle).y += offset;

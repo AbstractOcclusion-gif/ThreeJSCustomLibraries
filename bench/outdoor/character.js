@@ -17,7 +17,7 @@ const AIR_STATES = ['takeoff', 'airborne', 'land'];
 // measure means the feet could not be read, and the clips then play at their own rate. stretch: a gait is kept on its
 // own, played faster, up to this many times its stride speed before the next gait starts to blend in (quicker steps
 // rather than longer ones).
-const GAIT = {startSpeed: .5, minRate: .5, maxRate: 1.6, samples: 48, minStride: .1, stretch: 1.5};
+const GAIT = {startSpeed: .5, minRate: .5, maxRate: 1.6, samples: 48, minStride: .1, stretch: 1.2};
 const FOOT_BONES = ['l_foot', 'r_foot'];
 
 // Ground speed an in-place gait clip was animated for: the planted (lower) foot slides back under the body at that speed.
@@ -159,7 +159,10 @@ export async function loadCharacter(mode) {
  }
  const bones = new Map();
  gltf.scene.traverse(node => { if (node.isBone) bones.set(jointKey(node.name), node); });
- const feet = mode === 'sci-fi' ? null : createFootPlacement(bones);
+ // Ankle height above the sole, read on the bind pose: the model stands on y = 0 here.
+ gltf.scene.updateMatrixWorld(true);
+ const ankle = bones.get(FOOT_BONES[0])?.getWorldPosition(new THREE.Vector3()).y;
+ const feet = mode === 'sci-fi' ? null : createFootPlacement(bones, ankle);
  const soles = FOOT_BONES.map(name => bones.get(name));
  // Slowest first. Calibrated: every gait's stride speed could be measured, so playback can follow the ground speed.
  const gaits = [actions.walk, actions.jog, actions.sprint].filter(Boolean)
