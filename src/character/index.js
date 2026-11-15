@@ -12,7 +12,7 @@ export const CHARACTER_DEFAULTS = Object.freeze({
   walkSpeed: 2.1,       // m/s
   runSpeed: 5,          // m/s
   acceleration: 18,     // m/s2 on the ground
-  airControl: .3,       // share of the ground acceleration left while airborne
+  airControl: .3,       // share of the ground acceleration and turning left while airborne; 0 = no steering in the air
   jumpSpeed: 4.5,       // m/s at take-off
   jumpCut: .45,         // share of the rising speed kept when jump is released early
   coyoteTime: .12,      // s after walking off a ledge during which a jump still starts
@@ -111,8 +111,8 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
       vertical += system.GetGravity().GetY() * dt;
 
       if (moveX || moveZ) {
-        // Shortest way round, at most turnSpeed.
-        const turn = ((Math.atan2(moveX, moveZ) - state.heading) % TURN + TURN * 1.5) % TURN - Math.PI, most = o.turnSpeed * dt;
+        // Shortest way round, at most turnSpeed; in the air only as far as it can still steer.
+        const turn = ((Math.atan2(moveX, moveZ) - state.heading) % TURN + TURN * 1.5) % TURN - Math.PI, most = o.turnSpeed * (standing ? 1 : o.airControl) * dt;
         state.heading += Math.max(-most, Math.min(most, turn));
       }
       const length = Math.hypot(moveX, moveZ), scale = (run ? o.runSpeed : o.walkSpeed) / Math.max(1, length);

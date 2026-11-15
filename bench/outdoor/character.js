@@ -78,8 +78,9 @@ function retargetLocomotion(source, target) {
   for (const [name, donor] of Object.entries(LIMBS)) bind(side + '_' + name, donor + '.' + side.toUpperCase());
  }
 
- // Pelvis height. The gaits bend the knees and count on the pelvis dropping with them; left at standing height, the feet
- // hang in the air. Only the vertical travel is taken (the physics body owns the rest), scaled by leg length.
+ // Pelvis travel. The gaits bend the knees and count on the pelvis dropping with them (left at standing height, the
+ // feet hang in the air), and a walk without its side-to-side sway reads as stiff. The clips are in place, so the
+ // whole travel is taken, scaled by leg length; the physics body still owns where the character is.
  const pelvis = targetBones.get('hips'), donorPelvis = sourceBones.get(THREE.PropertyBinding.sanitizeNodeName('DEF-hips'));
  const from = new THREE.Vector3(), to = new THREE.Vector3();
  const legLength = joints => joints.reduce((length, joint, i) => i ? length + joints[i - 1].getWorldPosition(from).distanceTo(joint.getWorldPosition(to)) : 0, 0);
@@ -99,8 +100,8 @@ function retargetLocomotion(source, target) {
    if (nodeName === donorPelvis.name && propertyName === 'position') {
     const values = new Float32Array(track.values.length), travel = new THREE.Vector3();
     for (let i = 0; i < values.length; i += 3) {
-     const rise = travel.fromArray(track.values, i).sub(donorPelvis.position).applyMatrix3(donorToWorld).y * legRatio;
-     travel.set(0, rise, 0).applyMatrix3(worldToPelvis).add(pelvis.position).toArray(values, i);
+     travel.fromArray(track.values, i).sub(donorPelvis.position).applyMatrix3(donorToWorld).multiplyScalar(legRatio)
+      .applyMatrix3(worldToPelvis).add(pelvis.position).toArray(values, i);
     }
     tracks.push(new THREE.VectorKeyframeTrack(pelvis.name + '.position', track.times, values));
     continue;
