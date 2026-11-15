@@ -31,7 +31,7 @@ function createGlassMaterial(far) {
 }
 
 export function createShadowCasters({translucent = false} = {}) {
-  const casters = [], materials = [];   // the meshes dressed for this pass, and the material each one had
+  const casters = [], materials = [], layerMasks = [];
   const depthMaterials = new Map();     // one depth material per side / cutout a caster needs
   const glassMaterials = new Map();     // one glass material per transparent material met
   const glassFar = {value: 0};          // far plane of the light camera being drawn, for every glass material
@@ -57,8 +57,8 @@ export function createShadowCasters({translucent = false} = {}) {
   }
   const casts = material => !material.transparent && material.depthWrite && material.visible;
   function dress(object, material, layer) {
-    casters.push(object); materials.push(object.material);
-    object.material = material; object.layers.enable(layer);
+    casters.push(object); materials.push(object.material); layerMasks.push(object.layers.mask);
+    object.material = material; object.layers.set(layer);
   }
   function collect(object) {
     if (!object.isMesh || !object.castShadow) return;
@@ -71,8 +71,11 @@ export function createShadowCasters({translucent = false} = {}) {
     // Dresses the visible casters of a scene for the pass. Always followed by release().
     collect(scene) { scene.traverseVisible(collect); return casters.length; },
     release() {
-      for (let index = 0; index < casters.length; index++) { casters[index].material = materials[index]; casters[index].layers.disable(SHADOW_LAYER); casters[index].layers.disable(GLASS_LAYER); }
-      casters.length = materials.length = glass = 0;
+      for (let index = 0; index < casters.length; index++) {
+        casters[index].material = materials[index];
+        casters[index].layers.mask = layerMasks[index];
+      }
+      casters.length = materials.length = layerMasks.length = glass = 0;
     },
     // Draws one tile of an atlas from a light camera (on SHADOW_LAYER), between collect() and release(). size: texels
     // across the tile. far: far plane of a perspective light camera, 0 for an orthographic one.
@@ -102,9 +105,11 @@ export function createShadowCasters({translucent = false} = {}) {
 // everything back, even when draw() throws.
 export function withShadowCasters(casters, scene, renderer, draw) {
   const background = scene.background, override = scene.overrideMaterial, autoClear = renderer.autoClear;
-  casters.collect(scene);
-  scene.background = null; scene.overrideMaterial = null; renderer.autoClear = false;
-  try { return draw(); } finally {
+  try {
+    casters.collect(scene);
+    scene.background = null; scene.overrideMaterial = null; renderer.autoClear = false;
+    return draw();
+  } finally {
     scene.background = background; scene.overrideMaterial = override; renderer.autoClear = autoClear;
     casters.release();
   }

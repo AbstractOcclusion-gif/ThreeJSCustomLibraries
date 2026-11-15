@@ -109,16 +109,36 @@ test('a material gets its own hooks back when its last light slot is taken away'
  const material = new THREE.MeshStandardMaterial(), compile = shader => { shader.uniforms.own = {value: 1}; }, key = () => 'own';
  material.onBeforeCompile = compile; material.customProgramCacheKey = key;
  const first = addLightSlot(material, {key: 'a', after: 'irradiance *= 1.0;'}), second = addLightSlot(material, {key: 'b', after: 'irradiance *= 1.0;'});
- assert.equal(material.customProgramCacheKey(), 'own|light-slots:a,b');
+ const slotNames = () => JSON.parse(material.customProgramCacheKey().split('|light-slots:')[1]).map(([name]) => name);
+ assert.deepEqual(slotNames(), ['a', 'b']);
  const shader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
  material.onBeforeCompile(shader);
  assert.equal(shader.uniforms.own.value, 1);
  first(); first();
- assert.equal(material.customProgramCacheKey(), 'own|light-slots:b');
+ assert.deepEqual(slotNames(), ['b']);
  second();
  assert.equal(material.onBeforeCompile, compile); assert.equal(material.customProgramCacheKey, key);
  const unlit = new THREE.MeshBasicMaterial(); addLightSlot(unlit, {key: 'a', after: 'irradiance *= 1.0;'});
  assert.throws(() => unlit.onBeforeCompile({uniforms: {}, vertexShader: THREE.ShaderLib.basic.vertexShader, fragmentShader: THREE.ShaderLib.basic.fragmentShader}), /lit Three material/);
+});
+
+test('light slots can reattach after the caller replaces a material hook', () => {
+ const material = new THREE.MeshStandardMaterial();
+ const slot = {key: 'ambient', after: 'irradiance *= 0.5;'};
+ const detach = addLightSlot(material, slot);
+ const replacement = shader => { shader.uniforms.replacement = {value: true}; };
+ material.onBeforeCompile = replacement;
+ detach();
+ assert.equal(material.onBeforeCompile, replacement);
+ assert.equal(material.customProgramCacheKey, THREE.Material.prototype.customProgramCacheKey);
+
+ const detachAgain = addLightSlot(material, slot);
+ const shader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
+ material.onBeforeCompile(shader);
+ assert.equal(shader.uniforms.replacement.value, true);
+ assert.ok(shader.fragmentShader.includes(slot.after));
+ detachAgain();
+ assert.equal(material.onBeforeCompile, replacement);
 });
 
 test('the hook has no local lights by default and takes the ones of a light rig', () => {
@@ -229,6 +249,8 @@ test('sun shadows draw their cascades into the tiles of one atlas and give both 
  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(45, 16 / 9, .1, 400), sun = new THREE.Vector3(.3, .8, .5).normalize();
  const own = new THREE.MeshStandardMaterial(), glass = new THREE.MeshStandardMaterial({transparent: true});
  const caster = new THREE.Mesh(new THREE.BoxGeometry(), own), still = new THREE.Mesh(new THREE.BoxGeometry(), own), pane = new THREE.Mesh(new THREE.BoxGeometry(), glass);
+ caster.layers.enable(31);
+ const originalLayers = caster.layers.mask;
  caster.castShadow = pane.castShadow = true; scene.add(caster, still, pane);
  camera.position.set(22, 3, -27); camera.lookAt(4, -2, -3); camera.updateMatrixWorld(true);
  const seen = [];
@@ -237,7 +259,7 @@ test('sun shadows draw their cascades into the tiles of one atlas and give both 
  assert.deepEqual([0, 1, 2, 3, 4].map(() => shadows.render(scene, camera, sun)), [4, 2, 3, 3, 3]);
  // While a cascade is drawn the caster wears a depth material (back faces, as Three) on the shadow layer; then all is put back.
  assert.deepEqual(seen[0], [true, THREE.BackSide, true, 1, true]);
- assert.ok(caster.material === own && caster.layers.mask === 1 && renderer.autoClear === true && scene.background === null);
+ assert.ok(caster.material === own && caster.layers.mask === originalLayers && renderer.autoClear === true && scene.background === null);
  assert.deepEqual(renderer.calls.filter(call => call[0] === 'target').slice(0, 4).map(call => call[1]), [[0, 0, 256, 256], [256, 0, 256, 256], [0, 256, 256, 256], [256, 256, 256, 256]]);
  // The point the camera looks at, 38 m away, lands inside the tile of a cascade, at a depth between the planes.
  const target = new THREE.Vector3(4, -2, -3), inside = uniforms.uSunShadowMatrix.value.map((matrix, index) => {
@@ -248,6 +270,35 @@ test('sun shadows draw their cascades into the tiles of one atlas and give both 
  assert.ok(uniforms.uSunShadowTexel.value.x < uniforms.uSunShadowTexel.value.w && uniforms.uSunShadowLook.value.x === .5);
  assert.throws(() => shadows.render(scene, camera, [0, 1, 0]), TypeError);
  shadows.dispose(); assert.equal(shadows.render(scene, camera, sun), 0);
+});
+
+test('probe, sun and local shadow slots share a shader without duplicate declarations', () => {
+ const renderer = recordingRenderer(), probes = createLightProbes({ground, ...config});
+ const shadows = createSunShadows({renderer}), otherShadows = createSunShadows({renderer, cascades: 2});
+ const rig = createLightRig({shadows: {renderer}});
+ const lighting = createLighting({ambient: probes.ambient, sun: shadows.sun, lights: rig.lights});
+ const materials = [shadows, otherShadows, shadows].map(sun => {
+  const material = probes.applyTo(new THREE.MeshStandardMaterial(), lighting);
+  sun.applyTo(material);
+  rig.applyTo(material);
+  return material;
+ });
+ try {
+  const [first, second, repeat] = materials.map(material => material.customProgramCacheKey());
+  assert.notEqual(first, second);
+  assert.equal(first, repeat);
+  const shader = {uniforms: {}, vertexShader: THREE.ShaderLib.standard.vertexShader, fragmentShader: THREE.ShaderLib.standard.fragmentShader};
+  materials[0].onBeforeCompile(shader);
+  assert.equal([...shader.fragmentShader.matchAll(/uniform highp sampler2D u(?:Sun|Light)ShadowAtlas;/g)].length, 2);
+  assert.equal(shader.uniforms.uProbeVolume, probes.ambient.uniforms.uProbeVolume);
+  assert.equal(shader.uniforms.uSunShadowAtlas, shadows.sun.uniforms.uSunShadowAtlas);
+ } finally {
+  materials.forEach(material => material.dispose());
+  shadows.dispose();
+  otherShadows.dispose();
+  rig.dispose();
+  probes.dispose();
+ }
 });
 
 test('light shadows give each caster a block of the atlas, draw a spot once and a point light six times, and take turns', () => {

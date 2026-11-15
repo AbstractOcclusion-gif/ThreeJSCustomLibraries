@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
-import {createChannel, createChannelSurface, createRipples, createFlowBake, proceduralSky} from '../../src/water/index.js';
+import {createChannel, createChannelSurface, CHANNEL_OBSTACLE_COUNT, createRipples, createFlowBake, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
@@ -27,7 +27,7 @@ const sky = proceduralSky();
 
 const ripples = createRipples();
 const flow = createFlowBake();
-const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
+const obstacles = Array.from({length: CHANNEL_OBSTACLE_COUNT}, () => new THREE.Vector4());
 const water = createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow});
 const bed = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({vertexColors: true, roughness: .94})); scene.add(bed);
 const stone = new THREE.IcosahedronGeometry(1, 1), stoneMaterial = new THREE.MeshStandardMaterial({color: 0x736754, roughness: .95, flatShading: true});

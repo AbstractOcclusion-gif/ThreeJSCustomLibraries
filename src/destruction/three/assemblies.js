@@ -2,17 +2,22 @@ import {isRopeBridge} from '../bridge-suspension.js';
 import * as T from 'three';
 import {createThreeFracturedChunkView,uploadInstanceAttribute as upload} from './chunks.js';
 import {bindInstancedSurfaces} from './surface-detail.js';
+import {structureMaterial} from '../material-profiles.js';
+
+const WOOD_ROW = structureMaterial('oak').atlas.row;
+const CONCRETE_ROW = structureMaterial('rc').atlas.row;
+const STEEL_ROW = structureMaterial('steel').atlas.row;
 
 // damageColours: tint yielded (amber) and fractured (red) bars; false keeps every bar in steel colour.
 export function createThreeBendableStructureView({system,scene,assets,damageColours=true,surfaceAtlases=null}){
  const allSegments=system.members.flatMap(member=>member.segments.map(segment=>({member,...segment,adjacent:member.hinges.filter(h=>h.a===segment.body||h.b===segment.body),colour:-1,pose:{}}))),segments=allSegments.filter(s=>s.member.profile.section!=='round'),roundSegments=allSegments.filter(s=>s.member.profile.section==='round'),geometry=new T.BoxGeometry(1,1,1),material=new T.MeshStandardMaterial({color:0xffffff,metalness:.5,roughness:.55}),roots=[],dummy=new T.Object3D(),offset=new T.Vector3(),color=new T.Color();
- if(surfaceAtlases)bindInstancedSurfaces(material,geometry,segments.map(s=>s.member.type==='foundation'?7:s.member.profile.section==='rectangle'?2:11),surfaceAtlases);
+ if(surfaceAtlases)bindInstancedSurfaces(material,geometry,segments.map(s=>s.member.type==='foundation'?CONCRETE_ROW:s.member.profile.section==='rectangle'?WOOD_ROW:STEEL_ROW),surfaceAtlases);
  const steel=[0,1,2].map(()=>{const mesh=new T.InstancedMesh(geometry,material,segments.length);mesh.instanceMatrix.setUsage(T.DynamicDrawUsage);mesh.castShadow=mesh.receiveShadow=true;mesh.frustumCulled=false;scene.add(mesh);roots.push(mesh);return mesh;});
  const fallbackCapacity=panel=>Math.max(4,panel.asset?.pieces?.filter(piece=>piece.mode!=='cosmetic').length??0,panel.groups?.reduce((count,group)=>count+(group.pieceIds?.length??1),0)??0);
  const floorGeometry=new T.BoxGeometry(1,1,1),floorMaterial=new T.MeshStandardMaterial({color:0xffffff,roughness:.95}),capacity=Math.max(1,(system.floors?.panels??[]).reduce((count,panel)=>count+fallbackCapacity(panel),0)),floors=new T.InstancedMesh(floorGeometry,floorMaterial,capacity);floors.instanceMatrix.setUsage(T.DynamicDrawUsage);floors.castShadow=floors.receiveShadow=true;floors.frustumCulled=false;scene.add(floors);roots.push(floors);
  const plankDeck=isRopeBridge(system.definition?.metadata?.cableSetup);
  const floorSlots=Array.from({length:capacity},()=>({pose:{},colour:-1}));
- if(surfaceAtlases)bindInstancedSurfaces(floorMaterial,floorGeometry,Array(capacity).fill(plankDeck?2:7),surfaceAtlases);
+ if(surfaceAtlases)bindInstancedSurfaces(floorMaterial,floorGeometry,Array(capacity).fill(plankDeck?WOOD_ROW:CONCRETE_ROW),surfaceAtlases);
  const roundGeometry=roundSegments.length?new T.CylinderGeometry(1,1,1,20):null,roundMaterial=roundSegments.length?new T.MeshStandardMaterial({color:0xffffff,roughness:.85,metalness:.05}):null,round=roundGeometry?new T.InstancedMesh(roundGeometry,roundMaterial,roundSegments.length):null;
  if(round){roundGeometry.rotateZ(-Math.PI/2);round.instanceMatrix.setUsage(T.DynamicDrawUsage);round.castShadow=round.receiveShadow=true;round.frustumCulled=false;scene.add(round);roots.push(round);}
  const chunks=createThreeFracturedChunkView({system,scene,assets}),generatedRoots=roots.slice();

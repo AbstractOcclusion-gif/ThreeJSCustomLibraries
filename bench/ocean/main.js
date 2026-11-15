@@ -6,8 +6,7 @@ import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
 import {loadOceanLace} from '../kit/assets.js';
-import {aimRay} from '../kit/input.js';
-import {bindRippleGesture} from '../ripple-gesture.js';
+import {bindOceanRipples} from './ripples.js';
 import {oceanControls} from './controls.js';
 import '../bench.css';
 
@@ -29,15 +28,7 @@ const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);
 const probes = new SurfaceProbes(ocean.fft, 3, {wake: ocean.wake}), probeStep = 2;
 const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics, sky: sky.uniforms});
-const ray = new THREE.Raycaster(), impact = new THREE.Vector3();
-const meanSea = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const rippleGesture = bindRippleGesture(renderer.domElement, controls, event => {
-  if (view.waterline) return;
-  aimRay(ray, event, renderer.domElement, camera);
-  if (!ray.ray.intersectPlane(meanSea, impact)) return;
-  const {center, halfSize} = ocean.wake;
-  if (Math.abs(impact.x - center.x) < halfSize && Math.abs(impact.z - center.y) < halfSize) return impact;
-}, ({x, z}, strength) => ocean.wake.addDrop(x, z, 3.2, .65 * strength), {spacing: 1.5});
+const rippleGesture = bindOceanRipples({canvas: renderer.domElement, controls, camera, view, wake: ocean.wake});
 
 const gui = createBenchPanel('Ocean');
 const stageUI = stageControls(gui, stage, {onChange: () => sky.setEnvironment(stage.environment)});

@@ -10,27 +10,20 @@
 // world position of the fragment. The hook runs after the material's own onBeforeCompile and keeps it; a feature that
 // assigns onBeforeCompile must do so before it adds a slot.
 import * as THREE from 'three';
+import {injectWorldPosition} from './shader-world-position.js';
 
-const LIGHT_LOOP = '#include <lights_fragment_begin>', PROJECTION = '#include <project_vertex>', MAIN = 'void main() {';
+const LIGHT_LOOP = '#include <lights_fragment_begin>', MAIN = 'void main() {';
 const POINT_READ = 'getPointLightInfo( pointLight, geometryPosition, directLight );', SPOT_READ = 'getSpotLightInfo( spotLight, geometryPosition, directLight );';
 const DIRECTIONAL_READ = 'getDirectionalLightInfo( directionalLight, directLight );';
 const DIRECTIONAL_APPLY = 'RE_Direct( directLight', AFTER_DIRECTIONAL = '#if ( NUM_RECT_AREA_LIGHTS';
 const STAGES = ['point', 'spot', 'directional', 'directionalLit', 'after'];
 const WORLD_VARYING = 'varying vec3 vLightWorld;';
-const WORLD_VERTEX = /* glsl */`
-{
-  vec4 lightWorld = vec4(transformed, 1.0);
-  #ifdef USE_BATCHING
-  lightWorld = batchingMatrix * lightWorld;
-  #endif
-  #ifdef USE_INSTANCING
-  lightWorld = instanceMatrix * lightWorld;
-  #endif
-  vLightWorld = (modelMatrix * lightWorld).xyz;
-}`;
 const states = new WeakMap();   // material -> {slots, previousCompile, previousKey, compile, key}
 
 const block = (slots, stage) => slots.filter(slot => slot[stage]).map(slot => `\n{ // light slot: ${slot.key}\n${slot[stage]}\n}`).join('');
+const shaderSignature = slots => JSON.stringify(slots.map(slot => [
+  slot.key, Boolean(slot.worldPosition), slot.declarations ?? '', ...STAGES.map(stage => slot[stage] ?? ''),
+]));
 
 // Three's light loop with the slots written in. Throws when this Three no longer has the statements the slots follow.
 function lightLoop(slots) {
@@ -56,10 +49,7 @@ function install(material) {
     if (!slots.length) return;
     if (!shader.fragmentShader.includes(LIGHT_LOOP) || !shader.fragmentShader.includes(MAIN)) throw Error('Light slots need a lit Three material that keeps its light loop');
     const world = slots.some(slot => slot.worldPosition);
-    if (world) {
-      if (!shader.vertexShader.includes(PROJECTION)) throw Error('Light slots need a lit Three material that keeps its projection');
-      shader.vertexShader = WORLD_VARYING + '\n' + shader.vertexShader.replace(PROJECTION, PROJECTION + WORLD_VERTEX);
-    }
+    if (world) shader.vertexShader = injectWorldPosition(shader.vertexShader, 'vLightWorld');
     for (const slot of slots) Object.assign(shader.uniforms, slot.uniforms);
     const declarations = [world ? WORLD_VARYING : '', ...slots.map(slot => slot.declarations ?? '')].filter(Boolean).join('\n');
     shader.fragmentShader = shader.fragmentShader.replace(MAIN, `${declarations}\n${MAIN}`).replace(LIGHT_LOOP, lightLoop(slots));
@@ -67,7 +57,7 @@ function install(material) {
   state.key = function () {
     // Three's default key is the text of onBeforeCompile, which is now this hook: the material's own one is used instead.
     const base = state.previousKey === THREE.Material.prototype.customProgramCacheKey ? state.previousCompile.toString() : state.previousKey.call(this);
-    return state.slots.length ? `${base}|light-slots:${state.slots.map(slot => slot.key).join(',')}` : base;
+    return state.slots.length ? `${base}|light-slots:${shaderSignature(state.slots)}` : base;
   };
   material.onBeforeCompile = state.compile; material.customProgramCacheKey = state.key;
   states.set(material, state);
@@ -87,8 +77,9 @@ export function addLightSlot(material, slot) {
     const index = state.slots.indexOf(slot);
     if (index < 0) return;
     state.slots.splice(index, 1); material.needsUpdate = true;
-    if (state.slots.length || material.onBeforeCompile !== state.compile || material.customProgramCacheKey !== state.key) return;
-    material.onBeforeCompile = state.previousCompile; material.customProgramCacheKey = state.previousKey;
+    if (state.slots.length) return;
     states.delete(material);
+    if (material.onBeforeCompile === state.compile) material.onBeforeCompile = state.previousCompile;
+    if (material.customProgramCacheKey === state.key) material.customProgramCacheKey = state.previousKey;
   };
 }

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {FFT_SAMPLE_GLSL} from './fft.js';
 import {SIM_SAMPLE_GLSL} from './sim-window.js';
 import {createTargetScope} from './passes.js';
+import {WATER_IOR} from '../water-optics.js';
 import {sunCovers} from '../../core/lighting.js';
 
 // WebAquarium ocean/caustics.js. Each ocean owns the projected grid and map.
@@ -9,7 +10,6 @@ export const OCEAN_CAUSTIC_DEFAULTS = Object.freeze({
  on: true, resolution: 512, halfSize: 40, referenceDepth: 6,
  strength: 1, depthFade: .06, normalStrength: 1, gridSegments: 200,
 });
-const IOR = 1.333;
 export const OCEAN_CAUSTIC_GLSL = `
  #define COAST_CAUSTICS
  uniform sampler2D tCaustics;
@@ -70,8 +70,8 @@ export function createOceanCaustics(fft, sun, settings, wake, cover) {
     vec2 tilt = wave.tilt * surfAmbientWeight(surf.mask) - surf.slopeXZ;
     vec3 n = normalize(vec3(tilt.x * uNormalStrength, 1.0, tilt.y * uNormalStrength));
     ${wake ? 'float fade; vec4 ripple = sampleRipple(xz, fade); h += ripple.r; n = normalize(n + vec3(ripple.b, 0.0, ripple.a));' : ''}
-    vec3 flatRay = refract(-uLight, vec3(0, 1, 0), 1.0 / ${IOR});
-    vec3 ray = refract(-uLight, n, 1.0 / ${IOR});
+    vec3 flatRay = refract(-uLight, vec3(0, 1, 0), 1.0 / ${WATER_IOR});
+    vec3 ray = refract(-uLight, n, 1.0 / ${WATER_IOR});
     vOld = projectRay(vec3(xz.x, 0.0, xz.y), flatRay);
     vNew = projectRay(vec3(xz.x, h, xz.y), ray);
     vec2 mapXZ = vNew.xz + flatRay.xz * (uCausticDepth / flatRay.y);
@@ -99,7 +99,7 @@ export function createOceanCaustics(fft, sun, settings, wake, cover) {
    if (!active) return;
    uniforms.uCausticStrength.value = s.strength;
    uniforms.uCausticCenter.value.set(position.x, position.z);
-   const eta = 1 / IOR;
+   const eta = 1 / WATER_IOR;
    uniforms.uRefrLight.value.set(-direction.x * eta,
     -Math.sqrt(1 - eta * eta * (1 - direction.y ** 2)), -direction.z * eta);
    scope(() => {

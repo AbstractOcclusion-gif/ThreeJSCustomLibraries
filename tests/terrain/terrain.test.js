@@ -80,6 +80,15 @@ test('terrain material takes per-layer detail only with one slice per packed lay
  assert.equal(plain.defines.TERRAIN_LAYER_DETAIL, undefined);
  const detailed = createTerrainMaterial({}, {field, layerArray, layerDetailArray: array(TERRAIN_LAYERS.length), detailNormal});
  assert.equal(detailed.defines.TERRAIN_LAYER_DETAIL, 1);
+ const {vertexShader, fragmentShader} = THREE.ShaderLib.standard;
+ const shader = {uniforms: {}, vertexShader, fragmentShader};
+ detailed.onBeforeCompile(shader);
+ assert.match(shader.vertexShader, /vSurfaceWorld =/);
+ assert.match(shader.fragmentShader, /float runoffFilmCoverage/);
+ assert.match(shader.fragmentShader, /float standingWater = max\(puddle, runoffFilmCoverage/);
+ assert.match(shader.fragmentShader, /diffuseColor\.rgb = mix\(diffuseColor\.rgb, terrainSnowAlbedo/);
+ assert.doesNotMatch(shader.fragmentShader, /\/\* weather:|mix\(diffuseColor\.rgb, surfaceSnowColor/);
+ assert.equal(shader.uniforms.terrainHeights.value, field.heightMap);
  assert.throws(() => createTerrainMaterial({}, {field, layerArray, layerDetailArray: array(2), detailNormal}), /one slice per layer/);
  plain.dispose(); detailed.dispose(); field.dispose();
 });

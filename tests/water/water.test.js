@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {createWaveBank, waveCount, createRipples, createFlowBake, createChannel, createFoamTexture, createLaceTexture, createOceanSurface, proceduralSky, customSky} from '../../src/water/index.js';
+import {createWaveBank, waveCount, createRipples, createFlowBake, createChannel, createFoamTexture, createLaceTexture, createOceanSurface, createChannelSurface, CHANNEL_OBSTACLE_COUNT, proceduralSky, customSky} from '../../src/water/index.js';
 
 test('wave bank normalises to the requested significant height and caches by parameters', () => {
  const bank = createWaveBank();
@@ -66,6 +66,62 @@ test('generated foam and lace tiles are valid repeat textures', () => {
   assert.ok(texture.image.data.some(v => v > 0));
   texture.dispose();
  }
+});
+
+test('pond offscreen passes share material inputs and restore the host state after drawing or throwing', () => {
+ const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera();
+ const hostTarget = new THREE.WebGLRenderTarget();
+ const ripples = createRipples(), flow = createFlowBake();
+ const draws = [];
+ let target = hostTarget, scissorTest = true, fail = false;
+ const renderer = {
+  getDrawingBufferSize: size => size.set(801, 601),
+  getRenderTarget: () => target, setRenderTarget: value => { target = value; },
+  getActiveCubeFace: () => 0, getActiveMipmapLevel: () => 0,
+  getViewport: out => out.set(0, 0, 801, 601), setViewport() {},
+  getScissor: out => out.set(5, 10, 200, 100), setScissor() {},
+  getScissorTest: () => scissorTest, setScissorTest: value => { scissorTest = value; },
+  render(passScene) {
+   assert.equal(pond.surface.visible, false);
+   assert.equal(scissorTest, false);
+   draws.push({scene: passScene, target});
+   if (fail) throw Error('draw failed');
+  },
+ };
+ const sky = proceduralSky();
+ sky.uniforms.uSkySun.value.set(0, 1, 0);
+ const obstacles = Array.from({length: CHANNEL_OBSTACLE_COUNT}, () => new THREE.Vector4());
+ const pond = createChannelSurface({renderer, scene, camera, sky, ripples, flow, obstacles, pondOptics: true, bedCaustics: 'material'});
+ const bed = new THREE.MeshStandardMaterial(), originalCompile = bed.onBeforeCompile;
+ pond.lighting.bindBedMaterial(bed);
+ assert.notEqual(bed.onBeforeCompile, originalCompile);
+ try {
+  assert.ok(pond.material.fragmentShader.includes(`uniform vec4 rocks[${CHANNEL_OBSTACLE_COUNT}];`));
+  pond.render(0, {caustics: 1, godRays: 1});
+  assert.equal(draws.length, 3);
+  assert.equal(draws[0].target.texture, pond.lighting.uniforms.causticMap.value);
+  assert.equal(draws[1].scene, scene);
+  assert.equal(draws[1].target.depthTexture, pond.depthTexture);
+  const shafts = draws[2].scene.children[0].material;
+  assert.equal(shafts.fragmentShader, pond.material.fragmentShader);
+  assert.equal(shafts.uniforms, pond.uniforms);
+  assert.equal(draws[2].target.width, 400);
+  assert.equal(pond.uniforms.pondGodHalf.value, true);
+  assert.equal(target, hostTarget);
+  assert.equal(scissorTest, true);
+  fail = true;
+  assert.throws(() => pond.render(1, {caustics: 1}), /draw failed/);
+  assert.equal(pond.surface.visible, true);
+  assert.equal(target, hostTarget);
+  assert.equal(scissorTest, true);
+ } finally {
+  pond.dispose();
+  ripples.dispose();
+  flow.dispose();
+  bed.dispose();
+  hostTarget.dispose();
+ }
+ assert.equal(bed.onBeforeCompile, originalCompile);
 });
 
 test('ocean surface builds on the procedural sky, applies presets and rejects an incomplete custom sky', () => {

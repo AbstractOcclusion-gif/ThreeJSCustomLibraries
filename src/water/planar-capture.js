@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import {Reflector} from 'three/addons/objects/Reflector.js';
-import {createTargetScope} from './ocean/passes.js';
+import {createRenderScope} from '../core/render-state.js';
 
 // Shared adaptation of WebAquarium's pond-reflection and ocean-reflections passes.
 export function createPlanarCapture(renderer) {
  const matrix = new THREE.Matrix4(), inverse = new THREE.Matrix4(), capturedFrom = new THREE.Matrix4();
- const scoped = createTargetScope(renderer);
+ const scoped = createRenderScope(renderer);
  let reflector, lastCapture = -Infinity, lastHeight, lastBelow, stale = true;
  return {
   matrix,

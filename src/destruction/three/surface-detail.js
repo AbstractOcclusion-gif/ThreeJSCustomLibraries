@@ -1,8 +1,14 @@
 import * as T from 'three';
-import {STRUCTURE_ATLAS} from '../material-profiles.js';
-import {structureMaterial} from '../material-profiles.js';
+import {STRUCTURE_ATLAS, structureMaterial} from '../material-profiles.js';
 import {prepareStructureAtlas} from './atlas.js';
-export const SURFACE_REPEAT_METRES={0:.5,1:.5,2:.5,3:.3,5:.3,6:.5,7:.5,8:.5,11:.5};
+const DEFAULT_REPEAT_METRES = .5, MASONRY_REPEAT_METRES = .3, END_GRAIN_REPEAT_METRES = .25;
+const WOOD_ROW = structureMaterial('oak').atlas.row, STEEL_ROW = structureMaterial('steel').atlas.row;
+const SURFACE_REPEAT_BY_MATERIAL = {
+ stone_rubble: DEFAULT_REPEAT_METRES, stone_dressed: DEFAULT_REPEAT_METRES, oak: DEFAULT_REPEAT_METRES, clay_tile: MASONRY_REPEAT_METRES,
+ brick: MASONRY_REPEAT_METRES, concrete_block: DEFAULT_REPEAT_METRES, rc: DEFAULT_REPEAT_METRES, render: DEFAULT_REPEAT_METRES, steel: DEFAULT_REPEAT_METRES,
+};
+export const SURFACE_REPEAT_METRES = Object.fromEntries(Object.entries(SURFACE_REPEAT_BY_MATERIAL)
+ .map(([id, repeat]) => [structureMaterial(id).atlas.row, repeat]));
 
 // A second coordinate set stays in authored metres when views re-centre,
 // instance or batch the geometry. Existing UVs still own material/cut identity.
@@ -13,8 +19,8 @@ export function prepareSurfaceCoordinates(geometry,assetMatrix,{grainAxis=[1,0,0
  for(let i=0;i<positions.count;i++){
   point.fromBufferAttribute(positions,i).applyMatrix4(assetMatrix);normal.fromBufferAttribute(normals,i).applyNormalMatrix(normalMatrix);
   const n=normal.toArray().map(Math.abs),axis=n.indexOf(Math.max(...n)),axes=[0,1,2].filter(k=>k!==axis),p=point.toArray();
-  const row=Math.floor((1-uv.getY(i))*STRUCTURE_ATLAS.rows),end=row===2&&axis===grain,repeats=end?4:1/(SURFACE_REPEAT_METRES[row]??.5);
-  if(row===2&&!end&&axes[1]!==grain)axes.reverse();
+  const row=Math.floor((1-uv.getY(i))*STRUCTURE_ATLAS.rows),end=row===WOOD_ROW&&axis===grain,repeats=1/(end?END_GRAIN_REPEAT_METRES:SURFACE_REPEAT_METRES[row]??DEFAULT_REPEAT_METRES);
+  if(row===WOOD_ROW&&!end&&axes[1]!==grain)axes.reverse();
   values[i*3]=p[axes[0]]*repeats;values[i*3+1]=p[axes[1]]*repeats;values[i*3+2]=end?1:0;
  }
  geometry.setAttribute('structureDetail',new T.BufferAttribute(values,3));
@@ -41,9 +47,9 @@ export function bindSurfaceDetail(material,atlases){
    vec3 surfaceP=position*vec3(length(instanceMatrix[0].xyz),length(instanceMatrix[1].xyz),length(instanceMatrix[2].xyz));
    vec3 surfaceN=abs(objectNormal);bool axisX=surfaceN.x>surfaceN.y&&surfaceN.x>surfaceN.z;
    vec2 surfaceUV=axisX?surfaceP.yz:(surfaceN.y>surfaceN.z?surfaceP.xz:surfaceP.xy);
-   bool wood=abs(instanceAtlasRow-2.)<.1;
+   bool wood=abs(instanceAtlasRow-${WOOD_ROW}.)<.1;
    if(wood&&!axisX)surfaceUV=surfaceN.y>surfaceN.z?surfaceP.zx:surfaceP.yx;
-   vStructureDetail=vec3(surfaceUV*(wood&&axisX?4.:2.),wood&&axisX?1.:0.);
+   vStructureDetail=vec3(surfaceUV*(wood&&axisX?${(1/END_GRAIN_REPEAT_METRES).toFixed(1)}:${(1/DEFAULT_REPEAT_METRES).toFixed(1)}),wood&&axisX?1.:0.);
   `:'vStructureDetail=structureDetail;'));
   shader.fragmentShader=(generated?'varying float vStructureRow;\n':'')+'varying vec3 vStructureDetail;\n'+shader.fragmentShader;
   shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
@@ -53,7 +59,7 @@ export function bindSurfaceDetail(material,atlases){
    vec2 structureUv=vMapUv,structureTangentUv=vMapUv;
    vec2 structureDx=dFdx(vMapUv),structureDy=dFdy(vMapUv);
    if(detailed){
-    if(abs(structureTile.y-2.)<.1)structureTile.x=step(.5,vStructureDetail.z);
+    if(abs(structureTile.y-${WOOD_ROW}.)<.1)structureTile.x=step(.5,vStructureDetail.z);
     vec2 localUv=fract(vStructureDetail.xy)*${span}+${inset};
     structureUv=vec2((structureTile.x+localUv.x)/${columns}.,1.-(structureTile.y+localUv.y)/${rows}.);
     structureTangentUv=vStructureDetail.xy;
@@ -63,7 +69,7 @@ export function bindSurfaceDetail(material,atlases){
    diffuseColor*=textureGrad(map,structureUv,structureDx,structureDy);
   `);
   shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`float roughnessFactor=roughness*textureGrad(normalMap,structureUv,structureDx,structureDy).a;`);
-  shader.fragmentShader=shader.fragmentShader.replace('#include <metalnessmap_fragment>','float metalnessFactor=abs(structureTile.y-11.)<.1?.9:metalness;');
+  shader.fragmentShader=shader.fragmentShader.replace('#include <metalnessmap_fragment>',`float metalnessFactor=abs(structureTile.y-${STEEL_ROW}.)<.1?.9:metalness;`);
   shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_begin>',T.ShaderChunk.normal_fragment_begin.replace('vNormalMapUv','structureTangentUv'));
   shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',T.ShaderChunk.normal_fragment_maps.replace('texture2D( normalMap, vNormalMapUv )','textureGrad( normalMap, structureUv, structureDx, structureDy )'));
  }

@@ -54,8 +54,11 @@ export function sunCovers(sun) {
 const sunGLSL = covers => covers.map(cover => cover.glsl).join('\n') + `
 vec3 lightSunVisibility(vec3 worldPosition, vec3 n) { return ${covers.map(cover => `(${cover.read})`).join(' * ')}; }`;
 
+export const AMBIENT_LIGHT_UNIFORMS = /* glsl */`
+uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uHemiSky; uniform vec3 uHemiGround;`;
+
 export const lightingGLSL = (ambient = LIGHT_AMBIENT_GLSL, lights = LIGHT_LOCAL_GLSL, sun = LIGHT_SUN_GLSL) => /* glsl */`
-uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uHemiSky; uniform vec3 uHemiGround;
+${AMBIENT_LIGHT_UNIFORMS}
 uniform vec3 uFogColor; uniform vec2 uFogRange;
 const float LIGHT_RECIPROCAL_PI = 0.3183098861837907;   // Lambert: a white surface returns irradiance / pi, as Three's BRDF
 ${ambient}

@@ -8,7 +8,7 @@ import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js
 import {createEnvironment, setEnvironmentWind} from '../../src/core/index.js';
 import {environmentControls} from '../kit/controls.js';
 import '../bench.css';
-import {aimRay} from '../kit/input.js';
+import {aimRay, bindSceneTap} from '../kit/input.js';
 
 // Burning wood glows: emissive colour x (flame intensity x burning + smoulder x smouldering). Charred trim is trimShade of the plank.
 const WOOD_GLOW = Object.freeze({color: [1, .22, .03], burning: .55, smouldering: .35}), TRIM_SHADE = .75;
@@ -90,18 +90,13 @@ function applyWind() {
 environmentControls(gui, {state: wind, apply: applyWind});
 
 const ray = new T.Raycaster();
-let down;
-renderer.domElement.addEventListener('pointerdown', e => { if (e.button === 0) down = [e.clientX, e.clientY]; });
-renderer.domElement.addEventListener('pointercancel', () => { down = null; });
-renderer.domElement.addEventListener('pointerup', e => {
-  const start = down;
-  down = null;
-  if (!start || Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 5) return;
+const PICK_DISTANCE = 5;
+bindSceneTap(renderer.domElement, e => {
   aimRay(ray, e, renderer.domElement, camera);
   const hit = ray.intersectObjects(pickables, false)[0];
   if (hit) crates[hit.object.userData.crate].fire.ignite();
-});
-bindResize(renderer, camera);
+}, {distance: PICK_DISTANCE});
+const unbindResize = bindResize(renderer, camera);
 let lastStatus = '';
 startFrameLoop(renderer, (dt, now) => {
   system.update(dt);
@@ -127,6 +122,7 @@ document.body.dataset.ready = 'true';
 window.fireBench = {system, crates, flameLook, environment, scene, camera, renderer};
 
 onLeave(() => {
+  unbindResize();
   renderer.setAnimationLoop(null);
   for (const {fx, plank, trim} of crates) { fx.dispose(); plank.dispose(); trim.dispose(); }
   for (const resource of [cube, ground.geometry, ground.material]) resource.dispose();

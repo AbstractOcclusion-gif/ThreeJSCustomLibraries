@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {createTargetScope} from './ocean/passes.js';
+import {createRenderScope} from '../core/render-state.js';
 
 // WebAquarium rendering/shadow.js and shaders/common.js: rasterize the highest
 // occluder along refracted sunlight, then jitter the lookup along each view ray.
@@ -23,7 +23,7 @@ export function createPondShadow(renderer, casters, resolution = 512) {
  const target = new THREE.WebGLRenderTarget(resolution, resolution, {
   type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
  });
- const scope = createTargetScope(renderer), scene = new THREE.Scene(), camera = new THREE.OrthographicCamera();
+ const scope = createRenderScope(renderer), scene = new THREE.Scene(), camera = new THREE.OrthographicCamera();
  scene.background = new THREE.Color(0);
  const material = new THREE.ShaderMaterial({side: THREE.DoubleSide,
   vertexShader: `varying float vY; void main() {

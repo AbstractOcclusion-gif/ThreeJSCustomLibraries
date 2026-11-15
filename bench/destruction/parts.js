@@ -1,7 +1,7 @@
 import {onLeave, startFrameLoop} from '../kit/page-lifecycle.js';
 import {createFixedStep} from '../../src/core/fixed-step.js';
 import {setupMobileControls} from './mobile-controls.js';
-import {bindSceneTap} from './scene-tap.js';
+import {bindSceneTap} from '../kit/input.js';
 import {createBrowserPerformance} from './browser-performance.js';
 import * as T from 'three';
 import * as C from 'cannon-es';

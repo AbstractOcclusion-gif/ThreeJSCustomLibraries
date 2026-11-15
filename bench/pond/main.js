@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
 import {createImpactSplash, createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
-import {createRipples, createFoamLayer, createFlowBake, createChannelSurface, createFoamTexture, createFreezeTexture, createIceLook, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
+import {createRipples, createFoamLayer, createFlowBake, createChannelSurface, CHANNEL_OBSTACLE_COUNT, createFoamTexture, createFreezeTexture, createIceLook, createWaterFreeze, createWaterlineComposite, proceduralSky} from '../../src/water/index.js';
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
@@ -45,7 +45,7 @@ const foamLayer = createFoamLayer({origin: [-15, -13], size: [200, 176], cell: .
 // A splash leaves foam radius x its own radius wide, amount x its strength thick.
 const SPLASH_FOAM = Object.freeze({radius: 1.5, amount: 1.1});
 const flow = createFlowBake();
-const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
+const obstacles = Array.from({length: CHANNEL_OBSTACLE_COUNT}, () => new THREE.Vector4());
 const lightOccluders = [];
 const freeze = createWaterFreeze(), freezeMap = createFreezeTexture(), iceLook = createIceLook();
 const water = createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow,

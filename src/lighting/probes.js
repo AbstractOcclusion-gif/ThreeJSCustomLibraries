@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import {createSkyVisibility} from '../core/sky-visibility.js';
 import {addLightSlot} from '../core/light-slots.js';
+import {AMBIENT_LIGHT_UNIFORMS} from '../core/lighting.js';
 
 export const LIGHT_PROBE_DEFAULTS = Object.freeze({
   columns: 32,      // probe columns per side of the grid
@@ -157,8 +158,12 @@ export function createLightProbes({ground, sky, ...overrides} = {}) {
     applyTo(material, lighting) {
       if (!material?.isMaterial || typeof material.onBeforeCompile !== 'function') throw new TypeError('Light probes apply to a Three material');
       if (lighting?.uniforms?.uProbeVolume !== uniforms.uProbeVolume) throw Error('Light probes need the lighting hook built with their ambient');
+      const {uSunDir, uSunColor, uHemiSky, uHemiGround} = lighting.uniforms;
       addLightSlot(material, {
-        key: 'light-probes', uniforms: lighting.uniforms, worldPosition: true, declarations: lighting.glsl,
+        key: 'light-probes',
+        uniforms: {...uniforms, uSunDir, uSunColor, uHemiSky, uHemiGround},
+        worldPosition: true,
+        declarations: AMBIENT_LIGHT_UNIFORMS + LIGHT_PROBE_GLSL,
         // The hemisphere light Three just added gives way to the ambient of the probes.
         after: /* glsl */`
           vec3 probeNormal = inverseTransformDirection(geometryNormal, viewMatrix);

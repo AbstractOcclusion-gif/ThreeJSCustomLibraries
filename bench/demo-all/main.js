@@ -5,16 +5,16 @@ import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERR
 import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
 import {seededRandom} from '../../src/core/hash.js';
 import {valueNoise} from '../../src/core/value-noise.js';
-import {createDataTexture} from '../../src/core/data-texture.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createImpactSplash, createParticleDepthBinding, createWaterSpray} from '../../src/particles/water/index.js';
-import {createChannelSurface, createFlowBake, createFoamLayer, createFreezeTexture, createIceLook, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
+import {createChannelSurface, CHANNEL_OBSTACLE_COUNT, createFlowBake, createFoamLayer, createFreezeTexture, createIceLook, createRipples, createWaterFreeze, createWaterlineComposite, skyFromWeather} from '../../src/water/index.js';
 import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createBenchPondSettings, inlandWaterControls} from '../water/controls.js';
 import {createTerrainImpacts} from './impacts.js';
 import {createTerrainIce} from './ice.js';
-import {loadTerrainTextures, packTerrainLayers} from '../terrain/textures.js';
+import {mountPerformanceControls} from './performance.js';
+import {loadDemoTerrainTextures} from './terrain-textures.js';
 import {grassCoverageAt, grassDensityControls, shorelineControls, terrainControls} from '../terrain/controls.js';
 import {createLighting} from '../../src/core/lighting.js';
 import {createLightRig, createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
@@ -57,51 +57,8 @@ const lightSettings = {volumetric: true};
 // Every lit Three material on a mesh that receives shadows takes the cascades (as Three's own shadow map did).
 const shadowReceivers = createShadowReceivers(scene, sunShadows, weather.view, lightRig);
 
-// Free repeatable diagnostic swatches. Alpha is micro-height, never transparency.
-const textureSize = 96;
-const noise = valueNoise(19);
-function periodicNoise(u, v, frequency) {
- u -= Math.floor(u);
- v -= Math.floor(v);
- const x = u * frequency, y = v * frequency;
- const blendX = THREE.MathUtils.smoothstep(u, 0, 1), blendY = THREE.MathUtils.smoothstep(v, 0, 1);
- return THREE.MathUtils.lerp(
-  THREE.MathUtils.lerp(noise(x, y), noise(x - frequency, y), blendX),
-  THREE.MathUtils.lerp(noise(x, y - frequency), noise(x - frequency, y - frequency), blendX), blendY,
- );
-}
-function relief(u, v) {
- return .5 + .23 * periodicNoise(u, v, 5) + .15 * periodicNoise(u + .23, v + .41, 13) + .09 * periodicNoise(u, v, 29);
-}
-function tile(pixel, colorSpace = THREE.NoColorSpace) {
- const data = new Uint8Array(textureSize * textureSize * 4);
- for (let y = 0; y < textureSize; y++) for (let x = 0; x < textureSize; x++) {
-  data.set(pixel(x / textureSize, y / textureSize), (y * textureSize + x) * 4);
- }
- return createDataTexture(data, textureSize, textureSize, {wrap: THREE.RepeatWrapping, filter: 'mipmap', colorSpace});
-}
-const layerColors = {grass: [99, 108, 62], rock: [118, 110, 100], snow: [204, 216, 219], mud: [108, 83, 62], forest: [64, 52, 39]};
-let layerArray, rockTexture, detail, proceduralLayers = [];
-try {
- ({layerArray, rock: rockTexture, detail} = await loadTerrainTextures(renderer));
-} catch (error) {
- console.warn('Terrain photo maps unavailable. Using procedural textures.', error);
- const layers = Object.fromEntries(Object.entries(layerColors).map(([name, rgb], index) => [name, tile((u, v) => {
-  const h = relief(u + index * .17, v);
-  const grain = periodicNoise(u + index * .31, v, 33);
-  const strata = name === 'rock' ? .045 * Math.sin(2 * Math.PI * (v * 7 + .65 * periodicNoise(u, v, 3))) : 0;
-  const variation = .73 + h * .5 + .14 * grain + strata;
-  return [...rgb.map(channel => channel * variation), h * 255];
- }, THREE.SRGBColorSpace)]));
- proceduralLayers = Object.values(layers);
- layerArray = packTerrainLayers(layers);
- rockTexture = layers.rock;
- detail = tile((u, v) => {
-  const step = 1 / textureSize;
-  const n = new THREE.Vector3(relief(u - step, v) - relief(u + step, v), relief(u, v - step) - relief(u, v + step), .5).normalize();
-  return [(n.x * .5 + .5) * 255, (n.y * .5 + .5) * 255, (n.z * .5 + .5) * 255, 255];
- });
-}
+const terrainTextures = await loadDemoTerrainTextures(renderer);
+const {layerArray, rockTexture, detail} = terrainTextures;
 
 const resolution = 129, span = 66, half = span / 2;
 const heights = Float32Array.from({length: resolution * resolution}, (_, i) => {
@@ -156,7 +113,7 @@ const ripples = createRipples({origin: [-24, -16], size: [96, 96], cell: .4});
 const flow = createFlowBake();
 // Foam left by splashes, on a finer grid over the pond's ripple area; it drifts with the baked flow.
 const foamLayer = createFoamLayer({origin: [-24, -16], size: [192, 192], cell: .2, flow});
-const obstacles = Array.from({length: 4}, () => new THREE.Vector4());
+const obstacles = Array.from({length: CHANNEL_OBSTACLE_COUNT}, () => new THREE.Vector4());
 const freeze = createWaterFreeze(), freezeMap = createFreezeTexture(), icePattern = createIceLook();
 const ice = createTerrainIce(field, freezeMap, scene, icePattern);
 // The pond shares the weather capture and uses a procedural moon to fit the WebGL2 minimum of 16 fragment samplers.
@@ -384,47 +341,12 @@ lightControls.add(lightSettings, 'volumetric').name('Volumetric light');
 lightControls.add(volumetric.settings, 'density', 0, .02, .0005).name('Air density · 1/m');
 lightControls.add(volumetric.settings, 'sun', 0, 6, .1).name('Sun in the air');
 lightControls.add(volumetric.settings, 'anisotropy', 0, .9, .01).name('Forward scatter');
-const profiling = gui.addFolder('Performance');
-const performanceSettings = {skyInterval: 1.25, pixelRatio: renderer.getPixelRatio(), cloudShadows: true};
-profiling.add(performanceSettings, 'skyInterval', [.35, 1.25, 8]).name('Sky refresh · s').onChange(value => weather.view.configure({sky: {captureInterval: value}}));
-profiling.add(performanceSettings, 'pixelRatio', [.75, 1, 1.25]).name('Render pixel ratio').onChange(value => renderer.setPixelRatio(value));
-profiling.add(performanceSettings, 'cloudShadows').name('Cloud shadows').onChange(enabled => weather.view.configure({appearance: {cloudShadowStrength: enabled ? 1 : 0}}));
-const benchmarkResult = document.getElementById('benchmark-result');
-let benchmark;
-profiling.add({run() {
- benchmark = {start: undefined, frames: [], ratio: renderer.getPixelRatio()};
- benchmarkResult.hidden = false;
- benchmarkResult.textContent = 'Measuring the current view for 5 seconds…';
-}}, 'run').name('Run 5-second benchmark');
-profiling.close();
-
-// Frame-rate readout every FPS_WINDOW_MS; the benchmark records BENCHMARK_MS of frames and reports the average and the 95th percentile.
-const FPS_WINDOW_MS = 1000, BENCHMARK_MS = 5000, BENCHMARK_PERCENTILE = .95;
 const unbindResize = bindResize(renderer, camera);
-const frameRate = document.getElementById('frame-rate');
-let previousNow, measuredSince, frames = 0;   // previousNow: raw frame time for the benchmark
+const updatePerformance = mountPerformanceControls(gui, {renderer, weather, frameRate: document.getElementById("frame-rate"),
+ benchmarkResult: document.getElementById("benchmark-result")});
 let receiverScan = RECEIVER_SCAN_SECONDS;
 startFrameLoop(renderer, (dt, now) => {
- measuredSince ??= now;
- if (now - measuredSince >= FPS_WINDOW_MS) {
-  const frameTime = (now - measuredSince) / frames;
-  frameRate.textContent = `${Math.round(1000 / frameTime)} fps · ${frameTime.toFixed(1)} ms/frame`;
-  measuredSince = now;
-  frames = 0;
- }
- frames++;
- if (benchmark) {
-  if (benchmark.start === undefined) benchmark.start = now;
-  else if (previousNow !== undefined) benchmark.frames.push(now - previousNow);
-  if (now - benchmark.start >= BENCHMARK_MS) {
-   const sorted = benchmark.frames.sort((a, b) => a - b);
-   const p95 = sorted[Math.ceil(sorted.length * BENCHMARK_PERCENTILE) - 1];
-   const fps = sorted.length * 1000 / (now - benchmark.start);
-   benchmarkResult.textContent = `${fps.toFixed(1)} fps average · ${p95.toFixed(1)} ms p95 · ${benchmark.ratio} pixel ratio`;
-   benchmark = undefined;
-  }
- }
- previousNow = now;
+ updatePerformance(now);
  if (diving) { /* the dive view places the camera below */ }
  else if (!shots.update(dt)) controls.update();
  weather.system.update(dt);
@@ -539,6 +461,7 @@ onLeave(() => {
  meadow.grassGeometries.forEach(geometry => geometry.dispose());
  meadow.dispose();
  tracks.dispose();
- for (const resource of [...proceduralLayers, detail, groundMaterial, rockMaterial, plainRock, rockGeometry]) resource.dispose();
+ terrainTextures.dispose();
+ for (const resource of [groundMaterial, rockMaterial, plainRock, rockGeometry]) resource.dispose();
  renderer.dispose();
 });

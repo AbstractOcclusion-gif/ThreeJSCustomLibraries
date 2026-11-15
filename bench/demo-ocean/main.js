@@ -16,15 +16,13 @@ import {createFixedStep} from '../../src/core/fixed-step.js';
 import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS, onLeave} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {loadOceanLace} from '../kit/assets.js';
-import {bindRippleGesture} from '../ripple-gesture.js';
+import {bindOceanRipples} from '../ocean/ripples.js';
 import {oceanDemoControls} from './controls.js';
 import {sprayControls} from '../particles/controls.js';
 import '../bench.css';
-import {aimRay} from '../kit/input.js';
 
 const $ = id => document.getElementById(id);
 const CRUISE_THROTTLE = .75, FOCUS_HEIGHT = .2;   // stick share while cruising; m above sea level the camera follows
-const DRAG_RIPPLE = Object.freeze({radius: 3.2, strength: .65, spacing: 1.5});   // m, share of the gesture strength, m
 const renderer = benchRenderer();
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(53, innerWidth / innerHeight, .15, 9500);
 camera.position.set(18, 6.5, -108);
@@ -133,16 +131,8 @@ function stepBoat(dt) {
  if (boatSettings.follow && !view.waterline) { camera.position.add(boatDelta); controls.target.add(boatDelta); }
 }
 const float = createOceanFloat(scene, ocean, spray.emitSplash);
-const ray = new THREE.Raycaster(), impact = new THREE.Vector3();
-const meanSea = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const rippleGesture = bindRippleGesture(renderer.domElement, controls, event => {
-  if (view.waterline) return;
-  aimRay(ray, event, renderer.domElement, camera);
-  if (!ray.ray.intersectPlane(meanSea, impact)) return;
-  const {center, halfSize} = ocean.wake;
-  if (Math.abs(impact.x - center.x) >= halfSize || Math.abs(impact.z - center.y) >= halfSize) return;
-  if ((coast.collisionHeightAt(impact.x, impact.z) ?? -1) < 0) return impact;
-}, ({x, z}, strength) => ocean.wake.addDrop(x, z, DRAG_RIPPLE.radius, DRAG_RIPPLE.strength * strength), {spacing: DRAG_RIPPLE.spacing});
+const rippleGesture = bindOceanRipples({canvas: renderer.domElement, controls, camera, view, wake: ocean.wake,
+  isWet: (x, z) => (coast.collisionHeightAt(x, z) ?? -1) < 0});
 
 const gui = createBenchPanel('Ocean coast demo');
 const islandActions = gui.addFolder('Island');

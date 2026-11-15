@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import {injectWorldPosition} from '../core/shader-world-position.js';
+import {weatherStage} from './weather-stages.js';
 import {RAIN_IMPACT_GLSL} from '../core/rain-impact.js';
 import {NOISE_GLSL} from '../core/lighting.js';
 export {createTrackMask} from '../core/track-mask.js';
@@ -126,16 +128,7 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
  };
  material.onBeforeCompile = shader => {
   Object.assign(shader.uniforms, uniforms);
-  shader.vertexShader = 'varying vec3 vSurfaceWorld;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
-   vec4 surfacePosition = vec4(transformed, 1.0);
-   #ifdef USE_BATCHING
-    surfacePosition = batchingMatrix * surfacePosition;
-   #endif
-   #ifdef USE_INSTANCING
-    surfacePosition = instanceMatrix * surfacePosition;
-   #endif
-   vSurfaceWorld = (modelMatrix * surfacePosition).xyz;
-  `);
+  shader.vertexShader = injectWorldPosition(shader.vertexShader, 'vSurfaceWorld');
   const map = THREE.ShaderChunk.map_fragment.replace('diffuseColor *= sampledDiffuseColor;', `
    #ifndef DECODE_VIDEO_TEXTURE
     if (surfaceAntiTile > 0.0) sampledDiffuseColor.rgb = mix(sampledDiffuseColor.rgb, surfaceUntile(vMapUv), surfaceAntiTile);
@@ -149,14 +142,14 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     vec3 surfaceGeometricNormal = normal;
    `)
    .replace('#include <lights_physical_fragment>', `
-    float up = inverseTransformDirection(surfaceGeometricNormal, viewMatrix).y;
+    ${weatherStage('ground')}
     float snowCoverage = 0.0;
     if (surfaceWeather.y > 0.0) {
      float cover = valueNoise(vSurfaceWorld * .28) * .7 + valueNoise(vSurfaceWorld * 1.8) * .3;
      snowCoverage = smoothstep(.25, .78, up) * smoothstep(0.0, .18, surfaceWeather.y * 1.22 - cover);
     }
     float track = surfaceTrack(vSurfaceWorld) * smoothstep(.35, .8, up);
-    snowCoverage *= 1.0 - track * .92;
+    ${weatherStage('snowTracks')}
     float wet = surfaceWeather.x * (1.0 - snowCoverage);
     diffuseColor.rgb *= (1.0 - surfaceWetDarkening * wet) * (1.0 - track * min(1.0, surfaceTrackContrast + .18 * wet));
     float filmRoughnessScale = surfaceWetRoughness;
@@ -165,18 +158,18 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     filmRoughnessScale = mix(surfaceWetRoughness, rainyGroundRoughnessScale, surfaceRainAmount);
     #endif
     roughnessFactor = mix(roughnessFactor, max(.12, roughnessFactor * filmRoughnessScale), wet);
-    float runoffSlope = 1.0 - smoothstep(.35, .88, abs(up));
-    if (surfaceRunoff > 0.0 && wet > .1 && runoffSlope > 0.0) {
-     float streak = surfaceRainStreaks(vSurfaceWorld) * surfaceRunoff * runoffSlope * smoothstep(.1, .72, wet);
-     diffuseColor.rgb *= 1.0 - .42 * streak;
+    ${weatherStage('runoffSlope')}
+    ${weatherStage('runoffCondition')}
+     ${weatherStage('runoffStreak')}
+     ${weatherStage('runoffDarkening')}
      roughnessFactor = mix(roughnessFactor, .085, streak);
     }
     float puddle = 0.0;
-    if (wet > .45 && surfacePuddles > 0.0) {
+    ${weatherStage('puddleCondition')}
      vec3 basinPosition = vec3(vSurfaceWorld.xz * .34, 0.0);
      float basin = valueNoise(basinPosition) * .85 + valueNoise(basinPosition * 3.2) * .15;
      puddle = surfacePuddles * smoothstep(.94, .995, up) * smoothstep(.45, .92, wet) * (1.0 - smoothstep(.24, .38, basin));
-     diffuseColor.rgb *= 1.0 - surfacePuddleDarkening * puddle;
+     ${weatherStage('puddleDarkening')}
      roughnessFactor = mix(roughnessFactor, .055, puddle);
      normal = normalize(mix(normal, transformDirection(vec3(0, 1, 0), viewMatrix), puddle * .75));
     }
@@ -187,15 +180,15 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
      vec3 impacts = rainImpacts(vSurfaceWorld.xz, surfaceTime, surfaceRainAmount, length(fwidth(vSurfaceWorld.xz)),
        surfaceRippleSize, surfaceRippleRate);
      // Rings need standing water. On ground that is only wet a drop leaves a brief splash.
-     float standingWater = puddle;
+     ${weatherStage('standingWater')}
      vec3 ringTilt = (viewMatrix * vec4(impacts.x, 0.0, impacts.y, 0.0)).xyz;
      normal = normalize(normal - ringTilt * standingWater * ringRelief * surfaceRippleStrength);
      float splash = impacts.z * wet * (1.0 - standingWater) * smoothstep(.3, .8, up);
      roughnessFactor = mix(roughnessFactor, min(roughnessFactor, splashRoughness), splash);
     }
     #endif
-    diffuseColor.rgb = mix(diffuseColor.rgb, surfaceSnowColor, snowCoverage);
-    roughnessFactor = mix(roughnessFactor, .83, snowCoverage);
+    ${weatherStage('snowColor')}
+    ${weatherStage('snowRoughness')}
     metalnessFactor *= 1.0 - snowCoverage;
     #include <lights_physical_fragment>
    `);

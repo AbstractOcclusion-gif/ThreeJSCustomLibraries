@@ -7,7 +7,7 @@ import {benchRenderer, bindResize, startFrameLoop, onLeave} from '../kit/page.js
 import {createDemolition} from './physics.js';
 import {createFixedStep} from '../../src/core/fixed-step.js';
 import '../bench.css';
-import {aimRay} from '../kit/input.js';
+import {aimRay, bindSceneTap} from '../kit/input.js';
 
 const renderer = benchRenderer();
 renderer.shadowMap.enabled = true;
@@ -86,19 +86,14 @@ destructionControls(gui, state);
 rebuild();
 
 const raycaster = new T.Raycaster();
-let down;
-renderer.domElement.addEventListener('pointerdown', e => { if (e.button === 0) down = [e.clientX, e.clientY]; });
-renderer.domElement.addEventListener('pointercancel', () => { down = null; });
-renderer.domElement.addEventListener('pointerup', e => {
-  const start = down;
-  down = null;
-  if (!start || Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 5) return;
+const PICK_DISTANCE = 5;
+bindSceneTap(renderer.domElement, e => {
   aimRay(raycaster, e, renderer.domElement, camera);
   const hit = raycaster.intersectObjects(view.members.filter(mesh => mesh.visible), true)[0];
   if (hit) targetId = hit.object.parent.userData.id;
-});
+}, {distance: PICK_DISTANCE});
 
-bindResize(renderer, camera);
+const unbindResize = bindResize(renderer, camera);
 startFrameLoop(renderer, dt => {
   clock.advance(dt * (state.slowMotion ? SLOW_MOTION_SCALE : 1), step => run.step(step));
   const target = view.members[targetId];
@@ -111,6 +106,7 @@ startFrameLoop(renderer, dt => {
   renderer.render(scene, camera);
 });
 onLeave(() => {
+  unbindResize();
   renderer.setAnimationLoop(null);
   view.dispose();
   run.dispose();
