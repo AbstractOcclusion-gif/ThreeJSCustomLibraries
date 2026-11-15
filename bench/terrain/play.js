@@ -111,12 +111,17 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     update(dt) {
       area?.impacts.update(dt);
       for (const shot of airborne) {
-        if (shot.contact) continue;
         const {mesh, velocity} = shot;
         const x = mesh.position.x + velocity[0] * dt, z = mesh.position.z + velocity[1] * dt;
+        const floor = shot.ground(x, z) + shot.radius;
+        if (shot.contact) {
+          const previous = shot.path.at(-1);
+          if (!previous || Math.hypot(x - previous.x, z - previous.z) >= .24) shot.path.push({x, z});
+          mesh.position.set(x, floor, z);
+          continue;
+        }
         shot.verticalSpeed -= 9.82 * dt;
         const y = mesh.position.y + shot.verticalSpeed * dt;
-        const floor = shot.ground(x, z) + shot.radius;
         mesh.position.set(x, Math.max(y, floor), z);
         shot.contact = y <= floor;
       }
@@ -148,22 +153,28 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
       mesh.scale.setScalar(scale);
       mesh.castShadow = true;
       scene.add(mesh);
-      shot = {mesh, velocity, radius, ground: floor, verticalSpeed: 0, contact: false};
+      shot = {mesh, velocity, radius, ground: floor, verticalSpeed: 0, contact: false, path: []};
       airborne.add(shot);
     }
     const launch = laid => {
       if (!laid) return;
-      if (laid.ready) return laid.ready.then(() => spawn(laid));
+      if (laid.ready && !shot) return laid.ready.then(() => spawn(laid));
       spawn(laid);
     };
     const spawn = laid => {
       if (area !== laid) return;
       if (shot && !airborne.delete(shot)) return;
-      laid.reveal();
+      if (laid.ready) laid.ready.then(laid.reveal, () => {});
+      else laid.reveal();
       shot?.mesh.removeFromParent();
       const position = shot ? shot.mesh.position : {x, z};
-      laid.impacts.launch('sphere', snow ? 'snow' : 'mud', undefined, {position: [position.x, position.z], velocity, scale,
-        height: shot && Math.max(position.y, laid.field.heightAt(position.x, position.z) + radius), verticalSpeed: shot?.verticalSpeed});
+      const ground = laid.field.heightAt(position.x, position.z);
+      for (const [index, point] of (shot?.path ?? []).entries()) {
+        laid.tracks.stamp(shot.path[index - 1] ?? point, point, .31 * scale, .8);
+      }
+      const inPatch = ground !== undefined;
+      laid.impacts.launch('sphere', snow ? 'snow' : 'mud', undefined, {position: inPatch ? [position.x, position.z] : [x, z], velocity, scale,
+        height: shot && inPatch ? Math.max(position.y, ground + radius) : undefined, verticalSpeed: shot?.contact ? 0 : shot?.verticalSpeed});
     };
     if (!shot) return launch(target);
     return Promise.resolve(target).then(launch).finally(() => {
