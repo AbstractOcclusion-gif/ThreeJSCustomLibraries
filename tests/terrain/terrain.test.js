@@ -411,3 +411,33 @@ test('an impact makes a crater from the weight, speed, angle and outline of the 
  assert.ok(Math.abs(plane.shape.yaw - Math.PI / 2) < 1e-9 && plane.shape.halfX > 2 * plane.shape.halfZ, 'a flat impact ploughs a furrow along its heading');
  assert.ok(plane.travel.obliquity > .9 && plane.depth < boulder.depth);
 });
+
+test('hard ground gives a shallower crater that shows rock, throws rubble and fractures around it', async () => {
+ const {createCraterStamp, craterStrataPaint, TERRAIN_PALETTE_ROLES, createCraterLayer} = await import('../../src/terrain/index.js');
+ const out = {t: 0, dig: 0, rise: 0}, at = hardness => createCraterStamp({x: 0, z: 0, shape: 3, depth: 2, ragged: 0, rays: 0, hardness});
+ const soft = at(0), hard = at(1);
+ assert.equal(soft.relief(0, 0, out).dig, 2);
+ assert.equal(hard.relief(0, 0, out).dig, 1);
+ assert.ok(hard.relief(3.2, 0, out).rise < soft.relief(3.2, 0, out).rise);
+ assert.equal(soft.fractured(4, 0), 0);
+ assert.ok(hard.fractured(1, 0) === 1 && hard.fractured(4.5, 0) > 0 && hard.fractured(4.5, 0) < 1 && hard.fractured(7.5, 0) === 0);
+ assert.throws(() => at(2), RangeError);
+ const role = name => TERRAIN_PALETTE_ROLES.indexOf(name), grass = () => TERRAIN_PALETTE_ROLES.map(name => name === 'grass' ? 1 : 0);
+ const softCut = grass(), hardCut = grass(), rubble = grass();
+ craterStrataPaint(softCut, .6, 0, undefined, 0); craterStrataPaint(hardCut, .6, 0, undefined, 1); craterStrataPaint(rubble, 0, 1, undefined, 1);
+ assert.ok(softCut[role('soil')] > .9 && hardCut[role('rock')] > .9 && rubble[role('scree')] === 1);
+ const nx = 81, field = createTerrainField({origin: [0, 0], size: [40, 40], resolution: [nx, nx], heights: new Float32Array(nx * nx), seed: 3, crater: {ragged: 0}});
+ const events = [], fracture = field.fractureMap.image.data;
+ field.subscribe(event => events.push(event));
+ field.crater(20, 20, 3, 2, undefined, {hardness: 1});
+ assert.ok(Math.abs(field.heightAt(20, 20) + 1) < 1e-4);
+ assert.ok(events[0].hardness === 1 && events[0].strata.rock > .4 && events[0].strata.rock > events[0].strata.subsoil, 'the debris is mostly rock');
+ assert.ok(fracture[40 * nx + 40] === 255 && fracture[40 * nx + 49] > 0 && fracture[40 * nx + 70] === 0);
+ field.resetDeformation();
+ assert.ok(fracture.every(value => value === 0));
+ field.dispose();
+ const layer = createCraterLayer({hardness: 1}), exposure = {};
+ layer.add({x: 0, z: 0, shape: 3, depth: 2});
+ assert.ok(layer.exposureAt(4, 0, exposure).fracture > 0 && exposure.hardness === 1);
+ assert.equal(layer.toJSON()[0].hardness, 1);
+});

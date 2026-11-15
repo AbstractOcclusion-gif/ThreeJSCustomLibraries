@@ -6,24 +6,23 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import initJolt from 'jolt-physics';
 import {Body, Box, Sphere, Vec3, World} from 'cannon-es';
 import {createBenchPanel} from '../panel.js';
-import {craterFromImpact, createTerrainAppearance, createTerrainField, createTerrainMaterial, CRATER_DEFAULTS, TERRAIN_ROLE_TINTS} from '../../src/terrain/index.js';
+import {cloneBiome, craterFromImpact, createTerrainAppearance, createTerrainField, createTerrainMaterial, createTerrainWorld, CRATER_DEFAULTS, TERRAIN_ROLE_TINTS} from '../../src/terrain/index.js';
 import {createSurfaceWeather} from '../../src/surface/index.js';
 import {createChips, createPuffs} from '../../src/particles/index.js';
 import {createJoltDriver} from '../../src/destruction/jolt-driver.js';
-import {createFixedStep, valueNoise} from '../../src/core/index.js';
+import {createFixedStep} from '../../src/core/index.js';
 import {createSunShadows} from '../../src/lighting/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createShadowReceivers} from '../kit/shadow-receivers.js';
 import {aimRay} from '../kit/input.js';
-import {loadTerrainTextures} from '../terrain/textures.js';
+import {loadTerrainPalette} from '../terrain/textures.js';
 import {createTerrainCollider} from '../terrain/heightfield.js';
 import {craterControls, craterLook, craterTool} from '../terrain/controls.js';
 import '../bench.css';
 
-// Ground: a square `span` m wide, `resolution` samples a side (25 cm cells), rolling `relief` m over `reliefSize` m.
-const TERRAIN = {span: 64, resolution: 257, relief: 1.6, reliefSize: 22, seed: 11};
-const RULES = {rockSlope: 1.1, snowLine: 300, mudBelow: -3, forestCover: 0};
+// Ground: a square `span` m wide, `resolution` samples a side (25 cm cells), of the world of one `biome`.
+const TERRAIN = {span: 64, resolution: 257, biome: 'plains', seed: 11};
 // What each stratum's debris looks like: the terrain's own role tints (topsoil is the dark top earth).
 const STRATA_TINT = {topsoil: TERRAIN_ROLE_TINTS.mud, subsoil: TERRAIN_ROLE_TINTS.soil, scree: TERRAIN_ROLE_TINTS.scree, rock: TERRAIN_ROLE_TINTS.rock};
 // Shards (particle chips): count from the thrown volume (m³ x perCubicMetre, at most max a crater), shock (pop speed)
@@ -61,34 +60,34 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .2, 900);
 camera.position.set(30, 20, 32);
 const orbit = new OrbitControls(camera, renderer.domElement);
-orbit.target.set(0, 0, 0); orbit.enableDamping = true; orbit.maxPolarAngle = Math.PI * .48; orbit.update();
+orbit.target.set(0, 3, 0); orbit.enableDamping = true; orbit.maxPolarAngle = Math.PI * .48; orbit.update();
 const weather = await createBenchWeather({scene, renderer, camera, lightTarget: new THREE.Vector3(), initial: 'clear', hour: 15, precipitation: false});
 const sunShadows = createSunShadows({renderer, distance: TERRAIN.span * 1.5});
 const shadowReceivers = createShadowReceivers(scene, sunShadows, weather.view);
 
-// Terrain.
-const {span, resolution, relief, reliefSize, seed} = TERRAIN, half = span / 2, spacing = span / (resolution - 1);
-const noise = valueNoise(seed);
-const heights = Float32Array.from({length: resolution ** 2}, (_, i) => {
-  const x = (i % resolution) * spacing - half, z = Math.floor(i / resolution) * spacing - half;
-  return relief * (noise(x / reliefSize, z / reliefSize) + .35 * noise(x / reliefSize * 2.7, z / reliefSize * 2.7));
-});
-const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, seed, rules: RULES});
-const textures = await loadTerrainTextures(renderer);
+// Terrain: a field cut from a one-biome world, which paints it with the biome's own texture sets (grass, soil,
+// scree, rock), so a crater shows real subsoil and rubble.
+const {span, resolution, biome, seed} = TERRAIN, half = span / 2, spacing = span / (resolution - 1);
+const world = createTerrainWorld({seed, biomes: [cloneBiome(biome)]});
+const heights = Float32Array.from({length: resolution ** 2}, (_, i) => world.heightAt((i % resolution) * spacing - half, Math.floor(i / resolution) * spacing - half, spacing));
+const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, seed,
+  paintAt: sample => world.paintAt(sample), paletteSize: world.palette.size});
+const {textures} = await loadTerrainPalette(renderer, world.palette);
 const surfaceWeather = createSurfaceWeather();
-const groundMaterial = createTerrainMaterial({}, {field, layerArray: textures.layerArray, detailNormal: textures.detail, appearance: createTerrainAppearance(), weather: surfaceWeather});
+const groundMaterial = createTerrainMaterial({}, {field, palette: {...world.palette, means: textures.means}, layerArray: textures.layerArray, layerDetailArray: textures.layerDetailArray,
+  detailNormal: textures.detail, appearance: createTerrainAppearance(), weather: surfaceWeather});
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
 ground.receiveShadow = true;
 scene.add(ground);
 
 // Physics: Cannon bodies as the model, Jolt solving them (the destruction module's driver).
 const J = await initJolt();
-const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
+const physics = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
 const driver = createJoltDriver(J);
 const groundBody = createTerrainCollider(field);
 const [groundShape] = groundBody.shapes;
-world.addBody(groundBody);
-driver.attach(world);
+physics.addBody(groundBody);
+driver.attach(physics);
 const fixedStep = createFixedStep({step: STEP});
 // The terrain writes every edited height into the collider; the Jolt copy is rebuilt once a crater is done.
 const onHeightSample = (x, z, value) => groundShape.setHeightValueAtIndex(z, x, value);
@@ -106,13 +105,13 @@ const objectMaterial = new THREE.MeshStandardMaterial({color: '#8d8a84', roughne
 const unitSphere = new THREE.SphereGeometry(1, 24, 16), unitBox = new THREE.BoxGeometry(2, 2, 2);   // scaled per object
 const moving = [];   // {body, mesh, age, life, owned geometry?}
 function addMoving(body, mesh, life) {
-  world.addBody(body);
+  physics.addBody(body);
   scene.add(mesh);
   moving.push({body, mesh, age: 0, life});
 }
 function removeMoving(index) {
   const [entry] = moving.splice(index, 1);
-  world.removeBody(entry.body);
+  physics.removeBody(entry.body);
   scene.remove(entry.mesh);
 }
 const clodCount = () => moving.reduce((count, entry) => count + (entry.clod ? 1 : 0), 0);
@@ -188,8 +187,8 @@ function launchObject(point) {
   addMoving(body, mesh, LAUNCH.life);
   const entry = Object.assign(moving.at(-1), {spec, size, radius, half, craters: 0, nextCrater: 0, before: new Vec3()});
   body.addEventListener('collide', ({body: other}) => {
-    if (other !== groundBody || entry.craters >= LAUNCH.craters || world.time < entry.nextCrater) return;
-    entry.craters++; entry.nextCrater = world.time + LAUNCH.cooldown;
+    if (other !== groundBody || entry.craters >= LAUNCH.craters || physics.time < entry.nextCrater) return;
+    entry.craters++; entry.nextCrater = physics.time + LAUNCH.cooldown;
     pendingImpacts.push(entry);   // the physics callback only records it; the ground changes between steps
   });
 }
@@ -213,7 +212,7 @@ function landImpacts() {
 // Panel.
 const gui = createBenchPanel('Craters');
 const action = {mode: 'blast'};
-const crater = {blast: true, shape: 'round', radius: 3, width: .5, yaw: 0, depth: 2.5, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays};
+const crater = {blast: true, shape: 'round', radius: 3, width: .5, yaw: 0, depth: 2.5, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays, hardness: CRATER_DEFAULTS.hardness};
 const clickFolder = gui.addFolder('Click action');
 clickFolder.add(action, 'mode', ACTIONS).name('Click does').onChange(mode => { orbit.enabled = mode === 'none'; crater.blast = mode === 'blast'; });
 orbit.enabled = false;
@@ -259,7 +258,7 @@ startFrameLoop(renderer, (dt, now) => {
   orbit.update();
   fixedStep.advance(dt, step => {
     for (const entry of moving) entry.before?.copy(entry.body.velocity);   // the velocity an impact arrives with
-    world.step(step);
+    physics.step(step);
     landImpacts();
   });
   if (field.flushDeformation() || groundChanged) {
@@ -289,7 +288,7 @@ startFrameLoop(renderer, (dt, now) => {
   }
 });
 document.body.dataset.ready = 'true';
-window.craterDemo = {field, world, driver, chips, puffs, weather, scene, camera, renderer};
+window.craterDemo = {field, world, physics, driver, chips, puffs, weather, scene, camera, renderer};
 onLeave(() => {
   renderer.setAnimationLoop(null);
   unbindResize(); pointerEvents.abort();

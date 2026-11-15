@@ -108,7 +108,7 @@ export async function mountValley() {
   let world, clipmap;
   // The craters blasted into the world: they outlive rebuilds of the world, so a reroll keeps them where they are.
   const craters = createCraterLayer();
-  const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays};
+  const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays, hardness: CRATER_DEFAULTS.hardness};
   // Vertex colours are only worked out for the views that show them.
   const debugView = () => settings.view === VIEWS[1] || settings.view === VIEWS[2];
   // Time spent keeping the terrain around the focus, per frame, over the last status period.

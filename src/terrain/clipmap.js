@@ -91,6 +91,8 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
     // With a palette the material reads the palette map: the layer and forest maps are not kept.
     const heights = new Float32Array(count), weights = paletteSize ? null : new Uint8Array(count * LAYER_CHANNELS);
     const forest = paletteSize ? null : new Uint8Array(count), sand = new Uint8Array(count);
+    // With world craters: how fractured they left the ground, for the cracks the material draws.
+    const fracture = world.craters ? new Uint8Array(count) : null;
     const palette = paletteSize ? new Uint8Array(count * paletteSize) : null;
     const climate = reach ? new Uint8Array(count) : null;
     const positions = new Float32Array(count * 3), normals = new Float32Array(count * 3);
@@ -110,6 +112,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       field.morph = {value: new THREE.Vector4(0, 0, end - MORPH.band * size / 2, end)};
     }
     if (weights) field.weightMap = createDataTexture(weights, n, n, {filter: 'linear'});
+    if (fracture) field.fractureMap = createDataTexture(fracture, n, n, {format: THREE.RedFormat, filter: 'linear'});
     if (forest) field.forestMap = createDataTexture(forest, n, n, {format: THREE.RedFormat, filter: 'linear'});
     if (palette) {
       field.paletteMap = new THREE.DataArrayTexture(palette, n, n, paletteGroups);
@@ -150,7 +153,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       slopeStride: Math.max(1, Math.round(reach.slope / cell)), hollowStride: Math.max(1, Math.round(reach.hollow / cell)),
       lattice: cell < HOLLOW_LATTICE.maxCell ? new Map() : null,
     };
-    const ring = {level, cell, size, heights, weights, forest, sand, palette, climate, signals, bake, skyBake, positions, normals, coarse, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
+    const ring = {level, cell, size, heights, weights, forest, sand, fracture, palette, climate, signals, bake, skyBake, positions, normals, coarse, colors: null, attributes, chunks, field, material, group: ringGroup, origin: null, hole: undefined, low: 0, high: 0};
     if (tint) colour(ring);
     return ring;
   });
@@ -218,6 +221,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
       ring.forest[index] = Math.round((paint.layers[FOREST_LAYER] ?? 0) * BYTE);
     }
     ring.sand[index] = Math.round(paint.sand * BYTE);
+    if (ring.fracture) ring.fracture[index] = Math.round((paint.fracture ?? 0) * BYTE);
     if (ring.climate) ring.climate[index] = Math.round((paint.moisture ?? 0) * BYTE);
     // Slice `group` of the palette map holds weights group x 4 .. group x 4 + 3 of every sample.
     for (let slot = 0; slot < paletteSize; slot++) {
@@ -419,7 +423,7 @@ export function createTerrainClipmap({world, createMaterial, tint, ...overrides}
         const all = Math.abs(dx) >= n || Math.abs(dz) >= n;
         ring.origin = next;
         if (!all) {
-          for (const [array, stride] of [[ring.heights, 1], [ring.weights, LAYER_CHANNELS], [ring.forest, 1], [ring.sand, 1], [ring.climate, 1], [ring.normals, 3], [ring.colors, 3]]) {
+          for (const [array, stride] of [[ring.heights, 1], [ring.weights, LAYER_CHANNELS], [ring.forest, 1], [ring.sand, 1], [ring.fracture, 1], [ring.climate, 1], [ring.normals, 3], [ring.colors, 3]]) {
             if (array) slide(array, stride, dx, dz);
           }
           for (let group = 0; group < paletteGroups; group++) {

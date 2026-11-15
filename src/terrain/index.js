@@ -5,7 +5,7 @@ import {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
 import {createRunoffLook} from './runoff.js';
 export {createRunoffLook, createTerrainRunoff} from './runoff.js';
 export {createTerrainField, SNOW_DEPTH_SCALE, SNOW_DEFAULTS, SNOW_FIELDS, validateSnow} from './field.js';
-export {CRATER_DEFAULTS, CRATER_FIELDS, CRATER_STRATA, CRATER_STRATA_FIELDS, CRATER_EJECTA, craterFootprint, craterStrataPaint, createCraterLayer, createCraterStamp, craterFromImpact, CRATER_IMPACT, validateStrata, addStrataVolumes, craterEvent} from './craters.js';
+export {CRATER_DEFAULTS, CRATER_FIELDS, CRATER_STRATA, CRATER_STRATA_FIELDS, CRATER_EJECTA, craterFootprint, craterStrataPaint, createCraterLayer, createCraterStamp, craterFromImpact, CRATER_IMPACT, CRATER_HARD, validateStrata, addStrataVolumes, craterEvent} from './craters.js';
 export {createTerrainDrainage} from './drainage.js';
 export {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_ROLE_LAYER, PAINT_REACH, TERRAIN_PAINT_FIELDS, createTerrainRules, TERRAIN_PAINT_DEFAULTS, validateTerrainPaint, dominantTerrainLayer} from './terrain-rules.js';
 export {valueNoise} from '../core/value-noise.js';
@@ -45,6 +45,9 @@ export const TERRAIN_PALETTE_ROUGHNESS = Object.freeze({...TERRAIN_LAYER_ROUGHNE
 // The colour each palette role is drawn toward (appearance.harmony): one earthy family, so no layer stands out.
 export const TERRAIN_ROLE_TINTS = Object.freeze({grass: '#6f8f3a', rock: '#86817a', snow: '#eef1f3', mud: '#5f5238', forest: '#55682f', scree: '#8a8274', soil: '#7a6648'});
 
+// Cracks of fractured ground (field.fractureMap): cell of the pattern (m), width of a crack (share of the cell),
+// how dark it is (0..1).
+export const TERRAIN_CRACK_DEFAULTS = Object.freeze([.7, .045, .7]);
 export function createTerrainAppearance() {
  return {
   tiling: {value: .45}, rockScale: {value: .55}, sharpness: {value: 3.5}, antiTiling: {value: .85},
@@ -55,6 +58,7 @@ export function createTerrainAppearance() {
   // Palette mode with a climate map: grass and forest floor are tinted from dry to lush by the moisture of the place.
   dryTint: {value: new THREE.Color(1.12, 1, .68)}, lushTint: {value: new THREE.Color(.62, 1.08, .5)},
   climateTint: {value: .75},   // strength of that tint (0 = off)
+  cracks: {value: new THREE.Vector3(...TERRAIN_CRACK_DEFAULTS)},   // cracks of fractured ground: TERRAIN_CRACK_DEFAULTS
   macroVariation: {value: .5}, // large-scale light and dark patches over every layer, so far ground is not one flat colour (0 = off)
   // Palette mode: every texture set is shifted toward the colour of its role, so the layers of a landscape belong
   // together instead of each keeping the average colour of its photograph. The detail of the texture is kept.
@@ -223,6 +227,34 @@ float terrainCrystalGlints(vec3 world, vec3 surfaceNormal, vec3 halfway, float f
 }
 #endif
 
+#ifdef TERRAIN_FRACTURE
+uniform sampler2D terrainFractureMap;
+uniform vec3 terrainCrack;   // cell of the crack pattern (m), width of a crack (share of the cell), how dark it is
+// Distance to the nearest edge of a cell pattern, in cells: the cracks run along the edges.
+float terrainCrackEdge(vec2 p) {
+ vec2 cell = floor(p), inside = fract(p);
+ float nearest = 8.0, second = 8.0;
+ for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+  vec2 offset = vec2(float(i), float(j));
+  vec2 site = offset + vec2(hash12(cell + offset), hash12(cell + offset + 71.3)) - inside;
+  float d = dot(site, site);
+  if (d < nearest) { second = nearest; nearest = d; } else if (d < second) second = d;
+ }
+ return sqrt(second) - sqrt(nearest);
+}
+// Cracks of fractured ground (0..1): wide plates where it is lightly fractured, finer ones inside them where it is
+// broken up. They widen with the fracture and fade out where a crack is thinner than a pixel.
+float terrainCracks(vec2 point, float fractured) {
+ const float fineCells = 2.7, fineFrom = .45;   // fine cracks per plate; fracture from which they show
+ vec2 p = point / terrainCrack.x;
+ float edge = terrainCrackEdge(p), width = terrainCrack.y * (.4 + fractured);
+ float pixel = length(fwidth(p));
+ float plates = (1.0 - smoothstep(width, width + pixel, edge)) * (1.0 - smoothstep(.25, .8, pixel));
+ float fineEdge = terrainCrackEdge(p * fineCells + 17.0), finePixel = pixel * fineCells;
+ float fine = (1.0 - smoothstep(width, width + finePixel, fineEdge)) * (1.0 - smoothstep(.25, .8, finePixel)) * smoothstep(fineFrom, 1.0, fractured) * .6;
+ return max(plates, fine) * smoothstep(.04, .3, fractured);
+}
+#endif
 #ifdef TERRAIN_SAND
 uniform sampler2D terrainSandWeight;
 uniform vec3 terrainSandColor;
@@ -583,6 +615,14 @@ const TERRAIN_FRAGMENT = /* glsl */`
   roughnessFactor = mix(roughnessFactor, terrainSandRoughness, sandCover * terrainContact);
  }
  #endif
+ #ifdef TERRAIN_FRACTURE
+ float terrainFractured = terrainProp ? 0.0 : textureLod(terrainFractureMap, terrainWeightUV, 0.0).r;
+ if (terrainFractured > 0.0) {
+  float crack = terrainCracks(terrainGround.xz, terrainFractured) * terrainContact;
+  diffuseColor.rgb *= 1.0 - terrainCrack.z * crack;
+  roughnessFactor = mix(roughnessFactor, 1.0, crack);
+ }
+ #endif
  if (terrainDetailStrength > 0.0 && terrainDetailNear > 0.0) {
   const float sharedDetailScale = 3.4;   // repeats of the shared detail normal per layer repeat
   vec3 detail = layerDetailShare < 1.0 ? terrainNormalDetail(TERRAIN_DETAIL, terrainP * sharedDetailScale, terrainDx * sharedDetailScale, terrainDy * sharedDetailScale, terrainSign, terrainAxes).xyz : vec3(0.0);
@@ -675,6 +715,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (palette && field.climateMap) material.defines = {...material.defines, TERRAIN_CLIMATE: 1};
  const paletteRoles = palette ? Array.from({length: palette.size}, (_, index) => Math.max(0, TERRAIN_PALETTE_ROLES.indexOf(palette.roles[index]))) : [];
  if (field.sandMap) material.defines = {...material.defines, TERRAIN_SAND: 1};
+ if (field.fractureMap) material.defines = {...material.defines, TERRAIN_FRACTURE: 1};
  if (field.snowMap) material.defines = {...material.defines, TERRAIN_SNOW_MAP: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  if (layerDetailArray) material.defines = {...material.defines, TERRAIN_LAYER_DETAIL: 1};
@@ -703,6 +744,7 @@ export function createTerrainMaterial(parameters = {}, {
   terrainLayerDetailArray: {value: layerDetailArray ?? null}, terrainLayerDetail: appearance.layerDetail ?? {value: 0},
   terrainGrass: {value: layers?.grass}, terrainRock: {value: layers?.rock}, terrainSnow: {value: layers?.snow}, terrainMud: {value: layers?.mud},
   terrainForest: {value: layers?.forest}, terrainForestWeight: {value: field.forestMap ?? null},
+  terrainFractureMap: {value: field.fractureMap ?? null}, terrainCrack: appearance.cracks ?? {value: new THREE.Vector3(...TERRAIN_CRACK_DEFAULTS)},
   terrainSandWeight: {value: field.sandMap ?? null}, terrainSandColor: sandLook.color, terrainSandHeading: sandLook.rippleHeading,
   terrainSandVariation: sandLook.variation, terrainSandGrain: sandLook.grain, terrainSandRippleSize: sandLook.rippleSize,
   terrainSandRippleHeight: sandLook.rippleHeight, terrainSandSparkle: sandLook.sparkle, terrainSandRoughness: sandLook.roughness,

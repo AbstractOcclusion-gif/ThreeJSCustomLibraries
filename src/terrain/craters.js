@@ -10,14 +10,21 @@ import {TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
 // thrown out (ejecta). rimMaxShare: highest a rim may stand above the original surface, as a share of depthLimit.
 // ragged (0..1): how irregular a crater is — its outline, the height of its rim, the patches of its thrown soil and
 // the strata in its walls; 0 is the exact shape. rays: streaks of soil thrown far out, each of its own length.
-export const CRATER_DEFAULTS = Object.freeze({depthLimit: 5, rimShare: .45, rimMaxShare: .25, ragged: .7, rays: 5});
+// hardness (0..1): 0 is soft soil; hard ground (CRATER_HARD) gives a shallower crater with little rim, shows scree
+// and rock where soft ground shows soil, throws rubble instead of soil and fractures around the crater.
+export const CRATER_DEFAULTS = Object.freeze({depthLimit: 5, rimShare: .45, rimMaxShare: .25, ragged: .7, rays: 5, hardness: 0});
 export const CRATER_FIELDS = Object.freeze({
   radius: {label: 'Crater radius · m', min: .3, max: 12, step: .1},
   depth: {label: 'Crater depth · m', min: .05, max: 8, step: .05},
   rimShare: {label: 'Dug soil piled into the rim', min: 0, max: 1, step: .01},
   ragged: {label: 'Border raggedness', min: 0, max: 1, step: .01},
   rays: {label: 'Ejecta rays', min: 0, max: 12, step: 1},
+  hardness: {label: 'Ground hardness', min: 0, max: 1, step: .01},
 });
+// What hardness 1 does: the shares of the depth and of the rim it takes away, the share by which it thins the soft
+// strata (so rock shows from near the surface), and the fractured ground around the crater: whole inside the outline,
+// fading out by `fracture` (normalised distance), in patches `fracturePatch` deep at ragged 1.
+export const CRATER_HARD = Object.freeze({depth: .5, rim: .7, strata: .9, fracture: 2.4, fracturePatch: .6});
 // Rim profile in normalised footprint distance (1 on the outline): rises from start, peaks, and ends.
 export const CRATER_RIM = Object.freeze({start: .8, peak: 1.06, end: 1.75});
 // What a crater cuts into, by depth below the original surface (m): the surface paint down to `topsoil`, then
@@ -77,42 +84,47 @@ export function validateStrata(strata) {
 }
 
 // Paints what a crater exposed into `roles` (one weight per TERRAIN_PALETTE_ROLES, summing to 1, changed in place):
-// dig, m below the original surface, cuts through the strata; ejecta (0..1) covers the ground with thrown subsoil.
+// dig, m below the original surface, cuts through the strata; ejecta (0..1) covers the ground with thrown subsoil,
+// or with rubble (scree) on hard ground; hardness thins the soft strata (CRATER_HARD).
 // Returns the share of the ground they cover, which hides sand lying there.
-export function craterStrataPaint(roles, dig, ejecta, strata = CRATER_STRATA) {
-  const exposed = dig > 0 ? smoothstep(0, strata.topsoil, dig) : 0;
+export function craterStrataPaint(roles, dig, ejecta, strata = CRATER_STRATA, hardness = 0) {
+  const thin = 1 - CRATER_HARD.strata * hardness;
+  const exposed = dig > 0 ? smoothstep(0, strata.topsoil * thin, dig) : 0;
   if (exposed <= 0 && ejecta <= 0) return 0;
-  const {subsoil, scree, band} = strata;
+  const subsoil = strata.subsoil * thin, scree = strata.scree * thin, band = strata.band * thin;
   const belowSoil = smoothstep(subsoil - band, subsoil + band, dig), belowScree = smoothstep(scree - band, scree + band, dig);
   for (let role = 0; role < roles.length; role++) roles[role] *= (1 - exposed) * (1 - ejecta);
   const cut = exposed * (1 - ejecta);
-  roles[STRATA_ROLE.soil] += cut * (1 - belowSoil) + ejecta;
-  roles[STRATA_ROLE.scree] += cut * belowSoil * (1 - belowScree);
+  roles[STRATA_ROLE.soil] += cut * (1 - belowSoil) + ejecta * (1 - hardness);
+  roles[STRATA_ROLE.scree] += cut * belowSoil * (1 - belowScree) + ejecta * hardness;
   roles[STRATA_ROLE.rock] += cut * belowScree;
   return exposed + ejecta - exposed * ejecta;
 }
 
 // Adds to `out` {topsoil, subsoil, scree, rock} the thickness of each stratum within [from, to] m below the
-// original surface, times `weight` (e.g. a sample's area, for volumes).
-export function addStrataVolumes(out, from, to, weight, strata = CRATER_STRATA) {
-  const bands = [['topsoil', 0, strata.topsoil], ['subsoil', strata.topsoil, strata.subsoil], ['scree', strata.subsoil, strata.scree], ['rock', strata.scree, Infinity]];
+// original surface, times `weight` (e.g. a sample's area, for volumes). hardness thins the soft strata (CRATER_HARD).
+export function addStrataVolumes(out, from, to, weight, strata = CRATER_STRATA, hardness = 0) {
+  const thin = 1 - CRATER_HARD.strata * hardness, topsoil = strata.topsoil * thin, subsoil = strata.subsoil * thin, scree = strata.scree * thin;
+  const bands = [['topsoil', 0, topsoil], ['subsoil', topsoil, subsoil], ['scree', subsoil, scree], ['rock', scree, Infinity]];
   for (const [name, top, bottom] of bands) out[name] += Math.max(0, Math.min(to, bottom) - Math.max(from, top)) * weight;
   return out;
 }
 // The 'terrain:crater' event both crater sources emit to their subscribers. x, z: centre; height: the ground at the
 // centre before the blast (null where the source does not know it: the host reads its world); reach: the outline's
 // reach, m; outer: how far the crater changed the ground (thrown soil included), m; volume, rim, ejecta: dug, piled
-// into the rim and thrown out, m³; strata: share of the dug volume from each stratum; rect: the rectangle changed.
-export function craterEvent({x, z, height = null, shape, depth, footprint, volume, rim, strata, rect}) {
+// into the rim and thrown out, m³; strata: share of the dug volume from each stratum; hardness: of the ground it hit;
+// rect: the rectangle changed.
+export function craterEvent({x, z, height = null, shape, depth, footprint, volume, rim, strata, hardness = 0, rect}) {
   const total = strata.topsoil + strata.subsoil + strata.scree + strata.rock;
   const shares = Object.freeze(Object.fromEntries(Object.entries(strata).map(([name, value]) => [name, total > 0 ? value / total : 0])));
-  return Object.freeze({type: 'terrain:crater', x, z, height, shape, depth, reach: footprint.reach,
+  return Object.freeze({type: 'terrain:crater', x, z, height, shape, depth, hardness, reach: footprint.reach,
     outer: footprint.reach * CRATER_EJECTA.reach, volume, rim, ejecta: volume - rim, strata: shares, rect: Object.freeze(rect)});
 }
 const emptyStrata = () => ({topsoil: 0, subsoil: 0, scree: 0, rock: 0});
 
 export function validateCraterSettings(settings) {
-  const {depthLimit, rimShare, rimMaxShare, ragged, rays} = settings;
+  const {depthLimit, rimShare, rimMaxShare, ragged, rays, hardness} = settings;
+  if (!(hardness >= 0 && hardness <= 1)) throw new RangeError('Ground hardness must be within 0..1');
   if (!(ragged >= 0 && ragged <= 1)) throw new RangeError('Crater raggedness must be within 0..1');
   if (!Number.isInteger(rays) || rays < 0 || rays > CRATER_FIELDS.rays.max) throw new RangeError(`A crater throws 0 to ${CRATER_FIELDS.rays.max} rays`);
   if (!(depthLimit >= 0 && depthLimit <= CRATER_FIELDS.depth.max)) throw new RangeError(`Crater depth limit must be within 0..${CRATER_FIELDS.depth.max} m`);
@@ -174,13 +186,14 @@ export function craterFromImpact({footprint, mass, velocity}) {
 }
 
 // One crater: everything it does to the ground around (x, z), for the field (which digs its samples with it) and the
-// crater layer (which keeps it). shape: craterFootprint's; depth: m at the centre; rimShare, ragged, rays: see
-// CRATER_DEFAULTS; travel: {heading (radians, from +X toward +Z), obliquity (0..1)} of the object that made it:
+// crater layer (which keeps it). shape: craterFootprint's; depth: m at the centre in soft ground; rimShare, ragged,
+// rays, hardness: see CRATER_DEFAULTS; travel: {heading (radians, from +X toward +Z), obliquity (0..1)} of the object that made it:
 // the soil is thrown forward, all of it at obliquity 1. Its irregularity is drawn from its position, so a crater
 // restored from a save is the same crater.
-export function createCraterStamp({x, z, shape, depth, rimShare = CRATER_DEFAULTS.rimShare, ragged = CRATER_DEFAULTS.ragged, rays = CRATER_DEFAULTS.rays, travel}) {
-  if (![x, z, depth].every(Number.isFinite) || depth <= 0) throw new RangeError('A crater needs a finite position and a positive depth');
-  validateCraterSettings({...CRATER_DEFAULTS, rimShare, ragged, rays});
+export function createCraterStamp({x, z, shape, depth: softDepth, rimShare: softRim = CRATER_DEFAULTS.rimShare, ragged = CRATER_DEFAULTS.ragged, rays = CRATER_DEFAULTS.rays, hardness = CRATER_DEFAULTS.hardness, travel}) {
+  if (![x, z, softDepth].every(Number.isFinite) || softDepth <= 0) throw new RangeError('A crater needs a finite position and a positive depth');
+  validateCraterSettings({...CRATER_DEFAULTS, rimShare: softRim, ragged, rays, hardness});
+  const depth = softDepth * (1 - CRATER_HARD.depth * hardness), rimShare = softRim * (1 - CRATER_HARD.rim * hardness);
   const {heading = 0, obliquity = 0} = travel ?? {};
   if (!Number.isFinite(heading) || !(obliquity >= 0 && obliquity <= 1)) throw new RangeError('Crater travel needs a heading and an obliquity from zero to one');
   const footprint = craterFootprint(shape), R = CRATER_RAGGED;
@@ -217,8 +230,8 @@ export function createCraterStamp({x, z, shape, depth, rimShare = CRATER_DEFAULT
   const volume = bowl * area * depth, rimPeak = rim > 0 ? rimShare * volume / (rim * area) : 0;
   const thrownShare = CRATER_EJECTA.cover * (1 - rimShare);
   return {
-    data: Object.freeze({x, z, shape: typeof shape === 'number' ? shape : Object.freeze({...shape}), depth, rimShare, ragged, rays, ...(travel && {travel: Object.freeze({heading, obliquity})})}),
-    x, z, depth, footprint, digReach, outer, volume, rimVolume: rimShare * volume,
+    data: Object.freeze({x, z, shape: typeof shape === 'number' ? shape : Object.freeze({...shape}), depth: softDepth, rimShare: softRim, ragged, rays, hardness, ...(travel && {travel: Object.freeze({heading, obliquity})})}),
+    x, z, depth, hardness, footprint, digReach, outer, volume, rimVolume: rimShare * volume,
     rect: Object.freeze({minX: x - outer, minZ: z - outer, maxX: x + outer, maxZ: z + outer}),
     // The shape at an offset from the centre, into out: t (normalised distance on the ragged outline), dig (m the
     // bowl cuts) and rise (m the rim stands).
@@ -232,6 +245,14 @@ export function createCraterStamp({x, z, shape, depth, rimShare = CRATER_DEFAULT
         out.rise = rimPeak * weight * Math.max(0, 1 + ragged * R.rim * noise(dx / r * R.rimLobes + 71.3, dz / r * R.rimLobes + 53.9));
       }
       return out;
+    },
+    // How fractured the ground is at an offset (0..1): hard ground cracks inside the crater and around it.
+    fractured(dx, dz) {
+      if (!hardness) return 0;
+      const near = 1 - smoothstep(1, CRATER_HARD.fracture, distance(dx, dz));
+      if (near <= 0) return 0;
+      const patch = .5 + .5 * noise(dx / patchSize + 83.1, dz / patchSize + 61.7);
+      return hardness * near * (1 - ragged * CRATER_HARD.fracturePatch * (1 - patch) * (1 - near));
     },
     // How far the strata stray at an offset: the dig the paint sees is the dig x this.
     strataShift: (dx, dz) => 1 + ragged * R.strata * noise(dx / patchSize + 7.7, dz / patchSize + 3.1),
@@ -262,14 +283,14 @@ export function createCraterStamp({x, z, shape, depth, rimShare = CRATER_DEFAULT
     dugStrata(out, strata, depthLimit) {
       for (let j = 0; j < CRATER_INTEGRATION; j++) for (let i = 0; i < CRATER_INTEGRATION; i++) {
         const share = footprint.bowl(distance(-outer + (i + .5) * step, -outer + (j + .5) * step));
-        if (share > 0) addStrataVolumes(out, 0, Math.min(depthLimit, depth * share), area, strata);
+        if (share > 0) addStrataVolumes(out, 0, Math.min(depthLimit, depth * share), area, strata, hardness);
       }
       return out;
     },
   };
 }
 
-// Craters of an endless world, as stamps: {x, z, shape, depth, rimShare, ragged, rays, travel} (createCraterStamp).
+// Craters of an endless world, as stamps: {x, z, shape, depth, rimShare, ragged, rays, hardness, travel} (createCraterStamp).
 // Each digs its bowl and piles rimShare of the dug volume into its rim; overlapping stamps add, the sum kept within
 // depthLimit below and the rim cap above the original relief. stamps: saved stamps to start from (toJSON). Pass the
 // layer to createTerrainWorld as `craters`.
@@ -285,8 +306,8 @@ export function createCraterLayer({stamps = [], strata = CRATER_STRATA, ...overr
   const keyOf = (column, row) => (column + GRID_SPAN) * 2 * GRID_SPAN + row + GRID_SPAN;
 
   // Adds a stamp. Returns the rectangle it changes, {minX, minZ, maxX, maxZ} in m.
-  function add({rimShare = settings.rimShare, ragged = settings.ragged, rays = settings.rays, ...crater}) {
-    const stamp = createCraterStamp({...crater, rimShare, ragged, rays}), {x, z, outer} = stamp;
+  function add({rimShare = settings.rimShare, ragged = settings.ragged, rays = settings.rays, hardness = settings.hardness, ...crater}) {
+    const stamp = createCraterStamp({...crater, rimShare, ragged, rays, hardness}), {x, z, outer} = stamp;
     if (Math.abs(cellOf(x)) + Math.ceil(outer / CRATER_GRID) >= GRID_SPAN || Math.abs(cellOf(z)) + Math.ceil(outer / CRATER_GRID) >= GRID_SPAN) {
       throw new RangeError('A crater stamp lies beyond the reach of the crater layer');
     }
@@ -299,7 +320,7 @@ export function createCraterLayer({stamps = [], strata = CRATER_STRATA, ...overr
     }
     if (listeners.size) {
       const event = craterEvent({x, z, shape: stamp.data.shape, depth: stamp.depth, footprint: stamp.footprint, volume: stamp.volume, rim: stamp.rimVolume,
-        strata: stamp.dugStrata(emptyStrata(), strata, settings.depthLimit), rect: stamp.rect});
+        strata: stamp.dugStrata(emptyStrata(), strata, settings.depthLimit), hardness: stamp.hardness, rect: stamp.rect});
       for (const listener of listeners) listener(event);
     }
     return stamp.rect;
@@ -324,11 +345,12 @@ export function createCraterLayer({stamps = [], strata = CRATER_STRATA, ...overr
     return Math.min(rimCap, rise) - Math.min(settings.depthLimit, dig);
   }
 
-  // What the craters exposed at a point, written into out {dig, ejecta}: the depth they cut below the original
-  // relief as the paint sees it (m, within depthLimit; the strata stray) and the share of thrown soil lying there
-  // (0..1). For craterStrataPaint.
+  // What the craters exposed at a point, written into out {dig, ejecta, hardness, fracture}: the depth they cut
+  // below the original relief as the paint sees it (m, within depthLimit; the strata stray), the share of thrown
+  // soil lying there (0..1), the hardness of the ground they hit and how fractured it is (0..1). For
+  // craterStrataPaint and the fracture map.
   function exposureAt(x, z, out) {
-    out.dig = out.ejecta = 0;
+    out.dig = out.ejecta = out.hardness = out.fracture = 0;
     const list = grid.get(keyOf(cellOf(x), cellOf(z)));
     if (!list) return out;
     for (const stamp of list) {
@@ -337,6 +359,8 @@ export function createCraterLayer({stamps = [], strata = CRATER_STRATA, ...overr
       stamp.relief(dx, dz, shape);
       if (shape.dig > 0) out.dig += shape.dig * stamp.strataShift(dx, dz);
       out.ejecta += stamp.thrown(dx, dz);
+      if (stamp.hardness > out.hardness) out.hardness = stamp.hardness;
+      out.fracture = Math.max(out.fracture, stamp.fractured(dx, dz));
     }
     out.dig = Math.min(settings.depthLimit, out.dig);
     out.ejecta = Math.min(1, out.ejecta);

@@ -199,13 +199,17 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
   // `palette` holds one weight per palette set, so each biome keeps its own textures; `moisture` is 0 dry .. 1 wet.
   // `palette` is reused: read it before the next call.
   // Craters show what they cut and threw out: the world's own (the crater layer) and a host's at the sample
-  // (sample.crater: {dig, ejecta}, see craterStrataPaint), painted with each biome's strata.
-  const paintScratch = new Float32Array(count), paletteWeights = new Float32Array(palette.size), exposure = {dig: 0, ejecta: 0};
+  // (sample.crater: {dig, ejecta, hardness}, see craterStrataPaint), painted with each biome's strata. `fracture`:
+  // how fractured the world's craters left the ground there (0..1), for a mesh's fracture map.
+  const paintScratch = new Float32Array(count), paletteWeights = new Float32Array(palette.size), exposure = {dig: 0, ejecta: 0, hardness: 0, fracture: 0};
   function paintAt(sample) {
     weightsAt(sample.x, sample.z, paintScratch);
-    exposure.dig = exposure.ejecta = 0;
+    exposure.dig = exposure.ejecta = exposure.hardness = exposure.fracture = 0;
     if (craters) craters.exposureAt(sample.x, sample.z, exposure);
-    if (sample.crater) { exposure.dig += sample.crater.dig; exposure.ejecta = Math.min(1, exposure.ejecta + sample.crater.ejecta); }
+    if (sample.crater) {
+      exposure.dig += sample.crater.dig; exposure.ejecta = Math.min(1, exposure.ejecta + sample.crater.ejecta);
+      exposure.hardness = Math.max(exposure.hardness, sample.crater.hardness ?? 0);
+    }
     sample.water = water ? settings.waterLevel - sample.height : -Infinity;
     const layers = new Array(TERRAIN_LAYERS.length).fill(0);
     paletteWeights.fill(0);
@@ -214,7 +218,7 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
       const share = paintScratch[i];
       if (share <= 0) continue;
       const painted = rules[i].paint(sample);
-      const cover = craterStrataPaint(painted.roles, exposure.dig, exposure.ejecta, biomes[i].strata ?? CRATER_STRATA);
+      const cover = craterStrataPaint(painted.roles, exposure.dig, exposure.ejecta, biomes[i].strata ?? CRATER_STRATA, exposure.hardness);
       painted.roles.forEach((weight, role) => {
         layers[TERRAIN_ROLE_LAYER[role]] += weight * share;
         paletteWeights[slices[i][role]] += weight * share;
@@ -222,7 +226,7 @@ export function createTerrainWorld({seed, biomes, map, water = false, climate = 
       sand += painted.sand * (1 - cover) * share;
       moisture += painted.moisture * share;
     }
-    return {layers, sand, moisture, palette: paletteWeights};
+    return {layers, sand, moisture, palette: paletteWeights, fracture: exposure.fracture};
   }
 
   return {

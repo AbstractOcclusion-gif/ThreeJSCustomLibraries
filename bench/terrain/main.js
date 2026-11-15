@@ -60,7 +60,7 @@ const rules = {rockSlope: 1, snowLine: 22, mudBelow: -.55, mudBlend: 1.2, forest
 const field = createTerrainField({origin: [-half, -half], size: [span, span], resolution: [resolution, resolution], heights, rules, snowTrackRims: true});
 // Live copies of the defaults, edited from the panel.
 const paint = {radius: TRACK.radius, depth: TRACK.depth, load: TRACK.load};
-const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays};
+const crater = {blast: false, ...CRATER, rimShare: CRATER_DEFAULTS.rimShare, ragged: CRATER_DEFAULTS.ragged, rays: CRATER_DEFAULTS.rays, hardness: CRATER_DEFAULTS.hardness};
 const footstep = {...FOOTSTEP_DEFAULTS};
 const contactSurfaces = structuredClone(CONTACT_SURFACES);
 const melt = {metresPerSecond: SNOW_MELT.metresPerSecond};

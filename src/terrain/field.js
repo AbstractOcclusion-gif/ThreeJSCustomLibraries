@@ -101,6 +101,9 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  // Sand has its own map too: it lies over the other layers. Pass rules.sandBelow to enable it.
  const sandWeights = paintAt || settings?.sandBelow !== undefined ? new Uint8Array(samples.length) : null;
  const sandMap = sandWeights ? createDataTexture(sandWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
+ // How fractured craters in hard ground left each sample: the material draws its cracks there.
+ const fracture = new Uint8Array(samples.length);
+ const fractureMap = createDataTexture(fracture, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
  if (!Number.isInteger(paletteSize / PALETTE_GROUP) || paletteSize < 0 || (paletteSize && typeof paintAt !== 'function')) throw Error('A field palette needs paintAt and a size in fours');
  const paletteWeights = paletteSize ? new Uint8Array(samples.length * paletteSize) : null;
  const climate = paletteSize ? new Uint8Array(samples.length) : null;
@@ -114,7 +117,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  // Depth each sample was dug by craters (m) and the share of thrown soil on it: what the paint shows them cut and
  // throw out. Laid by the first crater.
  // craterShown: the dig as the paint sees it (the strata stray around a crater).
- let craterDig = null, craterShown = null, ejecta = null, paintDirty = false;
+ // craterHard: the hardest ground a crater hit at each sample.
+ let craterDig = null, craterShown = null, ejecta = null, craterHard = null, paintDirty = false;
  const craterListeners = new Set();
  const exposedLayers = new Array(TERRAIN_LAYERS.length), exposedRoles = new Array(TERRAIN_PALETTE_ROLES.length);
  // Paints sample (x, z) from its current shape: the rules or paintAt, then what craters exposed there.
@@ -129,14 +133,15 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    const dig = craterShown ? Math.min(craterSettings.depthLimit, craterShown[index]) : 0, thrown = ejecta ? ejecta[index] : 0;
    const exposed = dig > 0 || thrown > 0;
    // paintAt paints the exposure itself (sample.crater, as createTerrainWorld's paintAt does); the rules are painted here.
-   if (paintAt && exposed) sample.crater = {dig, ejecta: thrown};
+   const hardness = craterHard ? craterHard[index] : 0;
+   if (paintAt && exposed) sample.crater = {dig, ejecta: thrown, hardness};
    const paint = paintAt?.(sample);
    let layers = paint?.layers, sand = paint?.sand;
    if (!paint && exposed) {
     // On the same layer weights as untouched samples, so the exposure fades into them without a seam.
     const base = rules.weights(sample);
     for (let role = 0; role < exposedRoles.length; role++) exposedRoles[role] = role < base.length ? base[role] : 0;
-    const cover = craterStrataPaint(exposedRoles, dig, thrown, strata);
+    const cover = craterStrataPaint(exposedRoles, dig, thrown, strata, hardness);
     exposedLayers.fill(0);
     for (let role = 0; role < exposedRoles.length; role++) exposedLayers[TERRAIN_ROLE_LAYER[role]] += exposedRoles[role];
     layers = exposedLayers;
@@ -160,6 +165,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   weightMap.needsUpdate = true;
   if (forestMap) forestMap.needsUpdate = true;
   if (sandMap) sandMap.needsUpdate = true;
+  fractureMap.needsUpdate = true;
   paintDirty = false;
  }
  function updateRules(values = {}) {
@@ -272,17 +278,18 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
  // Blasts a crater at the point (createCraterStamp: the footprint of `shape`, a radius or the outline of the object
  // that made it, `depth` m deep at the centre), deeper on each blast up to depthLimit below the original surface.
  // Lying snow inside the bowl is blown out; rimShare of the dug volume is piled into the rim, the rest counts as
- // thrown out. options: {rimShare, ragged, rays, travel}, the field's crater settings by default.
+ // thrown out. options: {rimShare, ragged, rays, hardness, travel}, the field's crater settings by default.
  // Returns {volume, rim, ejecta} in cubic metres, or null when nothing was dug; subscribers hear a 'terrain:crater'
  // event (craterEvent) with the strata the dug volume came from.
  const craterShape = {t: 0, dig: 0, rise: 0};
- function crater(x, z, shape, depth, onSample, {rimShare = craterSettings.rimShare, ragged = craterSettings.ragged, rays = craterSettings.rays, travel} = {}) {
+ function crater(x, z, shape, depth, onSample, {rimShare = craterSettings.rimShare, ragged = craterSettings.ragged, rays = craterSettings.rays, hardness = craterSettings.hardness, travel} = {}) {
   if (![x, z, depth].every(Number.isFinite) || depth <= 0) return null;
-  const stamp = createCraterStamp({x, z, shape, depth, rimShare, ragged, rays, travel}), {outer} = stamp;
+  const stamp = createCraterStamp({x, z, shape, depth, rimShare, ragged, rays, hardness, travel}), {outer} = stamp;
   const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ, cellArea = stepX * stepZ;
   craterDig ??= new Float32Array(samples.length);
   craterShown ??= new Float32Array(samples.length);
   ejecta ??= new Float32Array(samples.length);
+  craterHard ??= new Float32Array(samples.length);
   const height = heightAt(x, z) ?? null, dug = {topsoil: 0, subsoil: 0, scree: 0, rock: 0};
   // Everything the crater touches, one cell more for the slopes its paint reads.
   const columns = [Math.max(0, Math.floor(gx - outer / stepX) - 1), Math.min(nx - 1, Math.ceil(gx + outer / stepX) + 1)];
@@ -297,7 +304,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
     if (next < soil[index]) {
      const removed = soil[index] - next;
      volume += removed * cellArea;
-     addStrataVolumes(dug, craterDig[index], craterDig[index] + removed, cellArea, strata);
+     addStrataVolumes(dug, craterDig[index], craterDig[index] + removed, cellArea, strata, hardness);
      craterDig[index] += removed;
      craterShown[index] += removed * stamp.strataShift(dx, dz);
      soil[index] = next;
@@ -314,6 +321,10 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
     changed = true;
    }
    ejecta[index] = Math.min(1, ejecta[index] + stamp.thrown(dx, dz));
+   if (hardness > 0 && Math.hypot(dx, dz) <= outer) {
+    craterHard[index] = Math.max(craterHard[index], hardness);
+    fracture[index] = Math.max(fracture[index], Math.round(stamp.fractured(dx, dz) * BYTE));
+   }
    if (changed) writeHeight(index, Math.fround(soil[index] + (snowEnabled ? snow[index] : 0)), onSample);
   }
   for (let j = rows[0]; j <= rows[1]; j++) for (let i = columns[0]; i <= columns[1]; i++) paintSample(i, j);
@@ -321,7 +332,7 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   if (volume <= 0) return null;
   rim = Math.min(rim, volume);
   if (craterListeners.size) {
-   const event = craterEvent({x, z, height, shape: stamp.data.shape, depth, footprint: stamp.footprint, volume, rim, strata: dug, rect: stamp.rect});
+   const event = craterEvent({x, z, height, shape: stamp.data.shape, depth, footprint: stamp.footprint, volume, rim, strata: dug, hardness, rect: stamp.rect});
    for (const listener of craterListeners) listener(event);
   }
   return {volume, rim, ejecta: volume - rim};
@@ -420,7 +431,8 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
    writeHeight(index, original[index], onSample);
   }
   if (craterDig) {
-   craterDig = craterShown = ejecta = null;
+   craterDig = craterShown = ejecta = craterHard = null;
+   fracture.fill(0);
    for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) paintSample(x, z);
    paintDirty = true;
   }
@@ -488,12 +500,12 @@ export function createTerrainField({origin = [0, 0], size, resolution, heights, 
   return flushDeformation();
  }
  updateRules();
- return {geometry, bounds, heightMap, weightMap, forestMap, sandMap, paletteMap, climateMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, sandWeightAt, updateRules, deform, crater, craterSettings, compactSnow,
+ return {geometry, bounds, heightMap, weightMap, forestMap, sandMap, fractureMap, paletteMap, climateMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, sandWeightAt, updateRules, deform, crater, craterSettings, compactSnow,
   // Hears a 'terrain:crater' event (craterEvent) for every crater blasted; returns unsubscribe.
   subscribe(listener) {
    if (typeof listener !== 'function') throw new TypeError('A crater listener must be a function');
    craterListeners.add(listener);
    return () => craterListeners.delete(listener);
   }, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
-  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); sandMap?.dispose(); paletteMap?.dispose(); climateMap?.dispose(); snowMap.dispose(); }};
+  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); sandMap?.dispose(); fractureMap.dispose(); paletteMap?.dispose(); climateMap?.dispose(); snowMap.dispose(); }};
 }
