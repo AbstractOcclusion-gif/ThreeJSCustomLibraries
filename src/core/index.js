@@ -12,3 +12,4 @@ export {createDataTexture, configureTexture} from './data-texture.js';
 export {presetFile, assertPreset, downloadJson, readJsonFile} from './presets.js';
 export {assertFrameTime} from './validate.js';
 export {createFixedStep, FIXED_STEP_DEFAULTS} from './fixed-step.js';
+export {createJoltHost, JOLT_HOST_DEFAULTS, JOLT_LAYERS} from './jolt-host.js';

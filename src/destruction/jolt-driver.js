@@ -1,4 +1,5 @@
 import * as C from 'cannon-es';
+import {createJoltHost} from '../core/jolt-host.js';
 
 // Metres. Jolt's own default (cDefaultConvexRadius); clamped per hull by Jolt.
 const HULL_CONVEX_RADIUS=.05;
@@ -18,11 +19,8 @@ const HEIGHTFIELD_TURN=Object.freeze([.5,.5,.5,.5]);
 export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIslands=false,penetrationSlop,cacheHulls=true,profile=false,settleFreeze=true,settleSpeed=.05,settleSpin=.1,settleTime=.5,wakeSpeed=.3,workerThreads}={}){
  if(penetrationSlop!==undefined&&(!Number.isFinite(penetrationSlop)||penetrationSlop<=0))throw Error('Jolt penetrationSlop must be positive and finite');
  if(settleFreeze&&![settleSpeed,settleSpin,settleTime,wakeSpeed].every(n=>Number.isFinite(n)&&n>0))throw Error('Jolt settle thresholds must be positive and finite');
- const settings=new J.JoltSettings();settings.mMaxBodies=8192;settings.mMaxBodyPairs=32768;settings.mMaxContactConstraints=8192;if(workerThreads!==undefined)settings.mMaxWorkerThreads=workerThreads;
- const pairs=new J.ObjectLayerPairFilterTable(4);pairs.EnableCollision(0,1);pairs.EnableCollision(1,1);pairs.EnableCollision(0,3);
- const broad=new J.BroadPhaseLayerInterfaceTable(4,2),fixed=new J.BroadPhaseLayer(0),moving=new J.BroadPhaseLayer(1);for(let i=0;i<4;i++)broad.MapObjectToBroadPhaseLayer(i,i===0?fixed:moving);
- settings.mObjectLayerPairFilter=pairs;settings.mBroadPhaseLayerInterface=broad;settings.mObjectVsBroadPhaseLayerFilter=new J.ObjectVsBroadPhaseLayerFilterTable(broad,2,pairs,4);
- const engine=new J.JoltInterface(settings);J.destroy(settings);J.destroy(fixed);J.destroy(moving);
+ // The world is the core Jolt host's. Layers beyond its two: 2 collides with nothing, 3 with the fixed scenery only.
+ const host=createJoltHost(J,{layerCount:4,collide:[[0,1],[1,1],[0,3]],...(workerThreads!==undefined&&{workerThreads})}),engine=host.jolt;
  const physics=engine.GetPhysicsSystem(),api=physics.GetBodyInterface(),config=new J.PhysicsSettings();config.mNumVelocitySteps=velocitySteps;config.mNumPositionSteps=positionSteps;config.mUseLargeIslandSplitter=splitIslands;config.mTimeBeforeSleep=.5;config.mPointVelocitySleepThreshold=NATIVE_SLEEP_SPEED;if(penetrationSlop!==undefined)config.mPenetrationSlop=penetrationSlop;physics.SetPhysicsSettings(config);J.destroy(config);
  const groupFilter=new J.GroupFilterTable(8192);groupFilter.AddRef();
  const vector=new J.Vec3(0,0,0),spin=new J.Vec3(0,0,0),position=new J.RVec3(0,0,0),rotation=new J.Quat(0,0,0,1);
@@ -240,6 +238,6 @@ export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIsland
     settleFreeze=false;const sleepSettings=physics.GetPhysicsSettings();sleepSettings.mTimeBeforeSleep=1.5;sleepSettings.mPointVelocitySleepThreshold=.05;physics.SetPhysicsSettings(sleepSettings);
    }
    if(penetrationSlop===undefined&&context?.system?.floors.panels.some(p=>p.asset)){const settings=physics.GetPhysicsSettings();settings.mPenetrationSlop=.001;physics.SetPhysicsSettings(settings);}world.nativeSleep=true;original={addBody:world.addBody,removeBody:world.removeBody,addConstraint:world.addConstraint,removeConstraint:world.removeConstraint,step:world.step};for(const b of world.bodies)addBody(b);for(const c of world.constraints)addJoint(c);physics.OptimizeBroadPhase();world.addBody=function(b){original.addBody.call(world,b);addBody(b);return world;};world.removeBody=function(b){removeBody(b);original.removeBody.call(world,b);return world;};world.addConstraint=function(c){original.addConstraint.call(world,c);addJoint(c);};world.removeConstraint=function(c){removeJoint(c);original.removeConstraint.call(world,c);};world.step=step;},
-  dispose(){if(disposed)return;disposed=true;for(const c of [...joints.keys()])removeJoint(c);for(const b of [...bodies.keys()])removeBody(b);if(world){Object.assign(world,original);delete world.nativeSleep;}J.destroy(engine);J.destroy(contact);for(const shape of hullCache.values())shape.Release();hullCache.clear();groupFilter.Release();for(const object of [vector,spin,position,rotation,estimate])J.destroy(object);}
+  dispose(){if(disposed)return;disposed=true;for(const c of [...joints.keys()])removeJoint(c);for(const b of [...bodies.keys()])removeBody(b);if(world){Object.assign(world,original);delete world.nativeSleep;}host.dispose();J.destroy(contact);for(const shape of hullCache.values())shape.Release();hullCache.clear();groupFilter.Release();for(const object of [vector,spin,position,rotation,estimate])J.destroy(object);}
  };
 }

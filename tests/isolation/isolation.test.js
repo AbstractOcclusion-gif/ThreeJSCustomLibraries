@@ -33,9 +33,11 @@ const PAGES = {
   interaction: ['interaction', 'puzzle'],
   save: ['save'],
   lighting: ['lighting'],
+  // A third-person character and a chase-camera car are built on the camera tool by design.
+  character: ['character', 'camera'], vehicle: ['vehicle', 'camera'],
 };
 const EVERY_PAGE = ['core', 'stage', 'ui'];
-const MIXED_PAGES = ['demo-ocean', 'demo-all', 'demo-world', 'demo-craters', 'outdoor', 'demo-vehicle', 'demo-drive'];
+const MIXED_PAGES = ['demo-ocean', 'demo-all', 'demo-world', 'demo-craters', 'outdoor', 'demo-drive'];
 
 const posix = file => file.split(path.sep).join('/');
 function jsFiles(dir) {
