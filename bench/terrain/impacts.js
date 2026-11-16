@@ -150,6 +150,12 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    entry.body.velocity = velocity;
    mark(entry, {x: point.x, z: point.z}, speedChange > CONTACT.impactSpeed && world.time - entry.lastImpact > CONTACT.cooldown, speedChange);
   },
+  // Hook: the chip the ground throws at (x, z), as the tool's own contacts choose it: lying snow's, sand's where sand
+  // lies, else the bare ground's (its colour, and whether it bounces, sticks or rolls).
+  chipAt(x, z) {
+   const snowy = field.snowCover.value;
+   return (!snowy && field.sandWeightAt(x, z) > CONTACT.sandChipShare ? surfaces.sand : surfaces[snowy ? 'snow' : 'mud']).chip;
+  },
   // Ends the trail of an outside contact, so its next mark is not joined to the last.
   lift(key) { outside.delete(key); },
   get moving() { return (chips?.active ?? 0) > 0 || [...active.keys()].some(body => body.sleepState !== Body.SLEEPING); },

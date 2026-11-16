@@ -2,7 +2,7 @@
 // and character tools say what happened ('vehicle:track', 'character:track', 'character:land'), and each line here
 // hands that to the tool that owns the reaction. The terrain page's impacts tool digs the rut and stamps the track on
 // the play area (and keeps rock clean), its footstep tool prints the feet, the grass tool lays its blades along the
-// sweep, the particles tool throws clods from the ruts and dust on dry ground, and where the tools report water the
+// sweep, the particles tool throws the surface's own chips from the ruts (mud, sand or snow) and dust on dry ground, and where the tools report water the
 // river ripples and splashes. A hard landing digs a crater: the terrain's craterFromImpact shapes it from the body that
 // fell, its field digs it, and the field's 'terrain:crater' event throws the kit's shards and dust, clears the grass
 // and tells the host its ground changed. No reaction is computed here.
@@ -92,7 +92,8 @@ export function connectReactions({vehicle, controller, play, dressing, chips, pu
    point.set(event.to.x, event.to.y, event.to.z);
    if (event.speed >= clods.fromSpeed && count % clods.every === 0) {
     const {x, y, z} = velocity();
-    chips.emit(point, {...CONTACT_SURFACES.mud.chip, chips: wet ? clods.chips : clods.dryChips, size: clods.size}, event.speed * clods.shockPerSpeed, thrown.set(-x * clods.back, y + clods.up, -z * clods.back));
+    // What is thrown is the surface's own chip (the impacts tool's: its colour, its size, whether it bounces, sticks or rolls).
+    chips.emit(point, {size: clods.size, ...(area ? area.impacts.chipAt(point.x, point.z) : CONTACT_SURFACES.mud.chip), chips: wet ? clods.chips : clods.dryChips}, event.speed * clods.shockPerSpeed, thrown.set(-x * clods.back, y + clods.up, -z * clods.back));
    }
    if (!wet && event.speed >= dust.fromSpeed && count % dust.every === 0) puffs.dust(point, THREE.MathUtils.mapLinear(Math.min(event.speed, dust.fullSpeed), dust.fromSpeed, dust.fullSpeed, ...dust.size));
   }),
