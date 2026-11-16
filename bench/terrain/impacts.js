@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {Body, Box, Material, Sphere, Vec3, World} from 'cannon-es';
+import {TERRAIN_LAYERS} from '../../src/terrain/index.js';
 import {createSurroundCollider, createTerrainCollider} from './heightfield.js';
 
 const STEP = 1 / 120;
@@ -24,6 +25,8 @@ export const TRACK_RADIUS = Object.freeze({sphere: .31, box: .39});
 const IMPACT_CHIPS = Object.freeze({max: 26, perVolume: 30, size: 1.2, maxShock: 70, shockPerSpeed: 6});
 const MAX_BLOCKS = 8, ICE_BREAK_ENERGY = 1100, ICE_CRACK_RADIUS = 1.8, FALL_OUT_HEIGHT = -12;   // blocks; J; m; m
 const MAX_SUBSTEPS = 6;
+// Outside contacts (the press hook): rock weight from which the ground keeps no mark, and what stands still.
+const ROCK_SHARE = .5, ROCK_LAYER = TERRAIN_LAYERS.indexOf('rock'), AT_REST = Object.freeze(new Vec3());
 // Ground beyond the field (the `surround` option): a square `size` m wide sampled every `cell` m, laid again around
 // the latest body when it comes within `margin` m of the edge. Bodies it leaves behind are removed. Under the field
 // it is sunk by `sink` m.
@@ -81,6 +84,30 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
   if (previous) tracks.stamp(previous, point, trackRadius.box * entry.scale, strength);
  }
 
+ // One ground contact: the track stamp, the dig or the packed snow, and the chips of an impact.
+ function mark(entry, point, impact, speedChange) {
+  if (!impact && entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.printSpacing) return;
+  const y = field.heightAt(point.x, point.z);
+  if (y === undefined) return;
+  const snowy = field.snowCover.value;
+  const sand = snowy ? 0 : field.sandWeightAt(point.x, point.z);
+  const base = surfaces[entry.surface], style = sand > CONTACT.sandChipShare ? surfaces.sand : base;
+  const mix = key => THREE.MathUtils.lerp(base[key] ?? 0, surfaces.sand[key], sand);
+  const joined = entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.joinDistance;
+  stamp(entry, point, joined ? entry.last : null, impact ? 1 : CONTACT.rollingStrength);
+  const radius = (impact ? CONTACT.radius.impact : entry.kind === 'box' ? CONTACT.radius.box : CONTACT.radius.sphere) * entry.scale;
+  const volume = style.load !== undefined && snowy
+   ? field.compactSnow(point.x, point.z, radius, impact ? style.impactLoad : style.load, updateSample)
+   : field.deform(point.x, point.z, radius, impact ? mix('impact') : mix('print') * CONTACT.printDepthShare, updateSample, {rimShare: snowy ? 0 : mix('rimShare')});
+  if (impact) {
+   entry.lastImpact = world.time;
+   if (volume > 0) chips?.emit(new THREE.Vector3(point.x, y, point.z), {
+    ...style.chip, chips: Math.min(IMPACT_CHIPS.max, Math.ceil(volume * IMPACT_CHIPS.perVolume)), size: IMPACT_CHIPS.size,
+   }, Math.min(IMPACT_CHIPS.maxShock, speedChange * IMPACT_CHIPS.shockPerSpeed), entry.body.velocity);
+  }
+  entry.last = point;
+ }
+
  world.addEventListener('postStep', () => {
   strongest.clear();
   for (const contact of world.contacts) {
@@ -100,31 +127,31 @@ export function createTerrainImpacts({scene, field, tracks, material, ice, light
    const point = {x: ground.position.x + offset.x, z: ground.position.z + offset.z};
    const speedChange = contact.multiplier * STEP * entry.body.invMass;
    const impact = speedChange > CONTACT.impactSpeed && world.time - entry.lastImpact > CONTACT.cooldown;
-   if (!impact && entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.printSpacing) continue;
-   const y = field.heightAt(point.x, point.z);
-   if (y === undefined) continue;
-   const snowy = field.snowCover.value;
-   const sand = snowy ? 0 : field.sandWeightAt(point.x, point.z);
-   const base = surfaces[entry.surface], style = sand > CONTACT.sandChipShare ? surfaces.sand : base;
-   const mix = key => THREE.MathUtils.lerp(base[key] ?? 0, surfaces.sand[key], sand);
-   const joined = entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.joinDistance;
-   stamp(entry, point, joined ? entry.last : null, impact ? 1 : CONTACT.rollingStrength);
-   const radius = (impact ? CONTACT.radius.impact : entry.kind === 'box' ? CONTACT.radius.box : CONTACT.radius.sphere) * entry.scale;
-   const volume = style.load !== undefined && snowy
-    ? field.compactSnow(point.x, point.z, radius, impact ? style.impactLoad : style.load, updateSample)
-    : field.deform(point.x, point.z, radius, impact ? mix('impact') : mix('print') * CONTACT.printDepthShare, updateSample, {rimShare: snowy ? 0 : mix('rimShare')});
-   if (impact) {
-    entry.lastImpact = world.time;
-    if (volume > 0) chips?.emit(new THREE.Vector3(point.x, y, point.z), {
-     ...style.chip, chips: Math.min(IMPACT_CHIPS.max, Math.ceil(volume * IMPACT_CHIPS.perVolume)), size: IMPACT_CHIPS.size,
-    }, Math.min(IMPACT_CHIPS.maxShock, speedChange * IMPACT_CHIPS.shockPerSpeed), entry.body.velocity);
-   }
-   entry.last = point;
+   mark(entry, point, impact, speedChange);
   }
  });
 
+ // Whether the ground at a point takes marks: rock does not.
+ const takesMarks = (x, z) => field.layerWeightAt(x, z, ROCK_LAYER) < ROCK_SHARE;
+ const outside = new Map();
+
  return {
   onHeightSample: updateSample,
+  takesMarks,
+  // Hook for a contact the tool's own bodies did not make (a wheel, a foot of the host's): the same mark as theirs.
+  // key: what touches (one trail per key). point: {x, z}. scale: its size against the tool's test sphere.
+  // speedChange (m/s): above the impact speed it lands (deeper mark, chips). velocity: where its chips fly.
+  press(key, point, {scale = 1, speedChange = 0, velocity = AT_REST} = {}) {
+   if (!takesMarks(point.x, point.z)) { outside.delete(key); return; }
+   let entry = outside.get(key);
+   if (!entry) outside.set(key, entry = {kind: 'sphere', last: null, lastImpact: -Infinity, body: {velocity}});
+   entry.scale = scale;
+   entry.surface = field.snowCover.value ? 'snow' : 'mud';
+   entry.body.velocity = velocity;
+   mark(entry, {x: point.x, z: point.z}, speedChange > CONTACT.impactSpeed && world.time - entry.lastImpact > CONTACT.cooldown, speedChange);
+  },
+  // Ends the trail of an outside contact, so its next mark is not joined to the last.
+  lift(key) { outside.delete(key); },
   get moving() { return (chips?.active ?? 0) > 0 || [...active.keys()].some(body => body.sleepState !== Body.SLEEPING); },
   setSurface(surface) {
    for (const entry of active.values()) remove(entry);

@@ -2,6 +2,9 @@
 // snapping, pushing bodies); this adds the movement feel: acceleration, air control, coyote time, jump buffer and
 // variable jump height. No model, camera or input device: the host passes a world-space move direction every fixed
 // step and reads `position` (the feet) back. Gravity is the physics system's, along world Y.
+// Hooks, so the character needs no other module: subscribe(listener) hears what it does to the ground
+// ('character:track', 'character:jump', 'character:land'), for a host that has ground to mark, grass to bend or water
+// to splash; waterLevelAt(x, z), when the host has water, makes it wade slower. Without them it just walks.
 import {assertFrameTime} from '../core/validate.js';
 
 export const CHARACTER_DEFAULTS = Object.freeze({
@@ -21,6 +24,10 @@ export const CHARACTER_DEFAULTS = Object.freeze({
   stickDown: .4,        // m, how far it is pulled down to stay on a descending floor
   maxSlopeDegrees: 45,  // steeper ground is slid down, not walked
   turnSpeed: 10,        // rad/s, how fast it turns to face the way it moves
+  strideLength: 1.36,   // m walked on the ground between two 'character:track' events: a left and a right step
+  wadeFrom: .2,         // m of water at the feet where wading starts to slow it
+  wadeFull: 1.1,        // m where it is slowest
+  wadeLoss: .6,         // share of its speed lost there
 });
 // m. Gap Jolt keeps between the capsule and the world so it never starts a step in contact.
 const PADDING = .02;
@@ -31,7 +38,9 @@ const LEAVING_GROUND_SPEED = .1;
 
 const TURN = Math.PI * 2;
 
-export function createCharacterController({J, jolt, layer, position = [0, 0, 0], heading = 0, ...options} = {}) {
+const smoothstep = (value, from, to) => { const t = Math.min(1, Math.max(0, (value - from) / (to - from))); return t * t * (3 - 2 * t); };
+
+export function createCharacterController({J, jolt, layer, position = [0, 0, 0], heading = 0, waterLevelAt, ...options} = {}) {
   if (!J || !jolt || !Number.isInteger(layer)) throw Error('Character controller needs J (the Jolt module), jolt (its JoltInterface) and the object layer it collides as');
   const unknown = Object.keys(options).filter(key => !(key in CHARACTER_DEFAULTS));
   if (unknown.length) throw Error('Unknown character option: ' + unknown.join(', '));
@@ -78,7 +87,16 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
   const bodyFilter = new J.BodyFilter(), shapeFilter = new J.ShapeFilter();
 
   let coyote = 0, buffer = 0, jumpHeld = false, rising = false, disposed = false;
+  const listeners = new Set(), trail = {x: position[0], y: position[1], z: position[2], walked: 0};
+  let wasGrounded = false, fallSpeed = 0;
+  const tell = event => { for (const listener of listeners) listener(Object.freeze(event)); };
+  const waterOver = (x, y, z) => Math.max(0, (waterLevelAt?.(x, z) ?? -Infinity) - y);
   const state = {
+    wading: 1,       // share of its speed left by the water it stands in (1 = dry)
+    // listener(event) hears 'character:track' (a stride on the ground: {from, to ({x, y, z}), heading, speed, water}),
+    // 'character:jump' ({x, y, z}) and 'character:land' ({x, y, z, speed: m/s it came down at, water}). water: m of
+    // water over the point, 0 when dry. Returns unsubscribe.
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     position: {x: position[0], y: position[1], z: position[2]},   // feet, world space
     velocity: {x: 0, y: 0, z: 0},
     grounded: false,
@@ -115,7 +133,8 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
         const turn = ((Math.atan2(moveX, moveZ) - state.heading) % TURN + TURN * 1.5) % TURN - Math.PI, most = o.turnSpeed * (standing ? 1 : o.airControl) * dt;
         state.heading += Math.max(-most, Math.min(most, turn));
       }
-      const length = Math.hypot(moveX, moveZ), scale = (run ? o.runSpeed : o.walkSpeed) / Math.max(1, length);
+      state.wading = 1 - o.wadeLoss * smoothstep(waterOver(state.position.x, state.position.y, state.position.z), o.wadeFrom, o.wadeFull);
+      const length = Math.hypot(moveX, moveZ), scale = (run ? o.runSpeed : o.walkSpeed) * state.wading / Math.max(1, length);
       const wantedX = moveX * scale + (standing ? gx : 0), wantedZ = moveZ * scale + (standing ? gz : 0);
       const changeX = wantedX - vx, changeZ = wantedZ - vz, change = Math.hypot(changeX, changeZ);
       const limit = o.acceleration * (standing ? 1 : o.airControl) * dt, share = change > limit ? limit / change : 1;
@@ -131,6 +150,23 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
       const after = character.GetLinearVelocity();
       state.velocity.x = after.GetX(); state.velocity.y = after.GetY(); state.velocity.z = after.GetZ();
       state.grounded = character.GetGroundState() === J.EGroundState_OnGround;
+      if (listeners.size) {
+        if (state.jumped) tell({type: 'character:jump', x, y, z});
+        if (state.grounded && !wasGrounded) {
+          tell({type: 'character:land', x, y, z, speed: fallSpeed, water: waterOver(x, y, z)});
+          trail.x = x; trail.y = y; trail.z = z; trail.walked = 0;
+        }
+        if (state.grounded) {
+          trail.walked += state.speed * dt;
+          if (trail.walked >= o.strideLength) {
+            tell({type: 'character:track', from: {x: trail.x, y: trail.y, z: trail.z}, to: {x, y, z}, heading: state.heading, speed: state.speed, water: waterOver(x, y, z)});
+            trail.x = x; trail.y = y; trail.z = z; trail.walked = 0;
+          }
+        }
+      }
+      wasGrounded = state.grounded;
+      // Remembered while falling: the speed it lands at.
+      fallSpeed = state.grounded ? 0 : Math.max(0, -state.velocity.y);
       return state;
     },
     teleport(x, y, z, facing = state.heading) {
@@ -143,10 +179,13 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
       state.velocity.x = state.velocity.y = state.velocity.z = state.speed = 0;
       state.grounded = state.jumped = jumpHeld = rising = false;
       coyote = buffer = 0;
+      trail.x = x; trail.y = y; trail.z = z; trail.walked = 0;
+      wasGrounded = false; fallSpeed = 0;
     },
     dispose() {
       if (disposed) return;
       disposed = true;
+      listeners.clear();
       J.destroy(character);
       shape.Release();
       for (const object of [stepping, broadFilter, layerFilter, bodyFilter, shapeFilter, vector, gravity, place, upright]) J.destroy(object);

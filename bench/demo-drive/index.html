@@ -1,20 +1,10 @@
 <!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Drive demo</title>
-<style>
- body { margin: 0; background: #253b3a; color: white; font: 15px system-ui; }
- canvas { display: block; }
- aside { position: fixed; top: 1rem; left: 1rem; padding: 1rem; background: #121c20ed; border-radius: .5rem; }
- p { margin: .5rem 0; }
-</style>
-<aside>
- <strong>Drive demo</strong>
- <p>On foot: WASD move · Shift run · Space jump · E get in the car</p>
- <p>Driving: W / S throttle and brake-reverse · A / D steer · Space handbrake · E get out</p>
- <p>Click the view to look around (Esc to release) · R reset</p>
- <p id="status" role="status">Loading…</p>
-</aside>
-<script type="module" src="./main.js"></script>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>three-kit · Drive demo</title></head>
+<body>
+<header><div><small>THREE-KIT / DEMO</small><h1>Drive</h1></div><a href="../" target="_top">All modules ↗</a></header>
+<aside><p class="intro">A valley from the terrain tool, dressed with rocks, grass and woods, under the kit's weather. Walk it with the bot or drive it with the SUV.</p>
+<p>On foot: WASD move · Shift run · Space jump · E get in the car</p>
+<p>Driving: W / S throttle and brake-reverse · A / D steer · Space handbrake · E get out</p>
+<p>Click the view to look around (Esc to release) · R reset</p>
+<pre id="status" role="status">Loading…</pre><p id="error" role="alert" hidden></p></aside>
+<script type="module" src="./main.js"></script></body></html>

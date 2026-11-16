@@ -218,6 +218,8 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
   return {
     settings, stats,
     probed: [rockGroup, treeGroup],   // what the light probes are meant for: the things that stand on the ground
+    // Hook: something passed through the grass. The grass tool lays its blades along the sweep and lets them recover.
+    sweep(stretch) { for (const {field} of grassChunks.values()) field?.addSweep(stretch); },
     update(dt, camera, focus) {
       rockGroup.visible = settings.rocks; grassGroup.visible = settings.grass; treeGroup.visible = settings.trees;
       if (settings.rocks) updateRocks(focus);
