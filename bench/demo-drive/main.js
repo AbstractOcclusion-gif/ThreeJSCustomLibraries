@@ -12,6 +12,7 @@ import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createLightProbes, createLightRig, createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
 import {createSurfaceWeather} from '../../src/surface/index.js';
 import {createCameraCollision, createCameraDirector, createThirdPersonRig} from '../../src/camera/index.js';
+import {createSceneFogScope} from '../kit/scene-fog.js';
 import {createShadowReceivers} from '../kit/shadow-receivers.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
@@ -22,6 +23,7 @@ import {loadSuv} from '../demo-vehicle/suv.js';
 import {loadCharacter} from '../outdoor/character.js';
 import {createPlayers} from './players.js';
 import {connectReactions} from './reactions.js';
+import {createRiver} from './river.js';
 import '../bench.css';
 
 // The terrain, as the World demo: half-metre cells in the nearest ring, one ring refreshed a frame, a third of the
@@ -30,7 +32,8 @@ const CLIP = {...CLIPMAP_DEFAULTS, cells: 128, cellSize: .5}, RINGS_PER_FRAME = 
 const SEED = 17, BIOME = 'valley';
 // The valley: the World demo's corridor shape, `length` m long, closed by its walls and at both ends.
 const VALLEY = {length: 620, width: 44, shoulder: 150, wall: 26, floor: 4, floorRelief: .4, bend: 34, bendScale: 170, endRamp: 90, sectionBlend: 90};
-const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
+// Shore: m of wet ground at the water's edge. The river's box: the route sampled every `step` m, `margin` m wider than the floor.
+const WATER = {shoreWidth: .8, step: 10, margin: 8};
 const APPEARANCE = {edgeSharpness: .25, rockScale: .18, antiTiling: 0, layerDetail: 0};
 // The light and what the sky costs, as the World demo. scanSeconds: how often new materials are looked for.
 const LIGHT = {shadowDistance: 160, airDensity: .0012, sunInAir: 1.5, scanSeconds: 2};
@@ -84,14 +87,6 @@ const clipmap = createTerrainClipmap({world: land, ...CLIP, ...BAKE, createMater
  detailNormal: textures.detail, appearance, sandLook, weather: surfaceWeather, cutout})});
 scene.add(clipmap.group);
 clipmap.update(focus.x, focus.z);
-// The river, as the World demo draws it: a sheet at the water level that follows the view.
-const waterSheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
- new THREE.MeshStandardMaterial({color: WATER.color, transparent: true, opacity: WATER.opacity, roughness: WATER.roughness, depthWrite: false}));
-waterSheet.renderOrder = 1;
-waterSheet.scale.setScalar(clipmap.extent);
-waterSheet.position.y = land.waterLevel;
-scene.add(waterSheet);
-
 const environment = weather.view.environment;
 const dressing = createWorldDressing({scene, world: land, renderer, environment, report});
 
@@ -106,6 +101,11 @@ const shadowReceivers = createShadowReceivers(scene, sunShadows, weather.view);
 for (const {material} of clipmap.rings) lightRig.applyTo(material);
 const probes = createLightProbes({ground: terrainLightGround({world: land, palette: {...land.palette, means: textures.means}, appearance, sandColor: sandLook.color.value})});
 const lighting = createLighting({ambient: probes.ambient, sun: sunCover, lights: lightRig.lights});
+// The river: reactive water over the whole valley floor, in the box the route sweeps.
+const routeXs = Array.from({length: Math.floor(route.length / WATER.step) + 1}, (_, i) => route.routeX(i * WATER.step)), reach = VALLEY.width / 2 + WATER.margin;
+const river = createRiver({renderer, scene, camera, land, weatherView: weather.view, sunCover,
+ bounds: {x: [Math.floor(Math.min(...routeXs) - reach), Math.ceil(Math.max(...routeXs) + reach)], z: [0, route.length]}});
+const withSceneFog = createSceneFogScope(scene, camera, lighting);
 const probed = new WeakSet();
 function findReceivers() {
  shadowReceivers.update();
@@ -176,7 +176,7 @@ const chips = createChips(scene, {pool: PARTICLES.chips});
 chips.setGround(land.heightAt);
 const puffs = await createPuffs(scene, {pool: PARTICLES.puffs, environment});
 const reactions = connectReactions({vehicle: players.vehicle, controller: players.controller, play, dressing, chips, puffs,
- wetness: () => surfaceWeather.levels.value.x, velocity: () => players.chassis.velocity});
+ wetness: () => surfaceWeather.levels.value.x, velocity: () => players.chassis.velocity, river});
 
 // Cameras: one third-person rig per seat; the ground pushes the camera in.
 const rigs = {walk: createThirdPersonRig(VIEW.walk), drive: createThirdPersonRig(VIEW.drive)};
@@ -191,6 +191,7 @@ let swap = false;
 function reset() {
  players.reset();
  chips.clear();
+ river.clear();
  clock.reset();
  aimCameras(spawn.heading);
  director.select('walk', {duration: 0});
@@ -267,18 +268,21 @@ startFrameLoop(renderer, (dt, now) => {
  surfaceWeather.update(dt, weather.system.weather);
  clipmap.group.position.y = snowLift();
  clipmap.update(focus.x, focus.z, RINGS_PER_FRAME);
- waterSheet.position.x = focus.x; waterSheet.position.z = focus.z;
  dressing.update(dt, camera, focus);
  keepPlayArea(focus);
  play.setSnow(surfaceWeather.levels.value.y > PLAY_SNOW_FROM);
  play.update(dt);
  chips.update(dt);
  puffs.update(dt);
+ river.update(dt);
  camera.updateMatrixWorld();
  lightRig.update(camera.position);
  lightRig.renderShadows(scene);
  sunShadows.render(scene, camera, environment.sun.direction);
+ // The water captures its bed with the frame's shadows, the weather draws the frame, the splashes go over it.
+ withSceneFog(false, () => river.render());
  weather.view.render(volumetric.capture(scene, camera, environment));
+ river.renderSplashes();
  weatherUI.sync();
  if (now - lastStatus >= STATUS_REFRESH_MS) {
   lastStatus = now;
@@ -288,7 +292,7 @@ startFrameLoop(renderer, (dt, now) => {
  }
 });
 document.body.dataset.ready = 'true';
-window.driveDemo = {players, land, clipmap, play, dressing, weather, surfaceWeather, chips, puffs, reset};
+window.driveDemo = {players, land, clipmap, play, dressing, weather, surfaceWeather, chips, puffs, river, reset};
 onLeave(() => {
  renderer.setAnimationLoop(null);
  window.removeEventListener('keydown', keydown);
@@ -297,10 +301,10 @@ onLeave(() => {
  window.removeEventListener('mousemove', mousemove);
  renderer.domElement.removeEventListener('click', capturePointer);
  unbindResize(); weatherUI.dispose();
- reactions.dispose(); players.dispose(); suv.dispose(); chips.dispose(); puffs.dispose();
+ reactions.dispose(); players.dispose(); suv.dispose(); chips.dispose(); puffs.dispose(); river.dispose();
  shadowReceivers.dispose(); play.dispose(); dressing.dispose();
  sunShadows.dispose(); volumetric.dispose(); lightRig.dispose(); probes.dispose(); weather.view.dispose();
- scene.remove(clipmap.group, waterSheet); clipmap.dispose(); waterSheet.geometry.dispose(); waterSheet.material.dispose();
+ scene.remove(clipmap.group); clipmap.dispose();
  for (const texture of Object.values(textures)) texture?.dispose?.();
  playWorker.terminate(); playRequests.clear(); playCompileTarget.dispose();
  const resources = new Set();
