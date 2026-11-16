@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drive demo</title>
+<style>
+ body { margin: 0; background: #253b3a; color: white; font: 15px system-ui; }
+ canvas { display: block; }
+ aside { position: fixed; top: 1rem; left: 1rem; padding: 1rem; background: #121c20ed; border-radius: .5rem; }
+ p { margin: .5rem 0; }
+</style>
+<aside>
+ <strong>Drive demo</strong>
+ <p>On foot: WASD move · Shift run · Space jump · E get in the car</p>
+ <p>Driving: W / S throttle and brake-reverse · A / D steer · Space handbrake · E get out</p>
+ <p>Click the view to look around (Esc to release) · R reset</p>
+ <p id="status" role="status">Loading…</p>
+</aside>
+<script type="module" src="./main.js"></script>
+</html>
