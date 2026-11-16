@@ -19,6 +19,7 @@ import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {loadTerrainPalette} from '../terrain/textures.js';
 import {createTerrainPlay, PLAY} from '../terrain/play.js';
 import {createWorldDressing} from '../demo-world/dressing.js';
+import {PLAY_SNOW_FROM, RINGS_PER_FRAME, SHORE_WIDTH, VALLEY_SHAPE, WORLD_APPEARANCE as APPEARANCE, WORLD_BAKE as BAKE, WORLD_COST as COST, WORLD_LIGHT as LIGHT, WORLD_RINGS, WORLD_WEATHER as WEATHER} from '../kit/world-settings.js';
 import {loadSuv} from '../demo-vehicle/suv.js';
 import {loadCharacter} from '../outdoor/character.js';
 import {createPlayers} from './players.js';
@@ -26,22 +27,15 @@ import {connectReactions} from './reactions.js';
 import {createRiver} from './river.js';
 import '../bench.css';
 
-// The terrain, as the World demo: half-metre cells in the nearest ring, one ring refreshed a frame, a third of the
-// library's background bake budget.
-const CLIP = {...CLIPMAP_DEFAULTS, cells: 128, cellSize: .5}, RINGS_PER_FRAME = 1, BAKE = {normalSamples: 1600, skySamples: 1300};
+// Rings, light, cost and weather settings are the kit's (bench/kit/world-settings.js), shared with the World demo.
+const CLIP = {...CLIPMAP_DEFAULTS, ...WORLD_RINGS};
 const SEED = 17, BIOME = 'valley';
-// The valley: the World demo's corridor shape, `length` m long, closed by its walls and at both ends.
-const VALLEY = {length: 620, width: 44, shoulder: 150, wall: 26, floor: 4, floorRelief: .4, bend: 34, bendScale: 170, endRamp: 90, sectionBlend: 90};
-// Shore: m of wet ground at the water's edge. The river's box: the route sampled every `step` m, `margin` m wider than the floor.
-const WATER = {shoreWidth: .8, step: 10, margin: 8};
-const APPEARANCE = {edgeSharpness: .25, rockScale: .18, antiTiling: 0, layerDetail: 0};
-// The light and what the sky costs, as the World demo. scanSeconds: how often new materials are looked for.
-const LIGHT = {shadowDistance: 160, airDensity: .0012, sunInAir: 1.5, scanSeconds: 2};
-const COST = {skyCapture: 1.25, skyLighting: 8, pixelRatio: 1, fpsSmoothing: .1};
-const WEATHER = {initial: 'cloudy 1', hour: 14, rain: {count: 360, radius: 32, height: 34, floorHeight: 0}};
+// The valley: the kit's corridor shape, `length` m long, closed by its walls and at both ends.
+const VALLEY = {length: 620, ...VALLEY_SHAPE};
+// The river's box: the route sampled every `step` m, `margin` m wider than the floor.
+const WATER = {step: 10, margin: 8};
 // Where the two start: m along the valley, and m beside its route (the river runs along the route).
 const SPAWN = {along: 140, car: 14, walker: 18, walkerAhead: 3};   // the floor lies 8 to 20 m from the route
-const PLAY_SNOW_FROM = .5;   // snow cover of the ground from which the play area lies under real snow, as the World demo
 // Particles thrown by the wheels: pool sizes of the chips (clods) and of the dust puffs.
 const PARTICLES = {chips: 160, puffs: 96};
 // Cameras: arm (m), angle above the target (rad), look-at height (m); the drive camera swings behind the car (1/s).
@@ -79,7 +73,7 @@ weather.view.configure({sky: {captureInterval: COST.skyCapture, lightingInterval
 const {textures, missing} = await loadTerrainPalette(renderer, land.palette);
 const appearance = createTerrainAppearance(), sandLook = createSandLook(), surfaceWeather = createSurfaceWeather();
 for (const [key, value] of Object.entries(APPEARANCE)) appearance[key].value = value;
-appearance.shoreWidth.value = WATER.shoreWidth;
+appearance.shoreWidth.value = SHORE_WIDTH;
 appearance.waterLevel.value = land.waterLevel;
 const cutout = {value: new THREE.Vector4()};   // the square of ground the play area draws in place of the rings
 const clipmap = createTerrainClipmap({world: land, ...CLIP, ...BAKE, createMaterial: field => createTerrainMaterial({}, {

@@ -58,7 +58,9 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     const sky = {map: createDataTexture(skyData, skySide, skySide, {format: THREE.RedFormat, filter: 'linear'}), bounds: field.bounds};
     const material = createTerrainMaterial({polygonOffset: true, polygonOffsetFactor: PLAY.offset, polygonOffsetUnits: PLAY.offset}, {
       field, palette: {...ground.palette, means: loaded.means}, layerArray: loaded.layerArray, layerDetailArray: loaded.layerDetailArray,
-      detailNormal: loaded.detail, appearance, sandLook, weather, tracks, trackContrast: PLAY.trackContrast, sky});
+      // No fracture mask: with its tracks, its snow, its sky map and the weather's shadows the area is at the 16 textures
+      // of a shader, and nothing cracks the ground here.
+      detailNormal: loaded.detail, appearance, sandLook, weather, tracks, trackContrast: PLAY.trackContrast, sky, fracture: false});
     const mesh = new THREE.Mesh(field.geometry, material);
     mesh.receiveShadow = true;
     mesh.visible = !prepare;

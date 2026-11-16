@@ -104,8 +104,10 @@ export function terrainLightGround({world, palette = world?.palette, appearance,
 }
 
 export function createTerrainMaterial(parameters = {}, {
- field, layers, layerArray, layerDetailArray, palette, cutout, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, sky, ...surface
+ field, layers, layerArray, layerDetailArray, palette, cutout, detailNormal, appearance = createTerrainAppearance(), contactBand, snowMaterial, snowLook = createSnowLook(), sandLook = createSandLook(), drainage, runoffFlow, puddleSky, sky, fracture = true, ...surface
 } = {}) {
+ // fracture: false leaves the field's fracture mask (the cracks of hard ground) out of the shader. It is one texture,
+ // and a material that already carries tracks, snow and the weather's shadows has none to spare of the 16 a GPU gives.
  // sky: {map, bounds} - a sky visibility map (bakeSkyMap) and the Vector4 world XZ origin and size it covers.
  // Default: the field's own skyMap (a clipmap ring), over the field.
  const skyMap = sky ?? (field?.skyMap ? {map: field.skyMap, bounds: field.bounds} : null);
@@ -146,7 +148,7 @@ export function createTerrainMaterial(parameters = {}, {
  if (palette && field.climateMap) material.defines = {...material.defines, TERRAIN_CLIMATE: 1};
  const paletteRoles = palette ? Array.from({length: palette.size}, (_, index) => Math.max(0, TERRAIN_PALETTE_ROLES.indexOf(palette.roles[index]))) : [];
  if (field.sandMap) material.defines = {...material.defines, TERRAIN_SAND: 1};
- if (field.fractureMap) material.defines = {...material.defines, TERRAIN_FRACTURE: 1};
+ if (fracture && field.fractureMap) material.defines = {...material.defines, TERRAIN_FRACTURE: 1};
  if (field.snowMap) material.defines = {...material.defines, TERRAIN_SNOW_MAP: 1};
  if (layerArray) material.defines = {...material.defines, TERRAIN_LAYER_ARRAY: 1};
  if (layerDetailArray) material.defines = {...material.defines, TERRAIN_LAYER_DETAIL: 1};
