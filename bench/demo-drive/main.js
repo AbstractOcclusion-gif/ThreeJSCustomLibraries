@@ -1,7 +1,8 @@
 // Mixed demo: a valley to walk and drive in. The terrain tool draws the ground, Jolt (through the destruction module's
 // driver, with Cannon bodies as the model) carries the SUV from the vehicle module and the bot on the character
 // controller; E swaps between the two. Wheels and feet stamp one track mask: the ground shows the marks and the grass
-// lies down along them. Reactive water plugs into this scene next.
+// lies down along them. The pond and the stream are the water module's inland surface: wheels and feet ripple and
+// splash it, deep water drags the car and drowns its engine, and the walker wades.
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import initJolt from 'jolt-physics';
@@ -11,6 +12,8 @@ import {seededRandom} from '../../src/core/hash.js';
 import {valueNoise} from '../../src/core/value-noise.js';
 import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS} from '../../src/terrain/index.js';
 import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
+import {CHANNEL_OBSTACLE_COUNT, createChannelSurface, createFlowBake, createRipples, proceduralSky} from '../../src/water/index.js';
+import {createImpactSplash, createParticleDepthBinding} from '../../src/particles/water/index.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createCameraCollision, createCameraDirector, createThirdPersonRig} from '../../src/camera/index.js';
 import {createCharacterController} from '../../src/character/index.js';
@@ -19,11 +22,13 @@ import {createJoltDriver} from '../../src/destruction/jolt-driver.js';
 import {createTerrainCollider} from '../terrain/heightfield.js';
 import {grassCoverageAt} from '../terrain/controls.js';
 import {loadTerrainTextures} from '../terrain/textures.js';
+import {createBenchPondSettings} from '../water/controls.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
 import {loadSuv} from '../demo-vehicle/suv.js';
 import {loadCharacter} from '../outdoor/character.js';
 import {createMarks} from './marks.js';
 import {VALLEY, WATER_LEVEL, valleyHeights} from './valley.js';
+import {carInWater, createWaterContacts, walkerInWater} from './wading.js';
 
 // Ground paint: rock on steep slopes, mud up to mudBelow m (the banks), no snow or forest floor in this valley.
 const RULES = {rockSlope: .8, snowLine: 60, mudBelow: .7, mudBlend: .9, forestCover: 0};
@@ -54,6 +59,9 @@ const VIEW = {
  sensitivity: .0025,   // mouse turn, rad per pixel
 };
 const DROP_HEIGHT = 1.2;       // m above the ground the car is set down from
+// Water. The surface is cut from the terrain cells whose ground comes within `shore` m of the water level. The ripple
+// field is one grid (cell m) from the stream's south bank to the pond's north bank (z from..to), across the valley.
+const WATER = {shore: .65, rippleCell: .5, rippleZ: [-60, 60], softParticles: .25};
 // Unseen walls just inside the valley's edge (m): a car at speed has the momentum to clear the rim.
 const WALL = {inset: 3, height: 90, thickness: 2};
 const MOVE = {KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [1, 0], ArrowLeft: [1, 0], KeyD: [-1, 0], ArrowRight: [-1, 0]};
@@ -94,11 +102,36 @@ for (let i = 0; i < GRASS.tries; i++) {
 }
 const grass = createGrassField({scene, geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff, placements,
  tileSize: GRASS.tileSize, flatColorMix: GRASS.flatColorMix, contactTracks: tracks, followTracks: true});
-// Stand-in water: a flat sheet at the water level until the reactive surface replaces it.
-const water = new THREE.Mesh(new THREE.PlaneGeometry(VALLEY.span, VALLEY.span).rotateX(-Math.PI / 2),
- new THREE.MeshStandardMaterial({color: 0x2f6f86, roughness: .15, metalness: .1, transparent: true, opacity: .72}));
-water.position.y = WATER_LEVEL;
-scene.add(water);
+// Water: the inland surface over every terrain cell that can be wet, sharing the ground's heights as its bed.
+const sky = proceduralSky();
+sky.setEnvironment(stage.environment);
+const ripples = createRipples({origin: [-half, WATER.rippleZ[0]],
+ size: [Math.round(VALLEY.span / WATER.rippleCell), Math.round((WATER.rippleZ[1] - WATER.rippleZ[0]) / WATER.rippleCell)], cell: WATER.rippleCell});
+ripples.mask((x, z) => field.heightAt(x, z) < WATER_LEVEL);
+const obstacles = Array.from({length: CHANNEL_OBSTACLE_COUNT}, () => new THREE.Vector4());
+const flowBake = createFlowBake();
+const water = createChannelSurface({renderer, scene, camera, sky, ripples, obstacles, flow: flowBake, clipToBed: true, pondOptics: true});
+const waterGeometry = field.geometry.clone(), waterPositions = waterGeometry.getAttribute('position'), bed = field.heightMap.image.data;
+waterGeometry.setAttribute('bedHeight', new THREE.BufferAttribute(bed, 1));
+for (let i = 0; i < waterPositions.count; i++) waterPositions.setY(i, 0);
+const cells = field.geometry.index.array, wetCells = [];
+for (let i = 0; i < cells.length; i += 3) {
+ if (Math.min(bed[cells[i]], bed[cells[i + 1]], bed[cells[i + 2]]) < WATER_LEVEL + WATER.shore) wetCells.push(cells[i], cells[i + 1], cells[i + 2]);
+}
+waterGeometry.setIndex(wetCells);
+waterGeometry.computeVertexNormals();
+water.surface.geometry.dispose();
+water.surface.geometry = waterGeometry;
+water.surface.position.y = WATER_LEVEL;
+const waterSettings = createBenchPondSettings();
+// Splashes are drawn in their own pass over the frame, faded against the water's depth capture.
+const fxScene = new THREE.Scene(), splashPoint = new THREE.Vector3();
+const splashDepth = createParticleDepthBinding({THREE, camera, depthTexture: water.depthTexture, viewport: water.viewport,
+ waterPlane: new THREE.Vector4(0, 1, 0, -WATER_LEVEL), softDistance: WATER.softParticles});
+const splash = createImpactSplash({THREE, scene: fxScene, depth: splashDepth, lighting: {
+ uniforms: {uSunCol: sky.uniforms.uSunCol, uFxAmbient: sky.uniforms.uAmb}, direction: sky.uniforms.uSkySunDir.value}});
+splash.ready.catch(console.error);
+const contacts = createWaterContacts({ripples, splash: (x, z, strength, radius) => splash.emit(splashPoint.set(x, WATER_LEVEL, z), strength, radius)});
 
 // Physics.
 const J = await initJolt();
@@ -148,6 +181,9 @@ function groundAt(foot, normal) {
 const keys = new Set(), move = new THREE.Vector2(), drive = {throttle: 0, steer: 0, handBrake: false};
 const target = new THREE.Vector3(), forward = new THREE.Vector3(), left = new THREE.Vector3(), clock = createFixedStep();
 let mode = 'walk', grounded = false, jumped = false, swap = false;
+// Height of the chassis centre over the wheel bottoms: what the water level is measured against on the car.
+const rideHeight = suv.layout.wheelRadius + SUSPENSION.rest - SUSPENSION.mount;
+let time = 0, engine = 1;   // engine: share of the throttle the engine answers (1 = dry, 0 = drowned)
 const carHeading = () => { forward.set(0, 0, 1).applyQuaternion(chassis.quaternion); return Math.atan2(forward.x, forward.z); };
 const doorDistance = () => Math.hypot(controller.position.x - chassis.position.x, controller.position.z - chassis.position.z);
 
@@ -160,6 +196,10 @@ function reset() {
  grounded = jumped = swap = false;
  character.reset();
  marks.reset();
+ contacts.reset();
+ ripples.clear();
+ splash.clear();
+ chassis.force.setZero();
  clock.reset();
  director.select('walk', {duration: 0});
  director.reset();
@@ -191,15 +231,20 @@ function simulate(dt) {
  if (swap) { swap = false; swapSeats(); }
  move.set(0, 0);
  for (const key of keys) { const axis = MOVE[key]; if (axis) { move.x += axis[0]; move.y += axis[1]; } }
+ // Water on the car: drag against its velocity, and an engine that drowns as the water climbs over it.
+ const flooded = carInWater(WATER_LEVEL - (chassis.position.y - rideHeight)), drift = chassis.velocity, driftSpeed = drift.length();
+ chassis.force.set(-drift.x * driftSpeed * flooded.drag, -drift.y * driftSpeed * flooded.drag, -drift.z * driftSpeed * flooded.drag);
+ engine = flooded.throttle;
  if (mode === 'drive') {
   // A / D give +1 / -1 on move.x (left is +X); the vehicle wants steer right positive.
-  drive.throttle = move.y; drive.steer = -move.x; drive.handBrake = keys.has('Space');
+  drive.throttle = move.y * flooded.throttle; drive.steer = -move.x; drive.handBrake = keys.has('Space');
   vehicle.update(drive);
  } else {
   // The parked car holds its handbrake. Keys are relative to the camera: forward is the way it looks.
   drive.throttle = drive.steer = 0; drive.handBrake = true;
   vehicle.update(drive);
   if (move.lengthSq() > 1) move.normalize();
+  move.multiplyScalar(walkerInWater(WATER_LEVEL - controller.position.y));
   const sin = Math.sin(rigs.walk.yaw), cos = Math.cos(rigs.walk.yaw);
   controller.update(dt, {moveX: sin * move.y + cos * move.x, moveZ: cos * move.y - sin * move.x,
    run: RUN_KEYS.some(key => keys.has(key)), jump: keys.has('Space')});
@@ -238,8 +283,12 @@ startFrameLoop(renderer, dt => {
  car.quaternion.copy(chassis.quaternion);
  vehicle.readWheels().forEach((wheel, i) => { wheels[i].position.copy(wheel.position); wheels[i].quaternion.copy(wheel.quaternion); });
  marks.wheels(dt, vehicle.wheels);
+ const carSpeed = Math.abs(vehicle.speed);
+ for (const wheel of vehicle.wheels) contacts.touch(dt, wheel.name, {x: wheel.position.x, z: wheel.position.z,
+  depth: WATER_LEVEL - (wheel.position.y - suv.layout.wheelRadius), speed: carSpeed, size: 1});
  if (mode === 'walk') {
   marks.feet(dt, {x: controller.position.x, z: controller.position.z, heading: controller.heading, speed: controller.speed, grounded});
+  contacts.touch(dt, 'walker', {x: controller.position.x, z: controller.position.z, depth: WATER_LEVEL - controller.position.y, speed: controller.speed});
   walker.position.copy(controller.position);
   walker.rotation.y = controller.heading;
   character.update(dt, {moving: move.lengthSq() > 0, speed: controller.speed, grounded, jumped, preview: false, groundAt});
@@ -252,14 +301,25 @@ startFrameLoop(renderer, dt => {
   rigs.drive.look(behind * (1 - Math.exp(-dt * VIEW.drive.follow)), 0);
   target.copy(car.position).y += VIEW.drive.height;
   const speed = Math.abs(vehicle.speed);
-  status.textContent = Math.round(speed * MS_TO_KMH) + ' km/h' + (speed <= DOOR.maxSpeed ? ' · E · get out' : '');
+  status.textContent = Math.round(speed * MS_TO_KMH) + ' km/h' + (engine < 1 ? engine > 0 ? ' · engine taking water' : ' · engine drowned (R resets)' : '')
+   + (speed <= DOOR.maxSpeed ? ' · E · get out' : '');
  }
  director.update(dt, {target});
  grass.update(dt, {camera});
  stage.update(camera);
+ time += dt;
+ ripples.update(dt);
+ splash.update(dt);
+ // The water captures its bed first, then the frame is drawn, then the splashes over it.
+ water.render(time, {...waterSettings, waveTime: time});
  renderer.render(scene, camera);
+ if (splash.active > 0) {
+  renderer.autoClear = false;
+  try { renderer.render(fxScene, camera); }
+  finally { renderer.autoClear = true; }
+ }
 });
-window.driveDemo = {vehicle, controller, chassis, world, field, tracks, reset};
+window.driveDemo = {vehicle, controller, chassis, world, field, tracks, ripples, water, reset};
 onLeave(() => {
  renderer.setAnimationLoop(null);
  window.removeEventListener('keydown', keydown);
@@ -272,12 +332,17 @@ onLeave(() => {
  controller.dispose();
  driver.dispose();
  suv.dispose();
+ splash.dispose();
+ water.dispose();
+ flowBake.dispose?.();
+ ripples.dispose();
+ waterGeometry.dispose();
  grass.dispose();
  meadow.dispose();
  tracks.dispose();
  stage.dispose();
  field.dispose();
- const resources = new Set([groundMaterial, water.geometry, water.material, textures.layerArray, textures.layerDetailArray, textures.detail, textures.rock]);
+ const resources = new Set([groundMaterial, textures.layerArray, textures.layerDetailArray, textures.detail, textures.rock]);
  walker.traverse(node => {
   if (!node.isMesh) return;
   resources.add(node.geometry);
