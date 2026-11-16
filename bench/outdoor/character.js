@@ -188,12 +188,14 @@ export async function loadCharacter(mode) {
   start();
  }, update(dt, {moving, speed = 0, grounded, jumped, preview, groundAt}) {
   feet?.restore();
+  // Landing on the move goes straight back to the gait: the landing clip stands still, and the body would slide under it.
+  const pace = preview ? (moving ? gaits[0]?.speed ?? GAIT.startSpeed : 0) : speed, travelling = pace >= GAIT.startSpeed;
   let next = state;
   if (preview || !actions.airborne) next = 'ground';
   else if (jumped) next = 'takeoff';
   else if (!grounded) { if (state !== 'takeoff' || finished) next = 'airborne'; }
-  else if (previousGround === false) next = 'land';
-  else if (state !== 'land' || finished) next = 'ground';
+  else if (previousGround === false) next = travelling ? 'ground' : 'land';
+  else if (state !== 'land' || finished || travelling) next = 'ground';
   previousGround = preview ? undefined : grounded;
   if (next !== state) {
    state = next;
@@ -216,7 +218,6 @@ export async function loadCharacter(mode) {
   // Ground speed picks the gaits: each one is at full weight from its own stride speed up to the handover speed, where
   // the next gait blends in; the handover never passes the midpoint between two gaits.
   const handover = (slow, fast) => Math.min(slow.speed * GAIT.stretch, (slow.speed + fast.speed) / 2);
-  const pace = preview ? (moving ? gaits[0]?.speed ?? GAIT.startSpeed : 0) : speed;
   const moveShare = gaits.length ? Math.min(1, pace / GAIT.startSpeed) : 0;
   let total = 0;
   gaits.forEach((gait, i) => {
