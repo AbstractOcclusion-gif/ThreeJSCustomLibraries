@@ -217,7 +217,7 @@ export function createJoltDriver(J,{velocitySteps=12,positionSteps=4,splitIsland
  return{
   name:'Jolt',heavyStep:1/120,rigidStep:1/60,
   // For hosts that add their own Jolt objects (a character controller): the native interface and the object layers bodies get.
-  native:engine,layers:Object.freeze({fixed:0,moving:1}),optimizeBroadPhase(){physics.OptimizeBroadPhase();},
+  native:engine,layers:Object.freeze({fixed:0,moving:1}),nativeBody(body){const r=bodies.get(body);if(!r)throw Error('Unknown body');return r.native;},optimizeBroadPhase(){physics.OptimizeBroadPhase();},
   // Explicit fixed attachment motion; ordinary static scenery is untouched.
   moveFixedBody(body){const r=bodies.get(body);if(!r||body.mass!==0)throw Error('Unknown fixed attachment');put(position,body.position);rotation.Set(body.quaternion.x,body.quaternion.y,body.quaternion.z,body.quaternion.w);api.SetPositionAndRotation(r.native.GetID(),position,rotation,J.EActivation_DontActivate);releaseAround(body,{reason:'attachment-moved'});for(const [c]of joints)if(c.bodyA===body||c.bodyB===body){const other=c.bodyA===body?c.bodyB:c.bodyA;other.wakeUp();const o=bodies.get(other);if(o)api.ActivateBody(o.native.GetID());}},
   get frozen(){return frozenCount;},
