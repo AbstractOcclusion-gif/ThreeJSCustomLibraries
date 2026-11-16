@@ -9,7 +9,7 @@ import {createCharacterController} from '../../src/character/index.js';
 import {createJoltDriver} from '../../src/destruction/jolt-driver.js';
 import {createTerrainCollider} from '../terrain/heightfield.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
-import {loadCharacter} from './character.js';
+import {loadCharacter} from '../character/character.js';
 import {createOutdoorProps} from './props.js';
 
 const COURSE = {span: 32, resolution: 65, step: [.95, .16, .65]};

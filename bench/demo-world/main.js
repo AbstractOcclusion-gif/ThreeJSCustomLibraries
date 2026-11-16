@@ -22,24 +22,19 @@ import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} f
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {loadTerrainPalette} from '../terrain/textures.js';
 import {createWorldDressing} from './dressing.js';
+import {PLAY_SNOW_FROM, RINGS_PER_FRAME, SHORE_WIDTH, VALLEY_SHAPE, WORLD_APPEARANCE as APPEARANCE, WORLD_BAKE as BAKE, WORLD_COST as COST, WORLD_LIGHT as LIGHT, WORLD_RINGS, WORLD_WEATHER as WEATHER} from '../kit/world-settings.js';
 import '../bench.css';
 
 const query = new URLSearchParams(location.search);
 // ?cells= and ?levels= size the rings down for a slow machine or a test; ?trees=0 leaves the tree models out.
-const CLIP = {...CLIPMAP_DEFAULTS, cells: 128, cellSize: .5,
+const CLIP = {...CLIPMAP_DEFAULTS, ...WORLD_RINGS,
   ...Object.fromEntries(['cells', 'levels'].filter(key => query.has(key)).map(key => [key, Number(query.get(key))]))};
-const RINGS_PER_FRAME = 1;
-// Relief samples the rings may spend per frame on their background bakes (far normals, sky map): a third of the
-// library defaults, so a moving view does not pay for them every frame.
-const BAKE = {normalSamples: 1600, skySamples: 1300};
 const SEED = 17;
 // The corridor: stretches of biome in this order from its start, each `stretch` m long, between walls.
 const BIOMES = ['valley', 'dry', 'alpine', 'mountains'];
-// Wide, gentle sides and a floor a few metres above the water leave room for grass and woods on the way through.
-const CORRIDOR = {stretch: 620, width: 44, shoulder: 150, wall: 26, floor: 4, floorRelief: .4, bend: 34, bendScale: 170, endRamp: 90, sectionBlend: 90};
-const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: .8};
-// As the terrain tool: soft junctions and rock drawn large, for a landscape rather than a close-up.
-const APPEARANCE = {edgeSharpness: .25, rockScale: .18, antiTiling: 0, layerDetail: 0};
+// The shape of the corridor is the kit's (bench/kit/world-settings.js), shared with the Drive demo.
+const CORRIDOR = {stretch: 620, ...VALLEY_SHAPE};
+const WATER = {color: 0x2f5d62, opacity: .8, roughness: .12, shoreWidth: SHORE_WIDTH};
 const VIEW = {
   fov: 50, near: .5, far: 6000, start: 140,                // m along the corridor the view opens on
   offset: [-38, 26, -64],                                   // camera from its target, when the page opens
@@ -60,14 +55,7 @@ const CAMP = {
 };
 // Ambience: the rain and wind recordings of the sound bench, at the level of the weather. fullWind: m/s of full volume.
 const SOUND = {fullWind: 18, gain: {rain: .9, wind: .6}};
-const PLAY_SNOW_FROM = .5;   // snow cover of the ground from which the play area lies under real snow
-// The light, as the All tools demo: the kit's cascaded sun shadows, and thin air lit by the sun through them and
-// through the weather's clouds. The weather's own pass then draws its fog bank and rainbow over that frame.
-const LIGHT = {shadowDistance: 160, airDensity: .0012, sunInAir: 1.5, scanSeconds: 2};   // scan: how often new materials are looked for
-// What the page costs: the sky is captured and its light refreshed at these intervals (s), as the All tools demo;
-// one canvas pixel per screen pixel unless chosen otherwise.
-const COST = {skyCapture: 1.25, skyLighting: 8, pixelRatio: 1, pixelRatios: [.75, 1, 1.25, 1.5], fpsSmoothing: .1};
-const WEATHER = {initial: 'cloudy 1', hour: 14, rain: {count: 360, radius: 32, height: 34, floorHeight: 0}};
+// Rings, light, cost and weather settings are the kit's (bench/kit/world-settings.js), shared with the Drive demo.
 
 const $error = document.getElementById('error'), $status = document.getElementById('status');
 // The graphics card the browser gave the page, when it says so.
