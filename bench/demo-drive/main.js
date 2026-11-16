@@ -25,6 +25,7 @@ import {loadCharacter} from '../character/character.js';
 import {createPlayers} from './players.js';
 import {connectReactions} from './reactions.js';
 import {createRiver} from './river.js';
+import {addJoltBlocks} from '../kit/jolt-blocks.js';
 import '../bench.css';
 
 // Rings, light, cost and weather settings are the kit's (bench/kit/world-settings.js), shared with the World demo.
@@ -40,6 +41,12 @@ const GROUND = {size: VALLEY.length, cells: 512, trackResolution: 1024, trackCon
 const WATER = {step: 10, margin: 8};
 // Where the two start: m along the valley, and m beside its route (the river runs along the route).
 const SPAWN = {along: 48, car: 14, walker: 18, walkerAhead: 3};   // the floor lies 8 to 20 m from the route
+// Something to jump from and to fall off, on the valley floor: the kit's blocks, each a ramp rising up the valley by
+// `pitch` rad, its low end on the ground `beside` m from the route at `along` m. halfExtents m.
+const COURSE = {color: 0xb9a27c, ramps: [
+ {along: 68, beside: 14, halfExtents: [3, .15, 5], pitch: .3},      // a kicker: a jump at speed
+ {along: 50, beside: -14, halfExtents: [3, .15, 10], pitch: .25},   // a long ramp to a drop of about 5 m
+]};
 // Particles thrown by the wheels: pool sizes of the chips (clods) and of the dust puffs.
 const PARTICLES = {chips: 160, puffs: 96};
 // Cameras: arm (m), angle above the target (rad), look-at height (m); the drive camera swings behind the car (1/s).
@@ -156,7 +163,8 @@ const play = createTerrainPlay({scene, appearance, sandLook, weather: surfaceWea
   await compiling;
  }});
 // Laid once, around the middle of the valley: it never moves, so every mark stays.
-Promise.resolve(play.lay(route.routeX(VALLEY.length / 2), VALLEY.length / 2)).catch(report);
+// The grass then follows its track mask: blades stay down along every rut and footprint.
+Promise.resolve(play.lay(route.routeX(VALLEY.length / 2), VALLEY.length / 2)).then(area => { if (area) dressing.followTracks(area.tracks); }).catch(report);
 
 // The two players, and what they do to the valley.
 const snowLift = () => SNOW_DEFAULTS.driftDepth * surfaceWeather.levels.value.y;
@@ -164,6 +172,11 @@ const [J, suv, character] = await Promise.all([initJolt(), loadSuv(), loadCharac
 const players = createPlayers({J, suv, character, spawn,
  ground: {heightAt: land.heightAt, lift: snowLift, waterLevelAt: () => land.waterLevel}});
 scene.add(players.car, ...players.wheels, players.walker);
+const course = addJoltBlocks({host: players.scenery, scene, color: COURSE.color, blocks: COURSE.ramps.map(({along, beside, halfExtents, pitch}) => {
+ const x = route.routeX(along) + beside;
+ // Its centre stands half its rise above the ground under its low end.
+ return {halfExtents, pitch: -pitch, position: [x, land.heightAt(x, along - Math.cos(pitch) * halfExtents[2]) + Math.sin(pitch) * halfExtents[2], along]};
+})});
 const chips = createChips(scene, {pool: PARTICLES.chips});
 chips.setGround(land.heightAt);
 const puffs = await createPuffs(scene, {pool: PARTICLES.puffs, environment});
@@ -292,7 +305,7 @@ onLeave(() => {
  window.removeEventListener('mousemove', mousemove);
  renderer.domElement.removeEventListener('click', capturePointer);
  unbindResize(); weatherUI.dispose();
- reactions.dispose(); players.dispose(); suv.dispose(); chips.dispose(); puffs.dispose(); river.dispose();
+ reactions.dispose(); course.dispose(); players.dispose(); suv.dispose(); chips.dispose(); puffs.dispose(); river.dispose();
  shadowReceivers.dispose(); play.dispose(); dressing.dispose();
  sunShadows.dispose(); volumetric.dispose(); lightRig.dispose(); probes.dispose(); weather.view.dispose();
  scene.remove(clipmap.group); clipmap.dispose();

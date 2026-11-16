@@ -89,6 +89,16 @@ export function createPlayers({J, suv, character, ground, spawn}) {
   get canSwap() { return mode === 'walk' ? doorDistance() <= door.reach : Math.abs(vehicle.speed) <= door.maxSpeed; },
   // Nearest ground hit between two points (a Cannon RaycastResult), or null: for the camera.
   raycast,
+  // Fixed scenery a page stands on the ground (ramps, decks), in the shape the kit's blocks ask of a host: the two
+  // collide with it and the camera and foot probes see it.
+  scenery: {
+   addBox({halfExtents, position, quaternion = [0, 0, 0, 1]}) {
+    const body = new CANNON.Body({mass: 0, shape: new CANNON.Box(new CANNON.Vec3(...halfExtents)), position: new CANNON.Vec3(...position), quaternion: new CANNON.Quaternion(...quaternion)});
+    world.addBody(body);
+    return body;
+   },
+   remove(body) { world.removeBody(body); },
+  },
   // One fixed physics step. input: {left, ahead} (-1..1 each), run, action (jump on foot, handbrake in the car), and
   // yaw, the heading the keys are relative to on foot (the camera's).
   step(dt, {left: sideways = 0, ahead = 0, run = false, action = false, yaw = 0} = {}) {

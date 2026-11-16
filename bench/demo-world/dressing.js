@@ -143,7 +143,7 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
   grassGroup.name = 'grass';
   scene.add(grassGroup);
   const grassChunks = new Map(), green = new THREE.Color(GRASS.green), dry = new THREE.Color(GRASS.dry), tint = new THREE.Color();
-  let grassJob = null;
+  let grassJob = null, contactTracks = null;
   // Weighs the candidates of a chunk a few at a time, then lays its field.
   function* weighChunk(index) {
     const {chunk, half, spacing, from, size} = GRASS, placements = [], columns = Math.floor(2 * half / spacing), rows = Math.floor(chunk / spacing);
@@ -160,7 +160,7 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
       if (++weighed % GRASS.perFrame === 0) yield;
     }
     const field = placements.length ? createGrassField({scene: grassGroup, geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff,
-      placements, tileSize: GRASS.tileSize, flatColorMix: GRASS.flatColorMix}) : null;
+      placements, tileSize: GRASS.tileSize, flatColorMix: GRASS.flatColorMix, ...(contactTracks && {contactTracks, followTracks: true})}) : null;
     grassChunks.set(index, {field, clumps: placements.length});
   }
   function updateGrass(dt, camera, focus) {
@@ -220,6 +220,14 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
     probed: [rockGroup, treeGroup],   // what the light probes are meant for: the things that stand on the ground
     // Hook: something passed through the grass. The grass tool lays its blades along the sweep and lets them recover.
     sweep(stretch) { for (const {field} of grassChunks.values()) field?.addSweep(stretch); },
+    // Hook: the grass follows a ground's track mask (the All tools demo's recipe), so its blades stay down wherever the
+    // ground is marked. The chunks already laid are laid again with it; null returns them to sweeps.
+    followTracks(mask) {
+      contactTracks = mask ?? null;
+      for (const {field} of grassChunks.values()) field?.dispose();
+      grassChunks.clear();
+      grassJob = null;
+    },
     update(dt, camera, focus) {
       rockGroup.visible = settings.rocks; grassGroup.visible = settings.grass; treeGroup.visible = settings.trees;
       if (settings.rocks) updateRocks(focus);
