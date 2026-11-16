@@ -7,7 +7,6 @@
 import * as THREE from 'three';
 import {stampFootstepTrail, FOOTSTEP_DEFAULTS} from '../terrain/footsteps.js';
 import {CONTACT_SURFACES, TRACK_RADIUS} from '../terrain/impacts.js';
-import {PLAY} from '../terrain/play.js';
 
 export const REACTIONS = Object.freeze({
  grassReach: .35,       // m beyond a tyre or a foot within which the grass is pushed over
@@ -42,7 +41,7 @@ export function connectReactions({vehicle, controller, play, dressing, chips, pu
  // The laid play area, when the point lies on it.
  const areaAt = ({x, z}) => {
   const area = play.area;
-  return area && x >= area.origin[0] && x <= area.origin[0] + PLAY.size && z >= area.origin[1] && z <= area.origin[1] + PLAY.size ? area : null;
+  return area && x >= area.origin[0] && x <= area.origin[0] + area.size && z >= area.origin[1] && z <= area.origin[1] + area.size ? area : null;
  };
  const sweep = (from, to, radius) => dressing.sweep({fromX: from.x, fromZ: from.z, toX: to.x, toZ: to.z, radius});
 

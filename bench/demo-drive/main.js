@@ -17,7 +17,7 @@ import {createShadowReceivers} from '../kit/shadow-receivers.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {loadTerrainPalette} from '../terrain/textures.js';
-import {createTerrainPlay, PLAY} from '../terrain/play.js';
+import {createTerrainPlay} from '../terrain/play.js';
 import {createWorldDressing} from '../demo-world/dressing.js';
 import {PLAY_SNOW_FROM, RINGS_PER_FRAME, SHORE_WIDTH, VALLEY_SHAPE, WORLD_APPEARANCE as APPEARANCE, WORLD_BAKE as BAKE, WORLD_COST as COST, WORLD_LIGHT as LIGHT, WORLD_RINGS, WORLD_WEATHER as WEATHER} from '../kit/world-settings.js';
 import {loadSuv} from '../vehicle/suv.js';
@@ -30,12 +30,16 @@ import '../bench.css';
 // Rings, light, cost and weather settings are the kit's (bench/kit/world-settings.js), shared with the World demo.
 const CLIP = {...CLIPMAP_DEFAULTS, ...WORLD_RINGS};
 const SEED = 17, BIOME = 'valley';
-// The valley: the kit's corridor shape, `length` m long, closed by its walls and at both ends.
-const VALLEY = {length: 620, ...VALLEY_SHAPE};
+// The valley: the kit's corridor shape, `length` m long, closed by its walls and at both ends, which rise over `endRamp` m.
+// Small, so one deformable ground covers all of it.
+const VALLEY = {...VALLEY_SHAPE, length: 128, endRamp: 24};
+// The deformable ground: one square as long as the valley, laid once around its middle, at the terrain page's
+// definition (25 cm cells, a track mask texel every 12.5 cm) and track contrast.
+const GROUND = {size: VALLEY.length, cells: 512, trackResolution: 1024, trackContrast: .5};
 // The river's box: the route sampled every `step` m, `margin` m wider than the floor.
 const WATER = {step: 10, margin: 8};
 // Where the two start: m along the valley, and m beside its route (the river runs along the route).
-const SPAWN = {along: 140, car: 14, walker: 18, walkerAhead: 3};   // the floor lies 8 to 20 m from the route
+const SPAWN = {along: 48, car: 14, walker: 18, walkerAhead: 3};   // the floor lies 8 to 20 m from the route
 // Particles thrown by the wheels: pool sizes of the chips (clods) and of the dust puffs.
 const PARTICLES = {chips: 160, puffs: 96};
 // Cameras: arm (m), angle above the target (rad), look-at height (m); the drive camera swings behind the car (1/s).
@@ -132,7 +136,7 @@ playWorker.onerror = event => {
 };
 playWorker.postMessage({world: worldOptions});
 const play = createTerrainPlay({scene, appearance, sandLook, weather: surfaceWeather, cutout, world: () => land, textures: () => textures,
- seed: () => SEED, rules: () => land.biomes[0].paint, cells: CLIP.cells, reliefCellSize: CLIP.cellSize,
+ seed: () => SEED, rules: () => land.biomes[0].paint, ...GROUND,
  sampleArea(request) {
   if (playWorkerError) return Promise.reject(playWorkerError);
   return new Promise((resolve, reject) => {
@@ -151,14 +155,8 @@ const play = createTerrainPlay({scene, appearance, sandLook, weather: surfaceWea
   } finally { renderer.setRenderTarget(previous); }
   await compiling;
  }});
-let layingPlay = false;
-function keepPlayArea({x, z}) {
- if (layingPlay) return;
- const area = play.area;
- if (area && Math.min(x - area.origin[0], area.origin[0] + PLAY.size - x, z - area.origin[1], area.origin[1] + PLAY.size - z) >= PLAY.edge) return;
- layingPlay = true;
- Promise.resolve(play.lay(x, z)).catch(report).finally(() => { layingPlay = false; });
-}
+// Laid once, around the middle of the valley: it never moves, so every mark stays.
+Promise.resolve(play.lay(route.routeX(VALLEY.length / 2), VALLEY.length / 2)).catch(report);
 
 // The two players, and what they do to the valley.
 const snowLift = () => SNOW_DEFAULTS.driftDepth * surfaceWeather.levels.value.y;
@@ -263,7 +261,6 @@ startFrameLoop(renderer, (dt, now) => {
  clipmap.group.position.y = snowLift();
  clipmap.update(focus.x, focus.z, RINGS_PER_FRAME);
  dressing.update(dt, camera, focus);
- keepPlayArea(focus);
  play.setSnow(surfaceWeather.levels.value.y > PLAY_SNOW_FROM);
  play.update(dt);
  chips.update(dt);

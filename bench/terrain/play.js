@@ -17,9 +17,10 @@ export const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, skyTexel: 2, tra
 // world, textures, seed and rules are read when an area is laid, so they are given as functions: () => the current
 // terrain world, its loaded palette textures, the world seed and the paint rules of its first biome.
 // cutout: the {value: Vector4} the ring materials were built with. weather: the surface weather of the ground.
-// Returns {area (the laid area: {field, tracks, material, mesh, impacts, origin, sky}, or undefined), lay(x, z),
+// size (m, a multiple of PLAY.snap), cells, trackResolution and trackContrast: PLAY's unless a page lays another area.
+// Returns {area (the laid area: {field, tracks, material, mesh, impacts, origin, size, sky}, or undefined), lay(x, z),
 // clear(), roll({focus, camera, radius}), setSnow(on), update(dt), reset(), dispose()}.
-export function createTerrainPlay({scene, world, textures, seed, rules, appearance, sandLook, weather, cutout, cells = PLAY.cells, reliefCellSize = PLAY.size / cells, prepare, sampleArea}) {
+export function createTerrainPlay({scene, world, textures, seed, rules, appearance, sandLook, weather, cutout, size = PLAY.size, cells = PLAY.cells, reliefCellSize = size / cells, trackResolution = PLAY.trackResolution, trackContrast = PLAY.trackContrast, prepare, sampleArea}) {
   const ballMaterial = new THREE.MeshStandardMaterial({color: PLAY.ball.color, roughness: PLAY.ball.roughness});
   const airborneGeometry = sampleArea && new THREE.SphereGeometry(PLAY.ball.baseRadius, 24, 16);
   const airborne = new Set();
@@ -48,26 +49,26 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
   // Lays the area around a point. Its ground is sampled and painted from the world, like the rings.
   function build(origin, {heights, paint, lowest, skyData, surroundSamples}, hidden = false) {
     const ground = world(), loaded = textures();
-    const {size, margin} = PLAY, n = cells + 1, step = size / cells;
+    const {margin} = PLAY, n = cells + 1, step = size / cells;
     const skySide = size / PLAY.skyTexel + 1;
     const field = createTerrainField({origin, size: [size, size], resolution: [n, n], heights, seed: seed(), rules: rules(),
       paintAt: sample => paint ? paint[Math.round((sample.z - origin[1]) / step) * n + Math.round((sample.x - origin[0]) / step)]
         : ground.paintAt(ground.sampleAt(sample.x, sample.z)), paletteSize: ground.palette.size, snowTrackRims: true});
-    const tracks = createTrackMask({origin, size: [size, size], resolution: PLAY.trackResolution, directional: true});
+    const tracks = createTrackMask({origin, size: [size, size], resolution: trackResolution, directional: true});
     // The area's own sky map, measured like the rings' so the ambient light does not change at its edge.
     const sky = {map: createDataTexture(skyData, skySide, skySide, {format: THREE.RedFormat, filter: 'linear'}), bounds: field.bounds};
     const material = createTerrainMaterial({polygonOffset: true, polygonOffsetFactor: PLAY.offset, polygonOffsetUnits: PLAY.offset}, {
       field, palette: {...ground.palette, means: loaded.means}, layerArray: loaded.layerArray, layerDetailArray: loaded.layerDetailArray,
       // No fracture mask: with its tracks, its snow, its sky map and the weather's shadows the area is at the 16 textures
       // of a shader, and nothing cracks the ground here.
-      detailNormal: loaded.detail, appearance, sandLook, weather, tracks, trackContrast: PLAY.trackContrast, sky, fracture: false});
+      detailNormal: loaded.detail, appearance, sandLook, weather, tracks, trackContrast, sky, fracture: false});
     const mesh = new THREE.Mesh(field.geometry, material);
     mesh.receiveShadow = true;
     mesh.visible = !prepare;
     scene.add(mesh);
     const impacts = createTerrainImpacts({scene, field, tracks, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow,
       surround: {heightAt: ground.heightAt, lift: () => snow ? SNOW_DEFAULTS.driftDepth : 0, samples: surroundSamples}});
-    const laid = area = {field, tracks, material, mesh, impacts, origin, sky};
+    const laid = area = {field, tracks, material, mesh, impacts, origin, size, sky};
     setSnow(snow);
     laid.reveal = () => {
       if (area !== laid) return;
@@ -86,7 +87,7 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
   }
 
   function lay(x, z, hidden = false) {
-    const {size, snap} = PLAY;
+    const {snap} = PLAY;
     const origin = [x, z].map(value => Math.round((value - size / 2) / snap) * snap);
     if (pending?.origin.every((value, index) => origin[index] === value)) return pending.result;
     clear();
@@ -142,7 +143,7 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     if (heading.lengthSq() === 0) heading.set(0, 0, 1);
     heading.normalize();
     const x = focus.x + heading.x * PLAY.ahead, z = focus.z + heading.z * PLAY.ahead;
-    const inside = area && [x - area.origin[0], z - area.origin[1]].every(offset => offset > PLAY.edge && offset < PLAY.size - PLAY.edge);
+    const inside = area && [x - area.origin[0], z - area.origin[1]].every(offset => offset > PLAY.edge && offset < size - PLAY.edge);
     const target = inside ? area : lay(x, z, warm);
     if (warm) return Promise.resolve(target).then(laid => laid?.ready);
     const velocity = [heading.x * PLAY.ball.speed, heading.z * PLAY.ball.speed], scale = radius / PLAY.ball.baseRadius;
