@@ -1,28 +1,41 @@
 // Mixed demo: a valley to walk and drive in. The terrain tool draws the ground, Jolt (through the destruction module's
 // driver, with Cannon bodies as the model) carries the SUV from the vehicle module and the bot on the character
-// controller; E swaps between the two. Tracks and reactive water plug into this scene next.
+// controller; E swaps between the two. Wheels and feet stamp one track mask: the ground shows the marks and the grass
+// lies down along them. Reactive water plugs into this scene next.
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import initJolt from 'jolt-physics';
 import {createFixedStep} from '../../src/core/fixed-step.js';
 import {createBasicStage} from '../../src/stage/index.js';
-import {createTerrainAppearance, createTerrainField, createTerrainMaterial} from '../../src/terrain/index.js';
+import {seededRandom} from '../../src/core/hash.js';
+import {valueNoise} from '../../src/core/value-noise.js';
+import {createTerrainAppearance, createTerrainField, createTerrainMaterial, TERRAIN_LAYERS} from '../../src/terrain/index.js';
+import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
 import {createSurfaceWeather, createTrackMask} from '../../src/surface/index.js';
 import {createCameraCollision, createCameraDirector, createThirdPersonRig} from '../../src/camera/index.js';
 import {createCharacterController} from '../../src/character/index.js';
 import {createVehicle} from '../../src/vehicle/index.js';
 import {createJoltDriver} from '../../src/destruction/jolt-driver.js';
 import {createTerrainCollider} from '../terrain/heightfield.js';
+import {grassCoverageAt} from '../terrain/controls.js';
 import {loadTerrainTextures} from '../terrain/textures.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
 import {loadSuv} from '../demo-vehicle/suv.js';
 import {loadCharacter} from '../outdoor/character.js';
+import {createMarks} from './marks.js';
 import {VALLEY, WATER_LEVEL, valleyHeights} from './valley.js';
 
 // Ground paint: rock on steep slopes, mud up to mudBelow m (the banks), no snow or forest floor in this valley.
 const RULES = {rockSlope: .8, snowLine: 60, mudBelow: .7, mudBlend: .9, forestCover: 0};
 // One track mask over the whole valley; px per side.
 const TRACK = {maskResolution: 2048, contrast: .5};
+// Meadow: clumps tried over the valley floor (kept where the ground is grass and dry), the all-tools demo's look.
+// cover: share of each ground layer that grows grass (%), patchiness and patch size (m) of the bare spots.
+const GRASS = {
+ tries: 90000, seed: 41, patchSeed: 23, shoreMargin: .06, sink: .02, tileSize: 6, flatColorMix: .75,
+ color: '#50762e', dryColor: '#c2aa61', sizeRange: [.4, 1.75],
+ cover: {grass: 100, rock: 0, snow: 0, mud: 0, forest: 24, patchiness: .85, patchSize: 5},
+};
 // Chassis: a low, flat physics box as wide and long as the model, so the car resists tipping.
 const CHASSIS = {halfHeight: .25, mass: 1500};
 // Suspension (m): mounts above the chassis centre, travel, and the length it settles at under this mass (measured).
@@ -65,6 +78,22 @@ const groundMaterial = createTerrainMaterial({}, {field, layerArray: textures.la
 const ground = new THREE.Mesh(field.geometry, groundMaterial);
 ground.receiveShadow = true;
 scene.add(ground);
+// Grass over the valley floor, inside the rim. It reads the track mask, so it lies down where wheels and feet passed.
+const meadow = createFreeVegetation({meadowBlades: true});
+const placements = [], random = seededRandom(GRASS.seed), patchNoise = valueNoise(GRASS.patchSeed);
+const green = new THREE.Color(GRASS.color), dryGrass = new THREE.Color(GRASS.dryColor), tint = new THREE.Color(), mudLayer = TERRAIN_LAYERS.indexOf('mud');
+for (let i = 0; i < GRASS.tries; i++) {
+ const x = (random() - .5) * VALLEY.rim[1] * 2, z = (random() - .5) * VALLEY.rim[1] * 2, chance = random(), yaw = random() * TURN, variation = random();
+ const y = field.heightAt(x, z);
+ if (Math.hypot(x, z) > VALLEY.rim[1] || y < WATER_LEVEL + GRASS.shoreMargin) continue;
+ const patch = THREE.MathUtils.smoothstep(patchNoise(x / GRASS.cover.patchSize, z / GRASS.cover.patchSize), -.5, .5);
+ if (chance >= grassCoverageAt(field, x, z, GRASS.cover, patch)) continue;
+ const dry = Math.max(patch, field.layerWeightAt(x, z, mudLayer));
+ tint.lerpColors(green, dryGrass, dry);
+ placements.push({x, y: y - GRASS.sink, z, yaw, scale: THREE.MathUtils.lerp(...GRASS.sizeRange, .7 * (1 - dry) + .3 * variation), tint: tint.toArray()});
+}
+const grass = createGrassField({scene, geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff, placements,
+ tileSize: GRASS.tileSize, flatColorMix: GRASS.flatColorMix, contactTracks: tracks, followTracks: true});
 // Stand-in water: a flat sheet at the water level until the reactive surface replaces it.
 const water = new THREE.Mesh(new THREE.PlaneGeometry(VALLEY.span, VALLEY.span).rotateX(-Math.PI / 2),
  new THREE.MeshStandardMaterial({color: 0x2f6f86, roughness: .15, metalness: .1, transparent: true, opacity: .72}));
@@ -88,6 +117,7 @@ driver.attach(world);
 const vehicle = createVehicle({J, jolt: driver.native, body: driver.nativeBody(chassis), layer: driver.layers.moving,
  ...suv.layout, suspensionMount: SUSPENSION.mount, suspensionMin: SUSPENSION.min, suspensionMax: SUSPENSION.max});
 const controller = createCharacterController({J, jolt: driver.native, layer: driver.layers.moving, ...PLAYER});
+const marks = createMarks({tracks, heightAt: field.heightAt, waterLevel: WATER_LEVEL, wheelWidth: suv.layout.wheelWidth});
 
 // The car model stands on y = 0 at its own origin: it hangs under the chassis centre so its arches meet the wheels.
 const car = new THREE.Group(), {wheels} = suv;
@@ -129,6 +159,7 @@ function reset() {
  walker.visible = true;
  grounded = jumped = swap = false;
  character.reset();
+ marks.reset();
  clock.reset();
  director.select('walk', {duration: 0});
  director.reset();
@@ -206,7 +237,9 @@ startFrameLoop(renderer, dt => {
  car.position.copy(chassis.position);
  car.quaternion.copy(chassis.quaternion);
  vehicle.readWheels().forEach((wheel, i) => { wheels[i].position.copy(wheel.position); wheels[i].quaternion.copy(wheel.quaternion); });
+ marks.wheels(dt, vehicle.wheels);
  if (mode === 'walk') {
+  marks.feet(dt, {x: controller.position.x, z: controller.position.z, heading: controller.heading, speed: controller.speed, grounded});
   walker.position.copy(controller.position);
   walker.rotation.y = controller.heading;
   character.update(dt, {moving: move.lengthSq() > 0, speed: controller.speed, grounded, jumped, preview: false, groundAt});
@@ -222,6 +255,7 @@ startFrameLoop(renderer, dt => {
   status.textContent = Math.round(speed * MS_TO_KMH) + ' km/h' + (speed <= DOOR.maxSpeed ? ' · E · get out' : '');
  }
  director.update(dt, {target});
+ grass.update(dt, {camera});
  stage.update(camera);
  renderer.render(scene, camera);
 });
@@ -238,7 +272,9 @@ onLeave(() => {
  controller.dispose();
  driver.dispose();
  suv.dispose();
- tracks.dispose?.();
+ grass.dispose();
+ meadow.dispose();
+ tracks.dispose();
  stage.dispose();
  field.dispose();
  const resources = new Set([groundMaterial, water.geometry, water.material, textures.layerArray, textures.layerDetailArray, textures.detail, textures.rock]);
