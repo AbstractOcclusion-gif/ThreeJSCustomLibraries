@@ -22,6 +22,7 @@ const ROCKS = {
   profile: {valley: 'woodland', dry: 'desert', alpine: 'alpine', mountains: 'alpine'}, fallbackProfile: 'alpine',
   repeat: .35, color: 0x8a8782, roughness: .92,   // texture repeats per metre of rock; plain colour without textures
   shadowTiles: 2,   // tiles from the focus within which the rocks cast shadows
+  solidFrom: .5,    // m: a rock whose smallest side is at least this is reported as solid (the `subscribe` hook)
 };
 // Grass, in chunks of `chunk` m along the corridor and `half` m to each side of the route: the chunk under the focus
 // and `keep` chunks each way. Candidates lie `spacing` m apart, `perFrame` of them weighed a frame.
@@ -37,6 +38,7 @@ const TREES = {
   spacing: 8.5, band: 150, clearance: 8, seed: 389, maxSlope: .75, waterMargin: .3, grassShare: .25,
   lod: 32, impostor: 75, refreshStep: .75,   // m the camera moves between two sorts of the trees into their tiers
   heights: {'ez-oak': [9, 14], 'ez-birch': [8, 12], 'ez-spruce': [10, 17], 'ez-bush': [1.3, 2.6]},
+  trunk: {'ez-oak': .035, 'ez-birch': .02, 'ez-spruce': .025},   // trunk radius per metre of height; a species left out has no trunk
   biomes: {
     valley: {density: 1, mix: {'ez-oak': .5, 'ez-birch': .3, 'ez-bush': .2}},
     dry: {density: .35, mix: {'ez-bush': .7, 'ez-oak': .3}},
@@ -79,15 +81,23 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
     rockMaterials.set(set, material);
     return material;
   }
-  const rockTiles = new Map();
+  const rockTiles = new Map(), rockSolids = new Map(), listeners = new Set();
+  const tell = event => { for (const listener of listeners) listener(event); };
+  const box = new THREE.Box3(), boxSize = new THREE.Vector3(), boxCentre = new THREE.Vector3(), turn = new THREE.Quaternion();
   function buildRockTile(column, row) {
     const {tile, scatter, cliffs} = ROCKS, x0 = column * tile, z0 = row * tile, cx = x0 + tile / 2, cz = z0 + tile / 2;
     const biome = biomeAt(cz), material = rockMaterial(biome), profile = ROCKS.profile[biome.id] ?? ROCKS.fallbackProfile;
-    const seed = Math.floor(hash2(column, row, ROCKS.seed) * 1e6) + 1, parts = [];
+    const seed = Math.floor(hash2(column, row, ROCKS.seed) * 1e6) + 1, parts = [], solids = [];
     // Every rock of the tile goes into one mesh: one draw call for the tile, and one per shadow cascade.
     const add = (rocks, x, z, yaw = 0) => {
       rocks.group.position.set(x, 0, z); rocks.group.rotation.y = yaw; rocks.group.updateMatrixWorld(true);
-      for (const mesh of rocks.group.children) parts.push(mesh.geometry.clone().applyMatrix4(mesh.matrixWorld));
+      for (const mesh of rocks.group.children) {
+        parts.push(mesh.geometry.clone().applyMatrix4(mesh.matrixWorld));
+        // Its box, turned as the rock is: what a host with physics makes solid.
+        box.setFromBufferAttribute(mesh.geometry.getAttribute('position')).getSize(boxSize);
+        if (Math.min(boxSize.x, boxSize.y, boxSize.z) < ROCKS.solidFrom) continue;
+        solids.push({position: box.getCenter(boxCentre).applyMatrix4(mesh.matrixWorld).toArray(), halfExtents: boxSize.multiplyScalar(.5).toArray(), quaternion: mesh.getWorldQuaternion(turn).toArray()});
+      }
       rocks.dispose();
     };
     const {paint} = paintAt(cx, cz), rocky = Math.min(1, paint.layers[LAYER.rock] * 1.5);
@@ -113,6 +123,8 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.receiveShadow = true;
     rockGroup.add(mesh);
+    rockSolids.set(column + ',' + row, solids);
+    tell({type: 'dressing:rocks', tile: column + ',' + row, rocks: solids});
     return mesh;
   }
   function updateRocks(focus) {
@@ -123,6 +135,8 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
       if (away <= reach + 1) continue;
       rockGroup.remove(mesh); mesh.geometry.dispose();
       rockTiles.delete(key);
+      rockSolids.delete(key);
+      tell({type: 'dressing:rocks-removed', tile: key});
     }
     let built = 0;
     // Nearest tiles first.
@@ -159,10 +173,11 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
       }
       if (++weighed % GRASS.perFrame === 0) yield;
     }
-    const field = placements.length ? createGrassField({scene: grassGroup, geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff,
-      placements, tileSize: GRASS.tileSize, flatColorMix: GRASS.flatColorMix, ...(contactTracks && {contactTracks, followTracks: true})}) : null;
-    grassChunks.set(index, {field, clumps: placements.length});
+    grassChunks.set(index, layChunk(placements));
   }
+  const layChunk = placements => ({placements, clumps: placements.length, field: placements.length ? createGrassField({scene: grassGroup,
+    geometries: meadow.grassGeometries, map: meadow.atlas, color: 0xffffff, placements, tileSize: GRASS.tileSize, flatColorMix: GRASS.flatColorMix,
+    ...(contactTracks && {contactTracks, followTracks: true})}) : null});
   function updateGrass(dt, camera, focus) {
     const here = Math.floor(focus.z / GRASS.chunk), last = Math.floor((route.length - 1) / GRASS.chunk);
     for (const [index, {field}] of grassChunks) {
@@ -181,7 +196,7 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
   }
 
   // ---- Trees
-  const treeGroup = new THREE.Group(), species = [];
+  const treeGroup = new THREE.Group(), species = [], trunks = [];
   treeGroup.name = 'trees';
   scene.add(treeGroup);
   if (trees) {
@@ -197,8 +212,9 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
       // The species: drawn by its share of the biome's mix.
       let draw = hash2(i + 3, j + 17, TREES.seed + 3), name;
       for (const [candidate, share] of Object.entries(rule.mix)) { name = candidate; if ((draw -= share) < 0) break; }
-      const [low, high] = TREES.heights[name], list = items[name];
-      list.push({x, y: sample.height, z, h: THREE.MathUtils.lerp(low, high, hash2(i, j, TREES.seed + 4)), variant: list.length});
+      const [low, high] = TREES.heights[name], list = items[name], h = THREE.MathUtils.lerp(low, high, hash2(i, j, TREES.seed + 4));
+      list.push({x, y: sample.height, z, h, variant: list.length});
+      if (TREES.trunk[name]) trunks.push({x, y: sample.height, z, h, radius: h * TREES.trunk[name]});
     }
     for (const [profile, list] of Object.entries(items)) {
       if (!list.length) continue;
@@ -217,6 +233,24 @@ export function createWorldDressing({scene, world, renderer, environment, trees 
   const sortedAt = new THREE.Vector3(Infinity, Infinity, Infinity), sortedFor = {lod: 0, impostor: 0};
   return {
     settings, stats,
+    // Hooks for a host with physics. trunks: where the trees stand, [{x, y, z, h, radius}] (m). subscribe(listener) hears
+    // 'dressing:rocks' ({tile, rocks: [{position, halfExtents, quaternion}]}: the boxes of a tile's larger rocks) as each
+    // tile is laid, the tiles already laid first, and 'dressing:rocks-removed' ({tile}); it returns unsubscribe.
+    trunks,
+    subscribe(listener) {
+      listeners.add(listener);
+      for (const [tile, rocks] of rockSolids) listener({type: 'dressing:rocks', tile, rocks});
+      return () => listeners.delete(listener);
+    },
+    // Hook: the ground within radius m of (x, z) was blown away (a crater): the grass that stood there is gone.
+    clearGrass(x, z, radius) {
+      for (const [index, chunk] of grassChunks) {
+        const kept = chunk.placements.filter(site => Math.hypot(site.x - x, site.z - z) > radius);
+        if (kept.length === chunk.placements.length) continue;
+        chunk.field?.dispose();
+        grassChunks.set(index, layChunk(kept));
+      }
+    },
     probed: [rockGroup, treeGroup],   // what the light probes are meant for: the things that stand on the ground
     // Hook: something passed through the grass. The grass tool lays its blades along the sweep and lets them recover.
     sweep(stretch) { for (const {field} of grassChunks.values()) field?.addSweep(stretch); },

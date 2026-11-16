@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {createBenchPanel} from '../panel.js';
+import {worldCostControls, worldDressingControls, worldGroundControls, worldLightControls} from '../kit/world-controls.js';
 import {CLIPMAP_DEFAULTS, cloneBiome, createSandLook, createTerrainAppearance, createTerrainClipmap, createTerrainMaterial, createTerrainWorld, SNOW_DEFAULTS, terrainLightGround} from '../../src/terrain/index.js';
 import {createLighting, syncLighting} from '../../src/core/lighting.js';
 import {createLightProbes, createLightRig, createSunShadows, createVolumetricLight} from '../../src/lighting/index.js';
@@ -267,35 +268,10 @@ campFolder.add(settings, 'ballRadius', PLAY.ball.minRadius, PLAY.ball.maxRadius,
 campFolder.add({run: attempt(() => play.roll({focus, camera, radius: settings.ballRadius}))}, 'run').name('Roll a ball from the view');
 campFolder.add({run: attempt(() => play.reset())}, 'run').name('Clear balls, ruts and marks');
 campFolder.add({run: attempt(startSound)}, 'run').name('Sound: start the ambience');
-const lightFolder = gui.addFolder('Light');
-lightFolder.add(sunShadows.settings, 'strength', 0, 1, .01).name('Sun shadows');
-lightFolder.add(sunShadows.settings, 'distance', 40, 600, 5).name('Sun shadows reach · m');
-lightFolder.add(sunShadows.settings, 'softness', 0, 4, .1).name('Shadow soft edge');
-lightFolder.add(settings, 'volumetric').name('Volumetric light');
-lightFolder.add(volumetric.settings, 'density', 0, .02, .0005).name('Air density · 1/m');
-lightFolder.add(probes.strength, 'value', 0, 1, .01).name('Light probes on rocks and trees');
-lightFolder.add(appearance.skyOcclusion, 'value', 0, 1, .01).name('Sky occlusion on the ground');
-// The ground follows the weather (rain wets it, snow covers it, both fade); or set by hand.
-// Every costly part can be switched off here, to find what a machine spends its frame on.
-const costFolder = gui.addFolder('Performance');
-costFolder.add(settings, 'pixelRatio', COST.pixelRatios).name('Render pixel ratio').onChange(value => renderer.setPixelRatio(value));
-costFolder.add(settings, 'sunShadows').name('Sun shadows').onChange(on => sunShadows.set('strength', on ? 1 : 0));
-costFolder.add(settings, 'cloudShadows').name('Cloud shadows').onChange(on => weather.view.configure({appearance: {cloudShadowStrength: on ? 1 : 0}}));
-costFolder.add(settings, 'volumetric').name('Volumetric light');
-costFolder.add(volumetric.settings, 'steps', 4, 48, 1).name('Volumetric steps');
-costFolder.add(settings, 'camp').name('Camp, bridge, fish');
-costFolder.add(appearance.layerDetail, 'value', 0, 1, .01).name('Terrain close-up detail');
-costFolder.add({sky: COST.skyCapture}, 'sky', [.35, 1.25, 8]).name('Sky refresh · s').onChange(value => weather.view.configure({sky: {captureInterval: value}}));
-const groundFolder = gui.addFolder('Ground');
-groundFolder.add(settings, 'followWeather').name('Follows the weather');
-groundFolder.add(settings, 'wetness', 0, 1, .01).name('Wetness (by hand)').listen();
-groundFolder.add(settings, 'snow', 0, 1, .01).name('Snow cover (by hand)').listen();
-const dressingFolder = gui.addFolder('Rocks, grass, trees');
-dressingFolder.add(dressing.settings, 'rocks').name('Rocks and cliffs');
-dressingFolder.add(dressing.settings, 'grass').name('Grass');
-dressingFolder.add(dressing.settings, 'trees').name('Trees');
-dressingFolder.add(dressing.settings, 'treeLod', 20, 200, 1).name('Trees: far model from · m');
-dressingFolder.add(dressing.settings, 'treeImpostor', 40, 400, 1).name('Trees: flat cards from · m');
+worldLightControls(gui, {settings, sunShadows, volumetric, probes, appearance});
+worldCostControls(gui, {settings, cost: COST, renderer, sunShadows, weather, volumetric, appearance}).add(settings, 'camp').name('Camp, bridge, fish');
+worldGroundControls(gui, settings);
+worldDressingControls(gui, dressing);
 const weatherUI = mountWeatherControls(weather);
 
 const unbindResize = bindResize(renderer, camera);

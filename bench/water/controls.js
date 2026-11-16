@@ -16,6 +16,11 @@ export function waterFreezeControls(folder, freeze) {
   folder.add(progress, 'ice', 0, 100).name('Freeze progress · %').disable().listen();
 }
 
+// How the Water page's stream moves: its current (speed x the baked flow), the foam it carries and its small waves
+// (m, m, degrees from the flow, degrees of spread, clock speed).
+export const STREAM_MOTION = Object.freeze({speed: 1, foam: .55, foamFeather: .65, bankFoam: 1, microRipples: .025});
+export const STREAM_WAVES = Object.freeze({height: .035, wavelength: 1.2, direction: 0, spread: 45, speed: 1});
+
 export function createBenchPondSettings() {
   return {
     ...inlandOpticsDefaults(),

@@ -89,6 +89,11 @@ export function createPlayers({J, suv, character, ground, spawn}) {
   get canSwap() { return mode === 'walk' ? doorDistance() <= door.reach : Math.abs(vehicle.speed) <= door.maxSpeed; },
   // Nearest ground hit between two points (a Cannon RaycastResult), or null: for the camera.
   raycast,
+  // The ground changed under the two (a crater): their colliders are laid again where they stand.
+  refreshGround() {
+   layGround('car', chassis.position.x, chassis.position.z);
+   layGround('walker', controller.position.x, controller.position.z);
+  },
   // Fixed scenery a page stands on the ground (ramps, decks), in the shape the kit's blocks ask of a host: the two
   // collide with it and the camera and foot probes see it.
   scenery: {

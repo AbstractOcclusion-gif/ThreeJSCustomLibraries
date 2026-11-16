@@ -5,7 +5,7 @@ import {createChannel, createChannelSurface, CHANNEL_OBSTACLE_COUNT, createRippl
 import {createBasicStage} from '../../src/stage/index.js';
 import {benchRenderer, bindResize, startFrameLoop, STATUS_REFRESH_MS} from '../kit/page.js';
 import {stageControls} from '../kit/controls.js';
-import {channelControls, inlandOpticsDefaults} from './controls.js';
+import {channelControls, inlandOpticsDefaults, STREAM_MOTION, STREAM_WAVES} from './controls.js';
 import {bindRippleGesture} from '../ripple-gesture.js';
 import '../bench.css';
 import {aimRay} from '../kit/input.js';
@@ -40,9 +40,9 @@ let channel, flowTime = 0, waveTime = 0, diving = false, dragged = -1;
 
 const P = {
   channel: {preset: 'stream', width: 1, drop: 3, depth: 1},
-  water: {...inlandOpticsDefaults(), speed: 1, foam: .55, foamFeather: .65, bankFoam: 1, refraction: 1, clarity: 1, reflection: 1, godRays: .55, tint: '#ffffff',
-    rippleStrength: 1, microRipples: .025, caustics: .65},
-  waves: {height: .035, wavelength: 1.2, direction: 0, spread: 45, speed: 1},
+  water: {...inlandOpticsDefaults(), ...STREAM_MOTION, refraction: 1, clarity: 1, reflection: 1, godRays: .55, tint: '#ffffff',
+    rippleStrength: 1, caustics: .65},
+  waves: {...STREAM_WAVES},
   interact: {mode: 'orbit', rippleStrength: 1, markers: true},
   bake: {iterations: 90},
 };

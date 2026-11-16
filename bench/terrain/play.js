@@ -18,9 +18,10 @@ export const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, skyTexel: 2, tra
 // terrain world, its loaded palette textures, the world seed and the paint rules of its first biome.
 // cutout: the {value: Vector4} the ring materials were built with. weather: the surface weather of the ground.
 // size (m, a multiple of PLAY.snap), cells, trackResolution and trackContrast: PLAY's unless a page lays another area.
+// surfaces: the impacts tool's contact surfaces (CONTACT_SURFACES unless given), read at each contact.
 // Returns {area (the laid area: {field, tracks, material, mesh, impacts, origin, size, sky}, or undefined), lay(x, z),
 // clear(), roll({focus, camera, radius}), setSnow(on), update(dt), reset(), dispose()}.
-export function createTerrainPlay({scene, world, textures, seed, rules, appearance, sandLook, weather, cutout, size = PLAY.size, cells = PLAY.cells, reliefCellSize = size / cells, trackResolution = PLAY.trackResolution, trackContrast = PLAY.trackContrast, prepare, sampleArea}) {
+export function createTerrainPlay({scene, world, textures, seed, rules, appearance, sandLook, weather, cutout, size = PLAY.size, cells = PLAY.cells, reliefCellSize = size / cells, trackResolution = PLAY.trackResolution, trackContrast = PLAY.trackContrast, surfaces, prepare, sampleArea}) {
   const ballMaterial = new THREE.MeshStandardMaterial({color: PLAY.ball.color, roughness: PLAY.ball.roughness});
   const airborneGeometry = sampleArea && new THREE.SphereGeometry(PLAY.ball.baseRadius, 24, 16);
   const airborne = new Set();
@@ -66,7 +67,7 @@ export function createTerrainPlay({scene, world, textures, seed, rules, appearan
     mesh.receiveShadow = true;
     mesh.visible = !prepare;
     scene.add(mesh);
-    const impacts = createTerrainImpacts({scene, field, tracks, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow,
+    const impacts = createTerrainImpacts({scene, field, tracks, surfaces, material: ballMaterial, fallOutHeight: lowest - PLAY.fallBelow,
       surround: {heightAt: ground.heightAt, lift: () => snow ? SNOW_DEFAULTS.driftDepth : 0, samples: surroundSamples}});
     const laid = area = {field, tracks, material, mesh, impacts, origin, size, sky};
     setSnow(snow);

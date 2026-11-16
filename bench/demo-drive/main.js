@@ -18,11 +18,17 @@ import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} f
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {loadTerrainPalette} from '../terrain/textures.js';
 import {createTerrainPlay} from '../terrain/play.js';
+import {CONTACT_SURFACES} from '../terrain/impacts.js';
+import {groundTrackControls} from '../terrain/controls.js';
+import {createBenchPanel} from '../panel.js';
+import {worldCostControls, worldDressingControls, worldGroundControls, worldLightControls} from '../kit/world-controls.js';
+import {createCraterEffects, CRATER_DUST, CRATER_SHARDS} from '../kit/crater-effects.js';
 import {createWorldDressing} from '../demo-world/dressing.js';
 import {PLAY_SNOW_FROM, RINGS_PER_FRAME, SHORE_WIDTH, VALLEY_SHAPE, WORLD_APPEARANCE as APPEARANCE, WORLD_BAKE as BAKE, WORLD_COST as COST, WORLD_LIGHT as LIGHT, WORLD_RINGS, WORLD_WEATHER as WEATHER} from '../kit/world-settings.js';
 import {loadSuv} from '../vehicle/suv.js';
 import {loadCharacter} from '../character/character.js';
-import {createPlayers} from './players.js';
+import {createPlayers, PLAYERS} from './players.js';
+import {connectSolids} from './solids.js';
 import {connectReactions} from './reactions.js';
 import {createRiver} from './river.js';
 import {addJoltBlocks} from '../kit/jolt-blocks.js';
@@ -37,6 +43,10 @@ const VALLEY = {...VALLEY_SHAPE, length: 128, endRamp: 24};
 // The deformable ground: one square as long as the valley, laid once around its middle, at the terrain page's
 // definition (25 cm cells, a track mask texel every 12.5 cm) and track contrast.
 const GROUND = {size: VALLEY.length, cells: 512, trackResolution: 1024, trackContrast: .5};
+// Under a car the mud gives way more than under the terrain page's test ball: rolling rut depth (m) and the share of
+// the pressed soil pushed up beside the rut. Both can be changed from the panel.
+const MUD = {print: .1, rimShare: .6};
+const CAR_SQUARENESS = .8;   // the outline the car lands on, between an ellipse (0) and its rectangle (1)
 // The river's box: the route sampled every `step` m, `margin` m wider than the floor.
 const WATER = {step: 10, margin: 8};
 // Where the two start: m along the valley, and m beside its route (the river runs along the route).
@@ -48,7 +58,7 @@ const COURSE = {color: 0xb9a27c, ramps: [
  {along: 50, beside: -14, halfExtents: [3, .15, 10], pitch: .25},   // a long ramp to a drop of about 5 m
 ]};
 // Particles thrown by the wheels: pool sizes of the chips (clods) and of the dust puffs.
-const PARTICLES = {chips: 160, puffs: 96};
+const PARTICLES = {chips: CRATER_SHARDS.pool, puffs: CRATER_DUST.pool};   // enough for a crater's shards and dust
 // Cameras: arm (m), angle above the target (rad), look-at height (m); the drive camera swings behind the car (1/s).
 const VIEW = {
  near: .5, far: 6000,
@@ -65,6 +75,10 @@ const report = error => { $error.hidden = !error; $error.textContent = error?.me
 const renderer = benchRenderer();
 renderer.setPixelRatio(Math.min(devicePixelRatio, COST.pixelRatio));
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(VIEW.walk.fov, innerWidth / innerHeight, VIEW.near, VIEW.far);
+// What the panel switches: the costly parts, and whether the ground follows the weather or is set by hand.
+const settings = {followWeather: true, wetness: 0, snow: 0, volumetric: true, sunShadows: true, cloudShadows: true, pixelRatio: renderer.getPixelRatio()};
+const surfaces = structuredClone(CONTACT_SURFACES);
+Object.assign(surfaces.mud, MUD);
 const focus = new THREE.Vector3();   // where the player is: the rings, the dressing, the probes and the weather follow it
 
 // The valley.
@@ -108,7 +122,7 @@ const probes = createLightProbes({ground: terrainLightGround({world: land, palet
 const lighting = createLighting({ambient: probes.ambient, sun: sunCover, lights: lightRig.lights});
 // The river: reactive water over the whole valley floor, in the box the route sweeps.
 const routeXs = Array.from({length: Math.floor(route.length / WATER.step) + 1}, (_, i) => route.routeX(i * WATER.step)), reach = VALLEY.width / 2 + WATER.margin;
-const river = createRiver({renderer, scene, camera, land, weatherView: weather.view, sunCover,
+const river = createRiver({renderer, scene, camera, land, route, weatherView: weather.view, sunCover,
  bounds: {x: [Math.floor(Math.min(...routeXs) - reach), Math.ceil(Math.max(...routeXs) + reach)], z: [0, route.length]}});
 const withSceneFog = createSceneFogScope(scene, camera, lighting);
 const probed = new WeakSet();
@@ -143,7 +157,7 @@ playWorker.onerror = event => {
 };
 playWorker.postMessage({world: worldOptions});
 const play = createTerrainPlay({scene, appearance, sandLook, weather: surfaceWeather, cutout, world: () => land, textures: () => textures,
- seed: () => SEED, rules: () => land.biomes[0].paint, ...GROUND,
+ seed: () => SEED, rules: () => land.biomes[0].paint, ...GROUND, surfaces,
  sampleArea(request) {
   if (playWorkerError) return Promise.reject(playWorkerError);
   return new Promise((resolve, reject) => {
@@ -170,7 +184,8 @@ Promise.resolve(play.lay(route.routeX(VALLEY.length / 2), VALLEY.length / 2)).th
 const snowLift = () => SNOW_DEFAULTS.driftDepth * surfaceWeather.levels.value.y;
 const [J, suv, character] = await Promise.all([initJolt(), loadSuv(), loadCharacter('bot')]);
 const players = createPlayers({J, suv, character, spawn,
- ground: {heightAt: land.heightAt, lift: snowLift, waterLevelAt: () => land.waterLevel}});
+ // The ground the two stand on: the relief, dug wherever the play area was (a crater).
+ ground: {heightAt: (x, z) => Math.min(land.heightAt(x, z), play.area?.field.heightAt(x, z) ?? Infinity), lift: snowLift, waterLevelAt: () => land.waterLevel}});
 scene.add(players.car, ...players.wheels, players.walker);
 const course = addJoltBlocks({host: players.scenery, scene, color: COURSE.color, blocks: COURSE.ramps.map(({along, beside, halfExtents, pitch}) => {
  const x = route.routeX(along) + beside;
@@ -180,8 +195,15 @@ const course = addJoltBlocks({host: players.scenery, scene, color: COURSE.color,
 const chips = createChips(scene, {pool: PARTICLES.chips});
 chips.setGround(land.heightAt);
 const puffs = await createPuffs(scene, {pool: PARTICLES.puffs, environment});
+const solids = connectSolids({dressing, scenery: players.scenery});
 const reactions = connectReactions({vehicle: players.vehicle, controller: players.controller, play, dressing, chips, puffs,
- wetness: () => surfaceWeather.levels.value.x, velocity: () => players.chassis.velocity, river});
+ wetness: () => surfaceWeather.levels.value.x, velocity: () => players.chassis.velocity, river,
+ // The car as it lands: its length lies along its heading.
+ car: () => ({x: players.chassis.position.x, z: players.chassis.position.z, mass: PLAYERS.chassis.mass,
+  footprint: {halfX: suv.size.z / 2, halfZ: suv.size.x / 2, yaw: Math.PI / 2 - players.carHeading, squareness: CAR_SQUARENESS}}),
+ walkerRadius: PLAYERS.walker.radius,
+ craterEffects: createCraterEffects({chips, puffs, heightAt: (x, z) => play.area?.field.heightAt(x, z)}),
+ onGroundChange: () => players.refreshGround()});
 
 // Cameras: one third-person rig per seat; the ground pushes the camera in.
 const rigs = {walk: createThirdPersonRig(VIEW.walk), drive: createThirdPersonRig(VIEW.drive)};
@@ -241,6 +263,12 @@ window.addEventListener('blur', blur);
 window.addEventListener('mousemove', mousemove);
 renderer.domElement.addEventListener('click', capturePointer);
 const weatherUI = mountWeatherControls(weather);
+const gui = createBenchPanel('Drive demo');
+worldLightControls(gui, {settings, sunShadows, volumetric, probes, appearance}).close();
+worldCostControls(gui, {settings, cost: COST, renderer, sunShadows, weather, volumetric, appearance}).close();
+worldGroundControls(gui, settings);
+groundTrackControls(gui, surfaces).open();
+worldDressingControls(gui, dressing);
 const unbindResize = bindResize(renderer, camera);
 aimCameras(spawn.heading);
 
@@ -270,7 +298,10 @@ startFrameLoop(renderer, (dt, now) => {
  syncLighting(lighting.uniforms, {sun: weather.view.sun, hemi: weather.view.hemi, fog: scene.fog});
  probes.update(focus.x, focus.z);
  if (now - lastScan >= LIGHT.scanSeconds * MS) { lastScan = now; findReceivers(); }
- surfaceWeather.update(dt, weather.system.weather);
+ if (settings.followWeather) {
+  surfaceWeather.update(dt, weather.system.weather);
+  settings.wetness = surfaceWeather.levels.value.x; settings.snow = surfaceWeather.levels.value.y;
+ } else { surfaceWeather.set({wetness: settings.wetness, snow: settings.snow}); surfaceWeather.update(dt, null); }
  clipmap.group.position.y = snowLift();
  clipmap.update(focus.x, focus.z, RINGS_PER_FRAME);
  dressing.update(dt, camera, focus);
@@ -282,10 +313,10 @@ startFrameLoop(renderer, (dt, now) => {
  camera.updateMatrixWorld();
  lightRig.update(camera.position);
  lightRig.renderShadows(scene);
- sunShadows.render(scene, camera, environment.sun.direction);
+ if (settings.sunShadows) sunShadows.render(scene, camera, environment.sun.direction);
  // The water captures its bed with the frame's shadows, the weather draws the frame, the splashes go over it.
  withSceneFog(false, () => river.render());
- weather.view.render(volumetric.capture(scene, camera, environment));
+ weather.view.render(settings.volumetric ? volumetric.capture(scene, camera, environment) : undefined);
  river.renderSplashes();
  weatherUI.sync();
  if (now - lastStatus >= STATUS_REFRESH_MS) {
@@ -305,8 +336,8 @@ onLeave(() => {
  window.removeEventListener('mousemove', mousemove);
  renderer.domElement.removeEventListener('click', capturePointer);
  unbindResize(); weatherUI.dispose();
- reactions.dispose(); course.dispose(); players.dispose(); suv.dispose(); chips.dispose(); puffs.dispose(); river.dispose();
- shadowReceivers.dispose(); play.dispose(); dressing.dispose();
+ reactions.dispose(); solids.dispose(); course.dispose(); players.dispose(); suv.dispose(); chips.dispose(); puffs.dispose(); river.dispose();
+ shadowReceivers.dispose(); play.dispose(); dressing.dispose(); gui.destroy();
  sunShadows.dispose(); volumetric.dispose(); lightRig.dispose(); probes.dispose(); weather.view.dispose();
  scene.remove(clipmap.group); clipmap.dispose();
  for (const texture of Object.values(textures)) texture?.dispose?.();

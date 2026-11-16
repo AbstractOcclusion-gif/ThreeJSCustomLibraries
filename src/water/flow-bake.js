@@ -13,17 +13,23 @@ const ROCK_INFLUENCE = Object.freeze({lead: .25, xSquash: .45, reach: 1.4});
 
 // Steady flow field baked from a channel (sectionAt) and rock obstacles [x, z, radius, _]. origin = [left, bottom] (m),
 // size = [width, height] cells, cell (m). rgb = velocity (0.5 centred, ±5 m/s), b = shear foam, a = wet.
-export function createFlowBake({origin = [-34, -28.6], size: gridSize = [112, 88], cell = .65} = {}) {
- const [width, height] = gridSize, [left, bottom] = origin;
+// along: 'x' (the channel runs along +X: sectionAt(x) gives its centre in z and its slope dz/dx) or 'z' (it runs along
+// +Z: sectionAt(z) gives its centre in x and its slope dx/dz). The texture, bounds and sample stay in world x, z.
+export function createFlowBake({origin = [-34, -28.6], size: gridSize = [112, 88], cell = .65, along = 'x'} = {}) {
+ if (along !== 'x' && along !== 'z') throw new RangeError(`A flow bake runs along x or z: ${along}`);
+ // The solver works along its first axis: a channel along Z is solved turned, and written back in world x, z.
+ const turned = along === 'z', [columns, rows] = gridSize;
+ const [width, height] = turned ? [rows, columns] : gridSize, [left, bottom] = turned ? [origin[1], origin[0]] : origin;
  const size = width * height;
  const pixels = new Uint8Array(size * 4);
- const texture = createDataTexture(pixels, width, height, {filter: 'linear', upload: false});
- const bounds = new Vector4(left, bottom, width * cell, height * cell);
+ const texture = createDataTexture(pixels, columns, rows, {filter: 'linear', upload: false});
+ const bounds = new Vector4(origin[0], origin[1], columns * cell, rows * cell);
  let ready = false;
  const vx = new Float32Array(size), vz = new Float32Array(size);
  const wet = new Uint8Array(size);
 
- function bake(channel, rocks, iterations) {
+ function bake(channel, obstacles, iterations) {
+  const rocks = turned ? obstacles.map(rock => ({x: rock.y, y: rock.x, z: rock.z})) : obstacles;
   const u = new Float32Array((width + 1) * height);
   const v = new Float32Array(width * (height + 1));
   const divergence = new Float32Array(size);
@@ -82,7 +88,7 @@ export function createFlowBake({origin = [-34, -28.6], size: gridSize = [112, 88
    after += (u[face + 1] - u[face] + v[i + width] - v[i]) ** 2;
   }
   for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) {
-   const i = z * width + x, j = i * 4;
+   const i = z * width + x, j = (turned ? x * columns + z : i) * 4;
    const wx = left + (x + .5) * cell, wz = bottom + (z + .5) * cell;
    const influence = rocks.reduce((max, rock) => {
     if (!rock.z || wx < rock.x - ROCK_INFLUENCE.lead) return max;
@@ -90,8 +96,8 @@ export function createFlowBake({origin = [-34, -28.6], size: gridSize = [112, 88
    }, 0);
    const shear = Math.abs((open(x, z + 1) ? vx[i + width] : vx[i]) -
     (open(x, z - 1) ? vx[i - width] : vx[i])) / (2 * cell);
-   pixels[j] = Math.round(clamp(.5 + vx[i] / FLOW_VELOCITY_SCALE, 0, 1) * BYTE);
-   pixels[j + 1] = Math.round(clamp(.5 + vz[i] / FLOW_VELOCITY_SCALE, 0, 1) * BYTE);
+   pixels[j] = Math.round(clamp(.5 + (turned ? vz : vx)[i] / FLOW_VELOCITY_SCALE, 0, 1) * BYTE);
+   pixels[j + 1] = Math.round(clamp(.5 + (turned ? vx : vz)[i] / FLOW_VELOCITY_SCALE, 0, 1) * BYTE);
    pixels[j + 2] = wet[i] ? Math.round(clamp((shear - SHEAR_FOAM.from) * influence * SHEAR_FOAM.gain, 0, 1) * BYTE) : 0;
    pixels[j + 3] = wet[i] * BYTE;
   }
@@ -101,10 +107,10 @@ export function createFlowBake({origin = [-34, -28.6], size: gridSize = [112, 88
  }
 
  function sample(x, z, out) {
-  const col = Math.floor((x - left) / cell), row = Math.floor((z - bottom) / cell);
+  const col = Math.floor(((turned ? z : x) - left) / cell), row = Math.floor(((turned ? x : z) - bottom) / cell);
   const i = row * width + col;
   if (col < 0 || col >= width || row < 0 || row >= height || !wet[i]) return false;
-  out.set(vx[i], vz[i]);
+  out.set((turned ? vz : vx)[i], (turned ? vx : vz)[i]);
   return true;
  }
 

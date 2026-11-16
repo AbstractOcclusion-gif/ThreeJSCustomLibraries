@@ -6,7 +6,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import initJolt from 'jolt-physics';
 import {Body, Box, Sphere, Vec3, World} from 'cannon-es';
 import {createBenchPanel} from '../panel.js';
-import {cloneBiome, craterFootprint, craterFromImpact, createTerrainAppearance, createTerrainField, createTerrainMaterial, createTerrainWorld, CRATER_DEFAULTS, TERRAIN_ROLE_TINTS} from '../../src/terrain/index.js';
+import {cloneBiome, craterFootprint, craterFromImpact, createTerrainAppearance, createTerrainField, createTerrainMaterial, createTerrainWorld, CRATER_DEFAULTS} from '../../src/terrain/index.js';
 import {createSurfaceWeather} from '../../src/surface/index.js';
 import {createChips, createPuffs} from '../../src/particles/index.js';
 import {createFreeVegetation, createGrassField} from '../../src/vegetation/index.js';
@@ -21,19 +21,11 @@ import {aimRay} from '../kit/input.js';
 import {loadTerrainPalette} from '../terrain/textures.js';
 import {createTerrainCollider} from '../terrain/heightfield.js';
 import {craterControls, craterLook, craterTool} from '../terrain/controls.js';
+import {createCraterEffects, CRATER_DUST as DUST, CRATER_SHARDS as SHARDS, STRATA_TINT} from '../kit/crater-effects.js';
 import '../bench.css';
 
 // Ground: a square `span` m wide, `resolution` samples a side (25 cm cells), of the world of one `biome`.
 const TERRAIN = {span: 64, resolution: 257, biome: 'plains', seed: 11};
-// What each stratum's debris looks like: the terrain's own role tints (topsoil is the dark top earth).
-const STRATA_TINT = {topsoil: TERRAIN_ROLE_TINTS.mud, subsoil: TERRAIN_ROLE_TINTS.soil, scree: TERRAIN_ROLE_TINTS.scree, rock: TERRAIN_ROLE_TINTS.rock};
-// Shards (particle chips): count from the thrown volume (m³ x perCubicMetre, at most max a crater), thrown outward
-// from `bursts` points on the rim at `speed` x sqrt(g x reach) m/s, so they clear the crater; shock (pop strength)
-// from the crater depth.
-const SHARDS = {pool: 900, perCubicMetre: 18, max: 240, bursts: 8, speed: 1.1, shockPerMetre: 14, maxShock: 70, size: 1.4};
-// Dust (particle puffs): one cloud over the crater, `perMetre` of its reach in size (at most maxSize), and `ring`
-// smaller ones (`ringShare` of that size) around the rim.
-const DUST = {pool: 120, perMetre: .9, maxSize: 7, ring: 6, ringShare: .55};
 // Clods (Jolt bodies): count from the thrown volume (m³ x perCubicMetre, at most perBlast, `hardShare` more of
 // them on hard ground). Edge size in m: a share of the crater reach, within [minSize, maxSize]. Thrown from the rim
 // at `speed` x sqrt(g x reach) m/s (each between `spread` shares of it), `rise` of it upward, so they land from
@@ -211,34 +203,7 @@ const clodCount = () => moving.reduce((count, entry) => count + (entry.clod ? 1 
 
 // The wiring: what a crater throws out, by the strata it cut.
 const effects = {shards: true, dust: true, clods: true, plants: true};
-const origin = new THREE.Vector3();
-const rimPoint = new THREE.Vector3(), outward = new THREE.Vector3();
-// Point k of n around the crater, `share` of its reach from the centre, on the ground; `outward` points away.
-function aroundCrater(event, k, n, share, y) {
-  const angle = (k + Math.random()) / n * Math.PI * 2;
-  outward.set(Math.cos(angle), 0, Math.sin(angle));
-  rimPoint.set(event.x + outward.x * event.reach * share, 0, event.z + outward.z * event.reach * share);
-  rimPoint.y = field.heightAt(rimPoint.x, rimPoint.z) ?? y;
-  return rimPoint;
-}
-const escapeSpeed = event => Math.sqrt(GRAVITY * event.reach);   // m/s that throws debris about a crater width
-function throwShards(event, y) {
-  const shock = Math.min(SHARDS.maxShock, event.depth * SHARDS.shockPerMetre), total = Math.min(SHARDS.max, event.ejecta * SHARDS.perCubicMetre);
-  for (const [name, share] of Object.entries(event.strata)) {
-    const count = Math.round(total * share / SHARDS.bursts);
-    if (count <= 0) continue;
-    const style = {color: new THREE.Color(STRATA_TINT[name]).getHex(), chips: count, size: SHARDS.size};
-    for (let k = 0; k < SHARDS.bursts; k++) {
-      aroundCrater(event, k, SHARDS.bursts, 1, y);
-      chips.emit(rimPoint, style, shock, outward.multiplyScalar(SHARDS.speed * escapeSpeed(event)));
-    }
-  }
-}
-function throwDust(event, y) {
-  const size = Math.min(DUST.maxSize, event.reach * DUST.perMetre);
-  puffs.dust(origin.set(event.x, y, event.z), size);
-  for (let k = 0; k < DUST.ring; k++) puffs.dust(aroundCrater(event, k, DUST.ring, 1.1, y), size * DUST.ringShare);
-}
+const {throwShards, throwDust, aroundCrater, escapeSpeed, origin, rimPoint, outward} = createCraterEffects({chips, puffs, heightAt: (x, z) => field.heightAt(x, z)});
 function throwClods(event, y) {
   const strata = Object.entries(event.strata).filter(([, share]) => share > 0);
   const count = Math.min(CLODS.perBlast, Math.round(event.ejecta * CLODS.perCubicMetre * (1 + CLODS.hardShare * event.hardness)));
