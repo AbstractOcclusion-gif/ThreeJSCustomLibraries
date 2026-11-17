@@ -31,7 +31,7 @@ test('time easing is independent of frame subdivision',()=>{
  const a=createCameraDirector(new PerspectiveCamera()),b=createCameraDirector(new PerspectiveCamera());a.setSlow(.25);b.setSlow(.25);const expected=a.tick(.2);for(let i=0;i<4;i++)b.tick(.05);near(b.timeScale,expected);
 });
 test('collision probes shorten the camera arm with clearance without mutating the subject',()=>{
- let probes=0;const target=new Vector3(0,1,0),desired=new Vector3(0,1,10),resolve=createCameraCollision({skin:.2,raycast:()=>{probes++;return 4;}});const result=resolve(target,desired);near(result.z,3.8);assert.equal(probes,5);assert.deepEqual(target.toArray(),[0,1,0]);near(desired.z,10);
+ let probes=0;const target=new Vector3(0,1,0),desired=new Vector3(0,1,10),resolve=createCameraCollision({skin:.2,raycast:()=>{probes++;return 4;}});const result=resolve(target,desired);near(result.z,3.8);assert.equal(probes,9);assert.deepEqual(target.toArray(),[0,1,0]);near(desired.z,10);
 });
 test('collision supports no hit, vertical arms and in-place output without NaNs',()=>{
  const resolve=createCameraCollision({raycast:()=>Infinity}),target=new Vector3(),desired=new Vector3(0,10,0);resolve(target,desired,desired);assert.deepEqual(desired.toArray(),[0,10,0]);resolve(target,target,desired);assert.deepEqual(desired.toArray(),[0,0,0]);
@@ -54,4 +54,10 @@ test('simultaneous recorded angles share time, objects and ring bounds; switchin
  o.position.x=99;live.position.x=999;assert.ok(r.begin(live));r.setPlaying(false);r.seek(.25);const cursor=r.position;near(o.position.x,2.5);
  for(const [n,id]of ['side','behind','orbit'].entries()){const pose=r.selectCamera(id);near(pose.position.x,100*(n+1)+2.5);near(pose.fov,views[id].fov);near(pose.target.x,2.5);near(r.position,cursor);near(o.position.x,2.5);near(pose.quaternion.angleTo(new Quaternion().setFromAxisAngle(new Vector3(0,1,0),.25)),0);}
  r.seek(1);near(r.update(0).position.x,304);near(r.selectCamera('recorded').position.x,4);assert.equal(r.frames,4);assert.equal(r.bytes,bytes);assert.equal(bytes,4*(11+4*8+3)*4);assert.throws(()=>r.selectCamera('missing'),/Unknown/);r.end(live);near(o.position.x,99);near(live.position.x,999);
+});
+test('collision probes that would start inside a wall beside the target are drawn back, so the camera is not pulled in',()=>{
+ // A wall fills x < -1; the target stands 0.2 m from it and the camera wants to sit 4 m straight behind.
+ const raycast=(from,to)=>{if(from.x<-1)return 0;if(to.x>=-1)return Infinity;return from.distanceTo(to)*(from.x+1)/(from.x-to.x);};
+ const resolve=createCameraCollision({raycast,radius:.35,skin:.15}),target=new Vector3(-.8,1,0),desired=new Vector3(-.8,1,-4);
+ const result=resolve(target,desired);near(result.z,-4);near(result.x,-.8);
 });

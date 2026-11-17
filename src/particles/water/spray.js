@@ -8,80 +8,122 @@ import {assertFrameTime} from '../../core/validate.js';
 // assets: {assetBaseUrl, sheets, dropletUrl, loadTexture} — all optional; without them the generated soft disc is used.
 // lighting: {uniforms: {uSunCol, uFxAmbient}, direction, ambient} - optional; without it the spray owns a clear-noon set
 // that setEnvironment() (core/environment.js contract) keeps in step with the scene light.
-const SPRAY_AMBIENT = [.35, .45, .55];
+const SPRAY_AMBIENT = [0.35, 0.45, 0.55];
 export function createWaterSpray({
- THREE, scene, renderer, depth, surface, lighting, onDeposit = null, assets = {}, impactSheets,
+  THREE,
+  scene,
+  renderer,
+  depth,
+  surface,
+  lighting,
+  onDeposit = null,
+  assets = {},
+  impactSheets,
 }) {
- if (!THREE || !scene || !renderer || !depth || !surface) {
-  throw Error('Water spray needs Three.js, a target scene, renderer, depth and surface bindings');
- }
- const ownsLighting = !lighting;
- if (ownsLighting) {
-  const ambient = new THREE.Color(...SPRAY_AMBIENT);
-  lighting = {uniforms: {uSunCol: {value: new THREE.Color(...CLEAR_NOON_SUN)}, uFxAmbient: {value: ambient}},
-   direction: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize(), ambient};
- }
- const sheets = createOceanSheets({THREE, assetBaseUrl: assets.assetBaseUrl, sheets: assets.sheets, loadTexture: assets.loadTexture});
- const mistSheet = sheets.SHEETS['mist (8x8)'] ? 'mist (8x8)' : SOFT_DISC;
- const host = {
-  THREE, fxScene: scene,
-  FX_DEPTH_GLSL: depth.glsl, FX_DEPTH_U: depth.uniforms,
-  SURFACE_HEIGHT_GLSL: surface.glsl, surfaceHeightUniforms: () => surface.uniforms,
- };
- const {SheetSprites} = createOceanSprites({...host, ...sheets});
- const mist = new SheetSprites(lighting.uniforms, lighting.direction, {
-  sheet: mistSheet, free: true, upright: true, billow: true,
-  size: .9, growth: .85, life: 1.05, rise: .48, opacity: .42,
- });
- const crown = impactSheets?.crown && new SheetSprites(lighting.uniforms, lighting.direction, impactSheets.crown);
- const foam = impactSheets?.foam && new SheetSprites(lighting.uniforms, lighting.direction, {...impactSheets.foam, flat: true});
- const sprites = [mist, crown, foam].filter(Boolean);
- const deposit = foam ? (x, z, radius, strength) => {
-  if (impactSheets.acceptFoam?.(x, z) ?? true) foam.spawn(x, z, strength, radius);
-  onDeposit?.(x, z, radius, strength);
- } : onDeposit;
- const splash = createOceanSplash({...host, renderer, ...sheets, dropletUrl: assets.dropletUrl, loadTexture: assets.loadTexture, onDeposit: deposit});
- if (crown) splash.setSplashHook((x, y, z, strength, radius, size, allowed) => {
-  if (allowed) crown.spawn(x, z, strength, radius, y);
- });
- splash.initSplash(lighting.uniforms, lighting.ambient, lighting.direction);
- splash.setSplashSettings({sprite: 'droplet', dropletSize: .055, opacity: .7});
- let disposed = false;
- return {
-  meshes: [...sprites.map(sprite => sprite.mesh), splash.mesh],
-  mist(position, intensity = 1, size = 1) {
-   if (!disposed) mist.spawn(position.x, position.z, intensity, size, position.y);
-  },
-  splash(position, strength = .6, radius = .2) {
-   if (!disposed) splash.emitSplash(position.x, position.y, position.z, strength, radius);
-  },
-  emitSplash(...args) {
-   if (!disposed) splash.emitSplash(...args);
-  },
-  // Follow a shared environment. Only applies to the spray's own lighting: a host that passed `lighting` drives it itself.
-  setEnvironment(environment) {
-   if (disposed || !ownsLighting || !environment) return;
-   lighting.uniforms.uSunCol.value.setRGB(...CLEAR_NOON_SUN).multiply(environment.light);
-   lighting.uniforms.uFxAmbient.value.setRGB(...SPRAY_AMBIENT).multiply(environment.light);
-   lighting.direction.copy(environment.sun.direction);
-  },
-  update(dt, simWindow = null) {
-   if (disposed) return;
-   assertFrameTime(dt, 'Water spray');
-   depth.update();
-   for (const sprite of sprites) sprite.update(dt);
-   splash.updateSplash(dt);
-   splash.depositFoam(simWindow);
-  },
-  get active() { return {mist: mist.active, droplets: splash.splashStats().droplets}; },
-  clear() { for (const sprite of sprites) sprite.clear(); splash.clear(); },
-  dispose() {
-   if (disposed) return;
-   disposed = true;
-   for (const sprite of sprites) sprite.dispose();
-   splash.dispose();
-   sheets.dispose();
-  },
-  sheets,
- };
+  if (!THREE || !scene || !renderer || !depth || !surface) {
+    throw Error('Water spray needs Three.js, a target scene, renderer, depth and surface bindings');
+  }
+  const ownsLighting = !lighting;
+  if (ownsLighting) {
+    const ambient = new THREE.Color(...SPRAY_AMBIENT);
+    lighting = {
+      uniforms: {uSunCol: {value: new THREE.Color(...CLEAR_NOON_SUN)}, uFxAmbient: {value: ambient}},
+      direction: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize(),
+      ambient,
+    };
+  }
+  const sheets = createOceanSheets({
+    THREE,
+    assetBaseUrl: assets.assetBaseUrl,
+    sheets: assets.sheets,
+    loadTexture: assets.loadTexture,
+  });
+  const mistSheet = sheets.SHEETS['mist (8x8)'] ? 'mist (8x8)' : SOFT_DISC;
+  const host = {
+    THREE,
+    fxScene: scene,
+    FX_DEPTH_GLSL: depth.glsl,
+    FX_DEPTH_U: depth.uniforms,
+    SURFACE_HEIGHT_GLSL: surface.glsl,
+    surfaceHeightUniforms: () => surface.uniforms,
+  };
+  const {SheetSprites} = createOceanSprites({...host, ...sheets});
+  const mist = new SheetSprites(lighting.uniforms, lighting.direction, {
+    sheet: mistSheet,
+    free: true,
+    upright: true,
+    billow: true,
+    size: 0.9,
+    growth: 0.85,
+    life: 1.05,
+    rise: 0.48,
+    opacity: 0.42,
+  });
+  const crown = impactSheets?.crown && new SheetSprites(lighting.uniforms, lighting.direction, impactSheets.crown);
+  const foam =
+    impactSheets?.foam && new SheetSprites(lighting.uniforms, lighting.direction, {...impactSheets.foam, flat: true});
+  const sprites = [mist, crown, foam].filter(Boolean);
+  const deposit = foam
+    ? (x, z, radius, strength) => {
+        if (impactSheets.acceptFoam?.(x, z) ?? true) foam.spawn(x, z, strength, radius);
+        onDeposit?.(x, z, radius, strength);
+      }
+    : onDeposit;
+  const splash = createOceanSplash({
+    ...host,
+    renderer,
+    ...sheets,
+    dropletUrl: assets.dropletUrl,
+    loadTexture: assets.loadTexture,
+    onDeposit: deposit,
+  });
+  if (crown)
+    splash.setSplashHook((x, y, z, strength, radius, size, allowed) => {
+      if (allowed) crown.spawn(x, z, strength, radius, y);
+    });
+  splash.initSplash(lighting.uniforms, lighting.ambient, lighting.direction);
+  splash.setSplashSettings({sprite: 'droplet', dropletSize: 0.055, opacity: 0.7});
+  let disposed = false;
+  return {
+    meshes: [...sprites.map(sprite => sprite.mesh), splash.mesh],
+    mist(position, intensity = 1, size = 1) {
+      if (!disposed) mist.spawn(position.x, position.z, intensity, size, position.y);
+    },
+    splash(position, strength = 0.6, radius = 0.2) {
+      if (!disposed) splash.emitSplash(position.x, position.y, position.z, strength, radius);
+    },
+    emitSplash(...args) {
+      if (!disposed) splash.emitSplash(...args);
+    },
+    // Follow a shared environment. Only applies to the spray's own lighting: a host that passed `lighting` drives it itself.
+    setEnvironment(environment) {
+      if (disposed || !ownsLighting || !environment) return;
+      lighting.uniforms.uSunCol.value.setRGB(...CLEAR_NOON_SUN).multiply(environment.light);
+      lighting.uniforms.uFxAmbient.value.setRGB(...SPRAY_AMBIENT).multiply(environment.light);
+      lighting.direction.copy(environment.sun.direction);
+    },
+    update(dt, simWindow = null) {
+      if (disposed) return;
+      assertFrameTime(dt, 'Water spray');
+      depth.update();
+      for (const sprite of sprites) sprite.update(dt);
+      splash.updateSplash(dt);
+      splash.depositFoam(simWindow);
+    },
+    get active() {
+      return {mist: mist.active, droplets: splash.splashStats().droplets};
+    },
+    clear() {
+      for (const sprite of sprites) sprite.clear();
+      splash.clear();
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const sprite of sprites) sprite.dispose();
+      splash.dispose();
+      sheets.dispose();
+    },
+    sheets,
+  };
 }

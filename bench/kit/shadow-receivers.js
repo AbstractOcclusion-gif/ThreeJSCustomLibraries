@@ -1,4 +1,5 @@
 // Mixed scenes can rebuild meshes and materials while the lighting passes stay alive.
+// weather (its cloud shadows) and rig (its lights' shadows) are optional: a scene without them passes null.
 export function createShadowReceivers(scene, shadows, weather, rig) {
   const receivers = new Map();
   return {
@@ -10,7 +11,7 @@ export function createShadowReceivers(scene, shadows, weather, rig) {
           if (!(material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial)) continue;
           present.add(material);
           if (receivers.has(material)) continue;
-          const removeCloud = material.isMeshStandardMaterial ? weather.addCloudShadowReceiver(material) : undefined;
+          const removeCloud = material.isMeshStandardMaterial ? weather?.addCloudShadowReceiver(material) : undefined;
           const removeSun = shadows.applyTo(material), removeLocal = rig?.applyTo(material);
           receivers.set(material, () => { removeCloud?.(); removeSun(); removeLocal?.(); });
         }

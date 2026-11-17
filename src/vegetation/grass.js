@@ -101,8 +101,11 @@ function patchMaterial(material, uniforms, lit, flatColorMix) {
 
 // Placements are world-space {x, y, z, yaw (radians), scale (>0), tint? [r, g, b] linear}.
 // LOD geometries and map are borrowed. With followTracks, the host paints and clears the supplied mask.
-const VIEW_DEFAULTS = Object.freeze({transmission: 1.45, lodDistance: 26, farDensity: .45, shadowDistance: 18, density: 1});
-export function createGrassField({scene, geometries, map, color, placements, tileSize = 5, flatColorMix = 0, contactTracks, followTracks = false}) {
+export const GRASS_VIEW_DEFAULTS = Object.freeze({transmission: 1.45, lodDistance: 26, farDensity: .45, shadowDistance: 18, density: 1});
+// tileSize: m of one culled tile; flatColorMix: share of the flat material colour; followTracks: follow a host's track mask.
+export const GRASS_FIELD_DEFAULTS = Object.freeze({tileSize: 5, flatColorMix: 0, followTracks: false});
+export function createGrassField({scene, geometries, map, color, placements, tileSize = GRASS_FIELD_DEFAULTS.tileSize,
+  flatColorMix = GRASS_FIELD_DEFAULTS.flatColorMix, contactTracks, followTracks = GRASS_FIELD_DEFAULTS.followTracks}) {
   const vectors = (length, Vector) => Array.from({length}, () => new Vector());
   const uniforms = {
     grassTime: {value: 0},
@@ -193,8 +196,8 @@ export function createGrassField({scene, geometries, map, color, placements, til
     setEnvironment(next) { heldEnvironment = next ?? null; },
     // Only `camera` is required. Wind comes from windX/windZ/gust, else from the environment (update's, else the held one), else calm.
     update(dt, {camera, environment = heldEnvironment, windX = environment?.wind.x ?? 0, windZ = environment?.wind.z ?? 0, gust = environment?.wind.gust ?? 0,
-      transmission = VIEW_DEFAULTS.transmission * (environment?.daylight ?? 1), lodDistance = VIEW_DEFAULTS.lodDistance, farDensity = VIEW_DEFAULTS.farDensity,
-      shadowDistance = VIEW_DEFAULTS.shadowDistance, density = VIEW_DEFAULTS.density, recoverySeconds = RECOVERY_SECONDS}) {
+      transmission = GRASS_VIEW_DEFAULTS.transmission * (environment?.daylight ?? 1), lodDistance = GRASS_VIEW_DEFAULTS.lodDistance, farDensity = GRASS_VIEW_DEFAULTS.farDensity,
+      shadowDistance = GRASS_VIEW_DEFAULTS.shadowDistance, density = GRASS_VIEW_DEFAULTS.density, recoverySeconds = RECOVERY_SECONDS}) {
       uniforms.grassTime.value += dt;
       uniforms.grassWind.value.set(windX, windZ).multiplyScalar(0.035).clampLength(0, MAX_BEND);
       uniforms.grassGust.value = gust;

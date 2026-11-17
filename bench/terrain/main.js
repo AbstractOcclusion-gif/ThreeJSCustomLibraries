@@ -12,8 +12,8 @@ import {loadTerrainTextures} from './textures.js';
 import {DEFAULT_TERRAIN_TEXTURES, TERRAIN_TEXTURE_SETS} from '../../src/terrain/textures.js';
 import {craterControls, craterLook, craterTool, groundTrackControls, runoffControls, textureSetControls, sandLookControls, snowBodyControls, snowLookControls, snowTrackControls, terrainControls, wetnessControls} from './controls.js';
 import {createTerrainBasins} from './basins.js';
-import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from './footsteps.js';
-import {CONTACT_SURFACES, createTerrainImpacts} from './impacts.js';
+import {FOOTSTEP_DEFAULTS, stampFootstepTrail} from '../../src/terrain/index.js';
+import {CONTACT_SURFACES, createTerrainImpacts} from '../../src/terrain/physics.js';
 import '../bench.css';
 
 const $ = id => document.getElementById(id);

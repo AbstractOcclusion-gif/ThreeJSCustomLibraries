@@ -2,16 +2,23 @@ export {createSequenceRule, createConditionRule} from './rules.js';
 
 const SNAPSHOT_VERSION = 1;
 
+// Hooks: subscribe(listener) hears 'puzzle:changed' ({id, solved, wasSolved, progress}); an onChange option is its
+// first listener.
 export function createPuzzle({id, rule, latch = true, onChange}) {
   let state = rule.initial();
   let solved = false;
+  const listeners = new Set(onChange ? [onChange] : []);
+  const tell = wasSolved => {
+    const event = Object.freeze({type: 'puzzle:changed', id, solved, wasSolved, progress: rule.progress(state)});
+    for (const listener of listeners) listener(event);
+  };
 
   function commit(next) {
     const wasSolved = solved;
     solved = Boolean((latch && solved) || rule.solved(next));
     const changed = next !== state || wasSolved !== solved;
     state = next;
-    if (changed) onChange?.({id, solved, wasSolved, progress: rule.progress(state)});
+    if (changed) tell(wasSolved);
   }
 
   function apply(input) {
@@ -19,6 +26,12 @@ export function createPuzzle({id, rule, latch = true, onChange}) {
   }
 
   return {
+    subscribe(listener) {
+      if (typeof listener !== 'function') throw Error('Puzzle listener must be a function');
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    dispose() { listeners.clear(); },
     get solved() { return solved; },
     get progress() { return rule.progress(state); },
     act(action, value) { apply({type: 'action', action, value}); },
@@ -30,7 +43,7 @@ export function createPuzzle({id, rule, latch = true, onChange}) {
       const wasSolved = solved;
       solved = false;
       state = rule.initial();
-      onChange?.({id, solved, wasSolved, progress: rule.progress(state)});
+      tell(wasSolved);
     },
     snapshot() { return {version: SNAPSHOT_VERSION, id, state: structuredClone(state)}; },
     restore(snapshot) {
@@ -41,7 +54,7 @@ export function createPuzzle({id, rule, latch = true, onChange}) {
       const wasSolved = solved;
       state = next;
       solved = Boolean(rule.solved(state));
-      onChange?.({id, solved, wasSolved, progress: rule.progress(state)});
+      tell(wasSolved);
     },
   };
 }

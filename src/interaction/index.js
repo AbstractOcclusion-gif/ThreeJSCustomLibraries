@@ -49,6 +49,12 @@ export function createInteraction() {
     },
     release: cancel,
     cancel,
+    // Forgets every target, so nothing the host registered stays reachable.
+    dispose() {
+      cancel();
+      targets.clear();
+      focused = null;
+    },
     update(seconds) {
       if (!hold) return;
       if (!Number.isFinite(seconds) || seconds < 0) throw new RangeError('Invalid interaction duration');

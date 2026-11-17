@@ -8,9 +8,8 @@ import * as CANNON from 'cannon-es';
 import {createCharacterController} from '../../src/character/index.js';
 import {createVehicle} from '../../src/vehicle/index.js';
 import {createJoltDriver} from '../../src/destruction/jolt-driver.js';
-import {FOOTSTEP_DEFAULTS} from '../terrain/footsteps.js';
-import {createSurroundCollider} from '../terrain/heightfield.js';
-import {SURROUND} from '../terrain/impacts.js';
+import {FOOTSTEP_DEFAULTS} from '../../src/terrain/index.js';
+import {createSurroundCollider, SURROUND} from '../../src/terrain/physics.js';
 
 export const PLAYERS = Object.freeze({
  gravity: 9.82,   // m/s2

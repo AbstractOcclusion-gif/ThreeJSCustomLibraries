@@ -43,11 +43,15 @@ export function createJoltHost(J, options = {}) {
   return {
     J, jolt, system, bodies, layers: JOLT_LAYERS,
     // A box body. halfExtents, position: [x, y, z]; quaternion: [x, y, z, w]; mass kg, 0 = fixed scenery.
-    addBox({halfExtents, position = [0, 0, 0], quaternion = [0, 0, 0, 1], mass = 0, friction = o.friction}) {
+    // kinematic: the host moves it itself with moveTo() (a lift, a platform): it carries and pushes what it meets,
+    // and nothing pushes it.
+    addBox({halfExtents, position = [0, 0, 0], quaternion = [0, 0, 0, 1], mass = 0, kinematic = false, friction = o.friction}) {
       vector.Set(...halfExtents);
       const shape = new J.BoxShape(vector, BOX_CONVEX_RADIUS, null);
       place.Set(...position); turn.Set(...quaternion);
-      const creation = new J.BodyCreationSettings(shape, place, turn, mass > 0 ? J.EMotionType_Dynamic : J.EMotionType_Static, mass > 0 ? JOLT_LAYERS.moving : JOLT_LAYERS.fixed);
+      if (kinematic && mass > 0) throw Error('A kinematic box has no mass: it is moved, not pushed');
+      const motion = kinematic ? J.EMotionType_Kinematic : mass > 0 ? J.EMotionType_Dynamic : J.EMotionType_Static;
+      const creation = new J.BodyCreationSettings(shape, place, turn, motion, mass > 0 || kinematic ? JOLT_LAYERS.moving : JOLT_LAYERS.fixed);
       creation.mFriction = friction;
       if (mass > 0) {
         creation.mOverrideMassProperties = J.EOverrideMassProperties_CalculateInertia;
@@ -55,7 +59,7 @@ export function createJoltHost(J, options = {}) {
       }
       const body = bodies.CreateBody(creation);
       J.destroy(creation);
-      bodies.AddBody(body.GetID(), mass > 0 ? J.EActivation_Activate : J.EActivation_DontActivate);
+      bodies.AddBody(body.GetID(), mass > 0 || kinematic ? J.EActivation_Activate : J.EActivation_DontActivate);
       return body;
     },
     remove(body) { bodies.RemoveBody(body.GetID()); bodies.DestroyBody(body.GetID()); },
@@ -65,6 +69,24 @@ export function createJoltHost(J, options = {}) {
       position.x = at.GetX(); position.y = at.GetY(); position.z = at.GetZ();
       const rotation = body.GetRotation();
       quaternion.x = rotation.GetX(); quaternion.y = rotation.GetY(); quaternion.z = rotation.GetZ(); quaternion.w = rotation.GetW();
+    },
+    // Takes a kinematic body to a position [x, y, z] over the step `dt` (s) that follows, keeping its turn: it gets
+    // the speed that brings it there, so what stands on it is carried along. Call it before each step it moves in.
+    moveTo(body, position, dt) {
+      if (!(dt > 0)) throw Error('moveTo needs the step it has to arrive in');
+      place.Set(...position);
+      bodies.MoveKinematic(body.GetID(), place, body.GetRotation(), dt);
+    },
+    // Carries a moving body over the ground at a speed (m/s along X and Z), without spin; its fall stays gravity's.
+    // For a host that moves a body itself (a crate she pushes): the body stays in the simulation, so whatever
+    // stands in its way still stops it. Call it every step it is carried, and with 0, 0 to hold it still.
+    setGroundVelocity(body, x, z) {
+      const id = body.GetID();
+      vector.Set(x, body.GetLinearVelocity().GetY(), z);
+      bodies.SetLinearVelocity(id, vector);
+      vector.Set(0, 0, 0);
+      bodies.SetAngularVelocity(id, vector);
+      bodies.ActivateBody(id);
     },
     // The nearest surface between two points {x, y, z}: {distance, point, normal} (reused between calls), or null.
     raycast(from, to) {

@@ -7,18 +7,22 @@
 // per-pixel sun disc, stars, galaxy and moon. The sun, the day (twilight, moon direction) and the weather (cloud profile, wind) come
 // from the page's adapter each frame: this module imports no page -- renderer, camera, GPU timer and the environment sink are injected.
 import * as THREE from 'three';
-import { Sky } from 'three/addons/objects/Sky.js';
-import { createCloudUniforms, CLOUD_GLSL, CLOUD_DRIFT, loadCloudNoise } from './cloud-density.js';
-import { createCloudWeatherMap } from './cloud-weather-map.js';
-import { DYNAMIC_SKY_DEFAULTS } from './settings.js';
-export { DYNAMIC_SKY_DEFAULTS } from './settings.js';
-
+import {Sky} from 'three/addons/objects/Sky.js';
+import {createCloudUniforms, CLOUD_GLSL, CLOUD_DRIFT, loadCloudNoise} from './cloud-density.js';
+import {createCloudWeatherMap} from './cloud-weather-map.js';
+import {DYNAMIC_SKY_DEFAULTS} from './settings.js';
+export {DYNAMIC_SKY_DEFAULTS} from './settings.js';
 
 // nightLight / nightColor: the night sky's own glow (the capture's ambient); the scene's night light is the day's (day.js)
-export const CLOUD_QUALITY = Object.freeze({ mobile: { size: 128, steps: 12 }, low: { size: 256, steps: 24 }, medium: { size: 256, steps: 40 }, high: { size: 512, steps: 64 } });
+export const CLOUD_QUALITY = Object.freeze({
+  mobile: {size: 128, steps: 12},
+  low: {size: 256, steps: 24},
+  medium: {size: 256, steps: 40},
+  high: {size: 512, steps: 64},
+});
 
-const SKY_SUN_DISC = 'float sundisk = smoothstep( sunAngularDiameterCos, sunAngularDiameterCos + 0.00002, cosTheta );';   // three r160 Sky.js: the capture drops the disc, the dome draws it sharp
-const CLOUD_RENDER_GLSL = /* glsl */`
+const SKY_SUN_DISC = 'float sundisk = smoothstep( sunAngularDiameterCos, sunAngularDiameterCos + 0.00002, cosTheta );'; // three r160 Sky.js: the capture drops the disc, the dome draws it sharp
+const CLOUD_RENDER_GLSL = /* glsl */ `
 uniform vec3 uCaptureOrigin,uDynamicSunColor,sunPosition; uniform float uDynamicDaylight,uNightBlend,uDynamicExposure;
 uniform vec3 uNightAmbient; uniform float uNightIntensity,uDistantCloudDrop;
 uniform vec2 uFlashPosition; uniform float uFlashStrength;
@@ -93,127 +97,320 @@ export class DynamicSky {
   // tGalaxy, uSunCol, uNightBlend, uSkyDyn); deps: the page's renderer and camera, its GPU timer section hook, and `environment`,
   // the sink for the prefiltered capture (the scene's standard materials' lighting): { setDynamic(texture, previousTexture),
   // setBlend(t 0..1), clear(), active } -- the ocean's WeatherEnvironment, or the pond's scene.environment wrapper.
-  constructor(settings, sky, { renderer, camera, gpuSec = () => {}, environment, assetBaseUrl, fetch:fetcher=globalThis.fetch, loadTexture }) {
-    if (!renderer || !camera || !environment) throw new Error('DynamicSky: renderer, camera and environment are required');
-    this.s = settings; this.sky = sky; this.renderer = renderer; this.camera = camera; this.gpuSec = gpuSec; this.env = environment;
-    this.cloudUniforms=createCloudUniforms();this.disposed=false;this.abortController=new AbortController();this.ownedTextures=[];
-    this.ready = false; this.captureAge = Infinity; this.lightAge = Infinity; this.sunColor = new THREE.Color(1, 0.96, 0.9); this.nightColor = new THREE.Color();
-    this.capture = new THREE.Scene(); this.dome = new Sky(); this.dome.scale.setScalar(10); this.capture.add(this.dome);
-    const m = this.dome.material; Object.assign(m.uniforms, this.cloudUniforms, {
-      uCaptureOrigin: { value: new THREE.Vector3() }, uDynamicSunColor: { value: this.sunColor }, uDynamicDaylight: { value: 1 }, uNightBlend: sky.uNightBlend,
-      uDynamicExposure: { value: 0.18 }, uNightAmbient: { value: new THREE.Color() }, uCloudBrightness: { value: 1 }, uCloudAmbient: { value: 1 }, uSkySaturation: { value: 1 }, uNightIntensity: sky.uNightIntensity,
-      uDistantCloudDrop: { value: 0 }, uFlashPosition: { value: new THREE.Vector2() }, uFlashStrength: { value: 0 } });
-    if (!m.fragmentShader.includes(SKY_SUN_DISC)) throw new Error('DynamicSky: three Sky.js sun disc line not found (three version changed?)');
-    m.fragmentShader = m.fragmentShader.replace('void main() {', CLOUD_RENDER_GLSL + '\nvoid main() {')
-      .replace('gl_FragColor = vec4( retColor, 1.0 );', `
+  constructor(
+    settings,
+    sky,
+    {renderer, camera, gpuSec = () => {}, environment, assetBaseUrl, fetch: fetcher = globalThis.fetch, loadTexture},
+  ) {
+    if (!renderer || !camera || !environment)
+      throw new Error('DynamicSky: renderer, camera and environment are required');
+    this.s = settings;
+    this.sky = sky;
+    this.renderer = renderer;
+    this.camera = camera;
+    this.gpuSec = gpuSec;
+    this.env = environment;
+    this.cloudUniforms = createCloudUniforms();
+    this.disposed = false;
+    this.abortController = new AbortController();
+    this.ownedTextures = [];
+    this.ready = false;
+    this.captureAge = Infinity;
+    this.lightAge = Infinity;
+    this.sunColor = new THREE.Color(1, 0.96, 0.9);
+    this.nightColor = new THREE.Color();
+    this.capture = new THREE.Scene();
+    this.dome = new Sky();
+    this.dome.scale.setScalar(10);
+    this.capture.add(this.dome);
+    const m = this.dome.material;
+    Object.assign(m.uniforms, this.cloudUniforms, {
+      uCaptureOrigin: {value: new THREE.Vector3()},
+      uDynamicSunColor: {value: this.sunColor},
+      uDynamicDaylight: {value: 1},
+      uNightBlend: sky.uNightBlend,
+      uDynamicExposure: {value: 0.18},
+      uNightAmbient: {value: new THREE.Color()},
+      uCloudBrightness: {value: 1},
+      uCloudAmbient: {value: 1},
+      uSkySaturation: {value: 1},
+      uNightIntensity: sky.uNightIntensity,
+      uDistantCloudDrop: {value: 0},
+      uFlashPosition: {value: new THREE.Vector2()},
+      uFlashStrength: {value: 0},
+    });
+    if (!m.fragmentShader.includes(SKY_SUN_DISC))
+      throw new Error('DynamicSky: three Sky.js sun disc line not found (three version changed?)');
+    m.fragmentShader = m.fragmentShader
+      .replace('void main() {', CLOUD_RENDER_GLSL + '\nvoid main() {')
+      .replace(
+        'gl_FragColor = vec4( retColor, 1.0 );',
+        `
         // Sky.js flattens saturation with its sunfade power curve; restore it before clouds so reflections and PMREM match.
         vec3 daySky=retColor*uDynamicExposure;daySky=max(mix(vec3(dot(daySky,SKY_LUMA)),daySky,uSkySaturation),vec3(0.0));
         vec3 base=mix(daySky,nightAmbient(direction),uNightBlend);
         base=renderCirrus(direction,base);
-        gl_FragColor=vec4(min(renderCloudLayer(direction,base),vec3(24.0)),gSkyTransmittance);`)
-      .replace(SKY_SUN_DISC, 'float sundisk = 0.0;').replace('#include <tonemapping_fragment>', '').replace('#include <colorspace_fragment>', '');   // render targets stay linear: screen and water do the output conversion
+        gl_FragColor=vec4(min(renderCloudLayer(direction,base),vec3(24.0)),gSkyTransmittance);`,
+      )
+      .replace(SKY_SUN_DISC, 'float sundisk = 0.0;')
+      .replace('#include <tonemapping_fragment>', '')
+      .replace('#include <colorspace_fragment>', ''); // render targets stay linear: screen and water do the output conversion
     this.pmrem = new THREE.PMREMGenerator(renderer);
-    const loader=new THREE.TextureLoader();
-    this.readyPromise=assetBaseUrl?this.loadAssets(assetBaseUrl,loadTexture??(url=>loader.loadAsync(url)),fetcher):Promise.resolve(false);
-    this.readyPromise.catch(()=>{}); // The caller still receives the rejection through readyPromise.
-
+    const loader = new THREE.TextureLoader();
+    this.readyPromise = assetBaseUrl
+      ? this.loadAssets(assetBaseUrl, loadTexture ?? (url => loader.loadAsync(url)), fetcher)
+      : Promise.resolve(false);
+    this.readyPromise.catch(() => {}); // The caller still receives the rejection through readyPromise.
   }
-  async loadAssets(baseUrl,loadTexture,fetcher){
-    const results=await Promise.allSettled([
-      loadCloudNoise(baseUrl,{fetch:fetcher,signal:this.abortController.signal}),
-      ...['moon.png','stars.png','galaxy.jpg','cirrus.png'].map(name=>loadTexture(new URL(name,baseUrl).href))
+  async loadAssets(baseUrl, loadTexture, fetcher) {
+    const results = await Promise.allSettled([
+      loadCloudNoise(baseUrl, {fetch: fetcher, signal: this.abortController.signal}),
+      ...['moon.png', 'stars.png', 'galaxy.jpg', 'cirrus.png'].map(name => loadTexture(new URL(name, baseUrl).href)),
     ]);
-    const textures=results.filter(r=>r.status==='fulfilled').flatMap(r=>Array.isArray(r.value)?r.value:[r.value]);
-    const failure=results.find(r=>r.status==='rejected');
-    if(this.disposed||failure){textures.forEach(t=>t.dispose());if(!this.disposed&&failure)throw failure.reason;return false;}
-    this.ownedTextures=textures;
-    const [noise,moon,stars,galaxy,cirrus]=results.map(r=>r.value),u=this.cloudUniforms;
-    for(const t of [moon,stars,galaxy])t.colorSpace=THREE.SRGBColorSpace;
-    cirrus.colorSpace=THREE.NoColorSpace;cirrus.wrapS=cirrus.wrapT=THREE.RepeatWrapping;
-    this.sky.tMoon.value=moon;this.sky.tStars.value=stars;this.sky.tGalaxy.value=galaxy;u.tCirrus.value=cirrus;u.tCloudBase.value=noise[0];u.tCloudDetail.value=noise[1];
+    const textures = results
+      .filter(r => r.status === 'fulfilled')
+      .flatMap(r => (Array.isArray(r.value) ? r.value : [r.value]));
+    const failure = results.find(r => r.status === 'rejected');
+    if (this.disposed || failure) {
+      textures.forEach(t => t.dispose());
+      if (!this.disposed && failure) throw failure.reason;
+      return false;
+    }
+    this.ownedTextures = textures;
+    const [noise, moon, stars, galaxy, cirrus] = results.map(r => r.value),
+      u = this.cloudUniforms;
+    for (const t of [moon, stars, galaxy]) t.colorSpace = THREE.SRGBColorSpace;
+    cirrus.colorSpace = THREE.NoColorSpace;
+    cirrus.wrapS = cirrus.wrapT = THREE.RepeatWrapping;
+    this.sky.tMoon.value = moon;
+    this.sky.tStars.value = stars;
+    this.sky.tGalaxy.value = galaxy;
+    u.tCirrus.value = cirrus;
+    u.tCloudBase.value = noise[0];
+    u.tCloudDetail.value = noise[1];
     // Optional baked weather map (weather-map.png: r coverage around .5, g cloud top, tileable). Falls back to the procedural Worley map.
-    let baked=null;try{baked=await loadTexture(new URL('weather-map.png',baseUrl).href);}catch{baked=null;}
-    if(this.disposed){baked?.dispose();textures.forEach(t=>t.dispose());this.ownedTextures=[];return false;}
-    if(baked){baked.colorSpace=THREE.NoColorSpace;baked.wrapS=baked.wrapT=THREE.RepeatWrapping;this.ownedTextures.push(baked);u.tCloudWeather.value=baked;}
-    else{try{this.weatherMap=createCloudWeatherMap(this.renderer,u);}catch(error){textures.forEach(t=>t.dispose());this.ownedTextures=[];throw error;}}
-    this.ready=true;this.captureAge=Infinity;return true;
+    let baked = null;
+    try {
+      baked = await loadTexture(new URL('weather-map.png', baseUrl).href);
+    } catch {
+      baked = null;
+    }
+    if (this.disposed) {
+      baked?.dispose();
+      textures.forEach(t => t.dispose());
+      this.ownedTextures = [];
+      return false;
+    }
+    if (baked) {
+      baked.colorSpace = THREE.NoColorSpace;
+      baked.wrapS = baked.wrapT = THREE.RepeatWrapping;
+      this.ownedTextures.push(baked);
+      u.tCloudWeather.value = baked;
+    } else {
+      try {
+        this.weatherMap = createCloudWeatherMap(this.renderer, u);
+      } catch (error) {
+        textures.forEach(t => t.dispose());
+        this.ownedTextures = [];
+        throw error;
+      }
+    }
+    this.ready = true;
+    this.captureAge = Infinity;
+    return true;
   }
-  dispose(){
-    if(this.disposed)return;this.disposed=true;this.abortController.abort();this.ready=false;
-    if(this.envOn)this.env.clear();this.sky.uSkyDyn.value=0;
-    this.targets?.forEach(t=>t.dispose());this.weatherMap?.dispose();this.ownedTextures.forEach(t=>t.dispose());this.ownedTextures=[];
-    this.previousEnvironment?.dispose();if(this.environment!==this.previousEnvironment)this.environment?.dispose();
-    this.pmrem.dispose();this.dome.geometry.dispose();this.dome.material.dispose();
-    for(const name of ['tMoon','tStars','tGalaxy','tDynamicSky','tDynamicSkyPrev'])this.sky[name].value=null;
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.abortController.abort();
+    this.ready = false;
+    if (this.envOn) this.env.clear();
+    this.sky.uSkyDyn.value = 0;
+    this.targets?.forEach(t => t.dispose());
+    this.weatherMap?.dispose();
+    this.ownedTextures.forEach(t => t.dispose());
+    this.ownedTextures = [];
+    this.previousEnvironment?.dispose();
+    if (this.environment !== this.previousEnvironment) this.environment?.dispose();
+    this.pmrem.dispose();
+    this.dome.geometry.dispose();
+    this.dome.material.dispose();
+    for (const name of ['tMoon', 'tStars', 'tGalaxy', 'tDynamicSky', 'tDynamicSkyPrev']) this.sky[name].value = null;
   }
   // active: the page shows the dynamic sky (its own switch / sky mode); sunDir: the page's sun (before any moon-light override);
   // weather: an atmosphere Weather (on, cloudProfile, weights, wind); day: an atmosphere Day (hour, daylight, moonDir, sunTint,
   // night light); windHeading: the weather wind's heading (deg); sunDim: what the page already baked into uSunCol (the pond's
   // LIGHT_MOD.sun) -- the clouds undo it and add the day's warm tint and daylight themselves (omit when uSunCol is already the day's sun)
-  update(dt, { active, sunDir, weather, day, windHeading = 0, sunDim, flashPosition, flashStrength = 0 }) {
-    if(this.disposed)return;const s = this.s, sky = this.sky, on = active && this.ready;
+  update(dt, {active, sunDir, weather, day, windHeading = 0, sunDim, flashPosition, flashStrength = 0}) {
+    if (this.disposed) return;
+    const s = this.s,
+      sky = this.sky,
+      on = active && this.ready;
     if (sky.uSkyDyn) sky.uSkyDyn.value = on ? 1 : 0;
-    if (!on) { this.cloudUniforms.uCloudOn.value = 0; this.cloudUniforms.uCirrusOn.value = 0; if (this.envOn) { this.env.clear(); this.envOn = false; } return; }
-    const q = CLOUD_QUALITY[s.quality] || CLOUD_QUALITY.low, u = this.cloudUniforms, m = this.dome.material.uniforms;
-    const captureSize = sky.uNightBlend.value > 0.5 ? Math.max(q.size, s.nightResolution) : q.size;
-    if (!this.targets || this.size !== captureSize) {   // two captures, cross-faded by the dome: a new capture becomes visible gradually instead of snapping
-      this.targets?.forEach(t => t.dispose());
-      this.targets = [0, 1].map(() => new THREE.WebGLCubeRenderTarget(captureSize, { type: THREE.HalfFloatType, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }));
-      this.cubeCameras = this.targets.map(t => new THREE.CubeCamera(0.1, 100, t)); this.current = 0; this.size = captureSize; this.captureAge = Infinity; this.lightAge = Infinity; this.resized = true;
+    if (!on) {
+      this.cloudUniforms.uCloudOn.value = 0;
+      this.cloudUniforms.uCirrusOn.value = 0;
+      if (this.envOn) {
+        this.env.clear();
+        this.envOn = false;
+      }
+      return;
     }
-    u.uCloudOn.value = s.clouds ? 1 : 0; u.uCloudBottom.value = s.bottom; u.uCloudThickness.value = s.thickness;
+    const q = CLOUD_QUALITY[s.quality] || CLOUD_QUALITY.low,
+      u = this.cloudUniforms,
+      m = this.dome.material.uniforms;
+    const captureSize = sky.uNightBlend.value > 0.5 ? Math.max(q.size, s.nightResolution) : q.size;
+    if (!this.targets || this.size !== captureSize) {
+      // two captures, cross-faded by the dome: a new capture becomes visible gradually instead of snapping
+      this.targets?.forEach(t => t.dispose());
+      this.targets = [0, 1].map(
+        () =>
+          new THREE.WebGLCubeRenderTarget(captureSize, {
+            type: THREE.HalfFloatType,
+            generateMipmaps: false,
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+          }),
+      );
+      this.cubeCameras = this.targets.map(t => new THREE.CubeCamera(0.1, 100, t));
+      this.current = 0;
+      this.size = captureSize;
+      this.captureAge = Infinity;
+      this.lightAge = Infinity;
+      this.resized = true;
+    }
+    u.uCloudOn.value = s.clouds ? 1 : 0;
+    u.uCloudBottom.value = s.bottom;
+    u.uCloudThickness.value = s.thickness;
     m.uDistantCloudDrop.value = s.distantDrop;
-    const flashChanged = (m.uFlashStrength.value > 0) !== (flashStrength > 0);
+    const flashChanged = m.uFlashStrength.value > 0 !== flashStrength > 0;
     m.uFlashStrength.value = flashStrength;
     if (flashPosition) m.uFlashPosition.value.copy(flashPosition);
-    u.uCloudScale.value = s.scale; u.uCloudDensity.value = s.density; u.uCloudDetail.value = s.detail; u.uCloudSteps.value = q.steps;
-    m.uCloudBrightness.value = s.brightness; m.uCloudAmbient.value = s.ambient; m.uSkySaturation.value = s.skySaturation;
-    u.uCloudMapScale.value = s.mapScale; u.uCloudMapVariation.value = s.mapVariation;
-    u.uCirrusOn.value = s.cirrus ? 1 : 0; u.uCirrusOpacity.value = s.cirrusOpacity; u.uCirrusAltitude.value = s.cirrusAltitude; u.uCirrusScale.value = s.cirrusScale;
+    u.uCloudScale.value = s.scale;
+    u.uCloudDensity.value = s.density;
+    u.uCloudDetail.value = s.detail;
+    u.uCloudSteps.value = q.steps;
+    m.uCloudBrightness.value = s.brightness;
+    m.uCloudAmbient.value = s.ambient;
+    m.uSkySaturation.value = s.skySaturation;
+    u.uCloudMapScale.value = s.mapScale;
+    u.uCloudMapVariation.value = s.mapVariation;
+    u.uCirrusOn.value = s.cirrus ? 1 : 0;
+    u.uCirrusOpacity.value = s.cirrusOpacity;
+    u.uCirrusAltitude.value = s.cirrusAltitude;
+    u.uCirrusScale.value = s.cirrusScale;
     // the weather's cloud profile [coverage mix clear..overcast, scale, thickness, detail, cirrus], blended by the machine; manual values with the weather off
-    const w = weather.on, p = weather.cloudProfile;
+    const w = weather.on,
+      p = weather.cloudProfile;
     u.uCloudCoverage.value = w ? THREE.MathUtils.lerp(s.clearCoverage, s.overcastCoverage, p[0]) : s.coverage;
-    if (w) { u.uCloudScale.value = s.scale * p[1]; u.uCloudThickness.value = s.thickness * p[2]; u.uCloudDetail.value = Math.min(0.8, s.detail * p[3]); u.uCirrusOpacity.value = s.cirrusOpacity * (s.clearCoverage * (weather.weights[weather.names?.indexOf('clear')??0]??0) + p[4]); }
-    const speed = (w ? weather.wind : s.windSpeed) * s.cloudDrift, heading = THREE.MathUtils.degToRad(w ? windHeading : s.windHeading);
-    u.uCloudOffset.value.x += Math.cos(heading) * speed * dt; u.uCloudOffset.value.y += Math.sin(heading) * speed * dt;
-    u.uCloudDetailOffset.value.x += Math.cos(heading) * speed * CLOUD_DRIFT.detail * dt; u.uCloudDetailOffset.value.y += Math.sin(heading) * speed * CLOUD_DRIFT.detail * dt;
+    if (w) {
+      u.uCloudScale.value = s.scale * p[1];
+      u.uCloudThickness.value = s.thickness * p[2];
+      u.uCloudDetail.value = Math.min(0.8, s.detail * p[3]);
+      u.uCirrusOpacity.value =
+        s.cirrusOpacity * (s.clearCoverage * (weather.weights[weather.names?.indexOf('clear') ?? 0] ?? 0) + p[4]);
+    }
+    const speed = (w ? weather.wind : s.windSpeed) * s.cloudDrift,
+      heading = THREE.MathUtils.degToRad(w ? windHeading : s.windHeading);
+    u.uCloudOffset.value.x += Math.cos(heading) * speed * dt;
+    u.uCloudOffset.value.y += Math.sin(heading) * speed * dt;
+    u.uCloudDetailOffset.value.x += Math.cos(heading) * speed * CLOUD_DRIFT.detail * dt;
+    u.uCloudDetailOffset.value.y += Math.sin(heading) * speed * CLOUD_DRIFT.detail * dt;
     u.uCloudLift.value += speed * CLOUD_DRIFT.lift * dt;
-    u.uCirrusOffset.value.x += Math.cos(heading) * s.cirrusSpeed * dt; u.uCirrusOffset.value.y += Math.sin(heading) * s.cirrusSpeed * dt;
+    u.uCirrusOffset.value.x += Math.cos(heading) * s.cirrusSpeed * dt;
+    u.uCirrusOffset.value.y += Math.sin(heading) * s.cirrusSpeed * dt;
     // the moon: its phase runs with the simulated days; its direction is the day's (day.js: own orbit or opposite the sun)
     // Moon phase belongs to the simulation clock, never to rendering.
     sky.uMoonDir.value.copy(day.moonDir);
-    sky.uMoonOn.value = s.moon ? 1 : 0; sky.uMoonPhase.value = day.moonPhase; sky.uMoonRadius.value = THREE.MathUtils.degToRad(s.moonRadiusDeg);
-    sky.uMoonIntensity.value = s.moonIntensity; sky.uMoonEarthshine.value = s.moonEarthshine;
-    sky.uStarIntensity.value = s.starIntensity; sky.uStarReflection.value = 1; sky.uGalaxyIntensity.value = s.galaxyIntensity; sky.uNightIntensity.value = s.nightIntensity;
-    sky.uStarsRotation.value = day.s.hour / 24 * Math.PI * 2;
+    sky.uMoonOn.value = s.moon ? 1 : 0;
+    sky.uMoonPhase.value = day.moonPhase;
+    sky.uMoonRadius.value = THREE.MathUtils.degToRad(s.moonRadiusDeg);
+    sky.uMoonIntensity.value = s.moonIntensity;
+    sky.uMoonEarthshine.value = s.moonEarthshine;
+    sky.uStarIntensity.value = s.starIntensity;
+    sky.uStarReflection.value = 1;
+    sky.uGalaxyIntensity.value = s.galaxyIntensity;
+    sky.uNightIntensity.value = s.nightIntensity;
+    sky.uStarsRotation.value = (day.s.hour / 24) * Math.PI * 2;
     // the sun's colour for the clouds: the page's sun; where the page dimmed it (sunDim) the clouds undo that and add the warm horizon + daylight themselves
     this.sunColor.copy(sky.uSunCol.value);
-    if (sunDim !== undefined) this.sunColor.multiply(day.sunTint).multiplyScalar(Math.max(day.daylight, 0.02) / Math.max(sunDim, 0.05));
-    m.turbidity.value = s.turbidity; m.rayleigh.value = s.rayleigh; m.mieCoefficient.value = s.mie; m.mieDirectionalG.value = s.mieG;
-    m.sunPosition.value.copy(sunDir).multiplyScalar(450000); m.uDynamicDaylight.value = day.daylight; m.uDynamicExposure.value = s.exposure;
-    if (this.nightColor._s !== s.nightColor) { this.nightColor.set(s.nightColor); this.nightColor._s = s.nightColor; }
+    if (sunDim !== undefined)
+      this.sunColor.multiply(day.sunTint).multiplyScalar(Math.max(day.daylight, 0.02) / Math.max(sunDim, 0.05));
+    m.turbidity.value = s.turbidity;
+    m.rayleigh.value = s.rayleigh;
+    m.mieCoefficient.value = s.mie;
+    m.mieDirectionalG.value = s.mieG;
+    m.sunPosition.value.copy(sunDir).multiplyScalar(450000);
+    m.uDynamicDaylight.value = day.daylight;
+    m.uDynamicExposure.value = s.exposure;
+    if (this.nightColor._s !== s.nightColor) {
+      this.nightColor.set(s.nightColor);
+      this.nightColor._s = s.nightColor;
+    }
     m.uNightAmbient.value.copy(this.nightColor).multiplyScalar(s.nightLight * 0.35);
-    m.uCaptureOrigin.value.copy(this.camera.position); m.uCaptureOrigin.value.y = Math.max(0.1, this.camera.position.y);
-    this.captureAge += dt; this.lightAge += dt;
+    m.uCaptureOrigin.value.copy(this.camera.position);
+    m.uCaptureOrigin.value.y = Math.max(0.1, this.camera.position.y);
+    this.captureAge += dt;
+    this.lightAge += dt;
     // a manual control change forces a fresh capture at once (also when the animation is paused); timed captures fade in over the next interval
-    const sunKey = day.s.on && day.s.auto && dt>0 ? 'auto' : [sunDir.x, sunDir.y, sunDir.z].map(v => v.toFixed(4)).join(',');
-    const weatherKey=w?(weather.transitioning&&dt>0?'transition':p.join(',')):s.coverage;
-    const key = [sunKey, weatherKey, s.clearCoverage, s.overcastCoverage, s.clouds, s.density, s.bottom, s.distantDrop, s.thickness, s.scale, s.detail, s.brightness, s.ambient, s.turbidity, s.rayleigh, s.mie, s.mieG,
-      s.exposure, s.skySaturation, s.mapScale, s.mapVariation, s.cirrus, s.cirrusOpacity, s.cirrusAltitude, s.cirrusScale, s.quality, s.nightColor, s.nightLight].join('|');
+    const sunKey =
+      day.s.on && day.s.auto && dt > 0 ? 'auto' : [sunDir.x, sunDir.y, sunDir.z].map(v => v.toFixed(4)).join(',');
+    const weatherKey = w ? (weather.transitioning && dt > 0 ? 'transition' : p.join(',')) : s.coverage;
+    const key = [
+      sunKey,
+      weatherKey,
+      s.clearCoverage,
+      s.overcastCoverage,
+      s.clouds,
+      s.density,
+      s.bottom,
+      s.distantDrop,
+      s.thickness,
+      s.scale,
+      s.detail,
+      s.brightness,
+      s.ambient,
+      s.turbidity,
+      s.rayleigh,
+      s.mie,
+      s.mieG,
+      s.exposure,
+      s.skySaturation,
+      s.mapScale,
+      s.mapVariation,
+      s.cirrus,
+      s.cirrusOpacity,
+      s.cirrusAltitude,
+      s.cirrusScale,
+      s.quality,
+      s.nightColor,
+      s.nightLight,
+    ].join('|');
     const manual = key !== this.key;
     if (this.captureAge >= s.captureInterval || manual || flashChanged) {
       this.gpuSec('dynamic sky + clouds');
-      const next = 1 - this.current; this.cubeCameras[next].update(this.renderer, this.capture);
+      const next = 1 - this.current;
+      this.cubeCameras[next].update(this.renderer, this.capture);
       const snap = manual || this.resized || flashChanged || flashStrength > 0;
       if (sky.tDynamicSkyPrev) sky.tDynamicSkyPrev.value = this.targets[snap ? next : this.current].texture;
-      sky.tDynamicSky.value = this.targets[next].texture; this.current = next; this.captureAge = 0; this.key = key;
-      if (flashStrength === 0 && (this.lightAge >= s.lightingInterval || manual || !this.environment || !this.env.active)) {
+      sky.tDynamicSky.value = this.targets[next].texture;
+      this.current = next;
+      this.captureAge = 0;
+      this.key = key;
+      if (
+        flashStrength === 0 &&
+        (this.lightAge >= s.lightingInterval || manual || !this.environment || !this.env.active)
+      ) {
         this.gpuSec('dynamic sky PMREM');
         const fresh = this.pmrem.fromCubemap(this.targets[next].texture);
         // keep the previous PMREM for the lighting cross-fade; textureCubeUV needs both at the same size, so a resize snaps
-        this.previousEnvironment?.dispose(); this.previousEnvironment = snap || !this.environment ? null : this.environment;
+        this.previousEnvironment?.dispose();
+        this.previousEnvironment = snap || !this.environment ? null : this.environment;
         if (!this.previousEnvironment) this.environment?.dispose();
-        this.environment = fresh; this.env.setDynamic(fresh.texture, (this.previousEnvironment || fresh).texture); this.envOn = true; this.lightAge = 0;
+        this.environment = fresh;
+        this.env.setDynamic(fresh.texture, (this.previousEnvironment || fresh).texture);
+        this.envOn = true;
+        this.lightAge = 0;
       }
       this.resized = false;
     }

@@ -7,9 +7,8 @@
 // fell, its field digs it, and the field's 'terrain:crater' event throws the kit's shards and dust, clears the grass
 // and tells the host its ground changed. No reaction is computed here.
 import * as THREE from 'three';
-import {craterFromImpact, TERRAIN_LAYERS} from '../../src/terrain/index.js';
-import {stampFootstepTrail, FOOTSTEP_DEFAULTS} from '../terrain/footsteps.js';
-import {CONTACT_SURFACES, TRACK_RADIUS} from '../terrain/impacts.js';
+import {craterFromImpact, FOOTSTEP_DEFAULTS, stampFootstepTrail, TERRAIN_LAYERS} from '../../src/terrain/index.js';
+import {CONTACT_SURFACES, TRACK_RADIUS} from '../../src/terrain/physics.js';
 
 export const REACTIONS = Object.freeze({
  grassReach: .35,       // m beyond a tyre or a foot within which the grass is pushed over

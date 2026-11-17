@@ -1,6 +1,9 @@
-export const ICE_MAP_SCALE = .08;
-const ICE_MIN = .12, ICE_MAX = .88, ICE_EDGE = .10, ICE_DEPTH_WEIGHT = .67;
-const THAW_BLEND_SECONDS = 1.2;   // time the surface takes to turn from freezing to its wet, melting look and back
+export const ICE_MAP_SCALE = 0.08;
+const ICE_MIN = 0.12,
+  ICE_MAX = 0.88,
+  ICE_EDGE = 0.1,
+  ICE_DEPTH_WEIGHT = 0.67;
+const THAW_BLEND_SECONDS = 1.2; // time the surface takes to turn from freezing to its wet, melting look and back
 
 export const ICE_COVERAGE_GLSL = `
  float iceCoverageAt(float progress, float deep, float order) {
@@ -15,24 +18,30 @@ export const ICE_COVERAGE_GLSL = `
 
 // How ice looks. Shared uniforms: pass one look to the water surface and to any ice mesh that should match it.
 export function createIceLook() {
- return {
-  frost: {value: .5},     // 0 = clear dark ice everywhere, 1 = white frosted ice everywhere
-  cracks: {value: 1},     // strength of the crack network
-  bubbles: {value: 1},    // trapped air bubbles in the clear ice
-  sparkle: {value: 1},    // sun glints on frost crystals
-  needles: {value: 1},    // freezing: how far crystal stars reach ahead of the ice (0 = a smooth front)
-  slush: {value: 1},      // freezing: milky, calmed water just ahead of the ice (0 = none)
- };
+  return {
+    frost: {value: 0.5}, // 0 = clear dark ice everywhere, 1 = white frosted ice everywhere
+    cracks: {value: 1}, // strength of the crack network
+    bubbles: {value: 1}, // trapped air bubbles in the clear ice
+    sparkle: {value: 1}, // sun glints on frost crystals
+    needles: {value: 1}, // freezing: how far crystal stars reach ahead of the ice (0 = a smooth front)
+    slush: {value: 1}, // freezing: milky, calmed water just ahead of the ice (0 = none)
+  };
 }
-export const iceLookUniforms = look => ({iceFrost: look.frost, iceCracks: look.cracks, iceBubbles: look.bubbles, iceSparkle: look.sparkle,
- iceNeedles: look.needles, iceSlush: look.slush});
+export const iceLookUniforms = look => ({
+  iceFrost: look.frost,
+  iceCracks: look.cracks,
+  iceBubbles: look.bubbles,
+  iceSparkle: look.sparkle,
+  iceNeedles: look.needles,
+  iceSlush: look.slush,
+});
 
 // The ice pattern in world space (p = world xz, metres), shared by every ice shader so they agree texel for texel.
 // noiseMap is the freeze texture (createFreezeTexture). All outputs are 0..1:
 //   frost       white frosted ice (1) or clear ice (0): frost gathers toward the shore and in drifting patches
 //   cracks      the crack network on the surface         deepCracks  the same cracks seen deeper inside clear ice
 //   bubbles     trapped air bubbles
-export const ICE_PATTERN_GLSL = /* glsl */`
+export const ICE_PATTERN_GLSL = /* glsl */ `
  uniform float iceFrost, iceCracks, iceBubbles, iceSparkle, iceNeedles, iceSlush;
  const vec3 ICE_CLEAR = vec3(.045, .15, .2);      // body colour of clear ice over deep water
  const vec3 ICE_FROSTED = vec3(.74, .84, .89);    // frosted, snowy ice
@@ -120,40 +129,54 @@ export const ICE_PATTERN_GLSL = /* glsl */`
 
 // Sample the generated, repeat-wrapped freeze map like WebGL's linear filter.
 export function hasIceSupport(progress, depth, x, z, map) {
- if (depth <= .002 || progress <= 0) return false;
- if (progress >= 1) return true;
- const {data, width, height} = map.image;
- const u = x * ICE_MAP_SCALE * width - .5, v = z * ICE_MAP_SCALE * height - .5;
- const i = Math.floor(u), j = Math.floor(v), fx = u - i, fz = v - j;
- const texel = (a, b) => data[((b % height + height) % height) * width + (a % width + width) % width] / 255;
- const order = (texel(i, j) * (1 - fx) + texel(i + 1, j) * fx) * (1 - fz)
-  + (texel(i, j + 1) * (1 - fx) + texel(i + 1, j + 1) * fx) * fz;
- const t = Math.max(0, Math.min(1, (depth - .05) / 1.95));
- const deep = t * t * (3 - 2 * t);
- return progress >= ICE_MIN + (ICE_MAX - ICE_MIN) * (ICE_DEPTH_WEIGHT * deep + (1 - ICE_DEPTH_WEIGHT) * order) + ICE_EDGE;
+  if (depth <= 0.002 || progress <= 0) return false;
+  if (progress >= 1) return true;
+  const {data, width, height} = map.image;
+  const u = x * ICE_MAP_SCALE * width - 0.5,
+    v = z * ICE_MAP_SCALE * height - 0.5;
+  const i = Math.floor(u),
+    j = Math.floor(v),
+    fx = u - i,
+    fz = v - j;
+  const texel = (a, b) => data[(((b % height) + height) % height) * width + (((a % width) + width) % width)] / 255;
+  const order =
+    (texel(i, j) * (1 - fx) + texel(i + 1, j) * fx) * (1 - fz) +
+    (texel(i, j + 1) * (1 - fx) + texel(i + 1, j + 1) * fx) * fz;
+  const t = Math.max(0, Math.min(1, (depth - 0.05) / 1.95));
+  const deep = t * t * (3 - 2 * t);
+  return (
+    progress >= ICE_MIN + (ICE_MAX - ICE_MIN) * (ICE_DEPTH_WEIGHT * deep + (1 - ICE_DEPTH_WEIGHT) * order) + ICE_EDGE
+  );
 }
 
 // Air temperature requests a phase. The water surface advances toward it over time.
 export function createWaterFreeze() {
- const settings = {phase: 'Weather', freezeSeconds: 6, thawSeconds: 5};
- let progress = 0, freezing = false, thaw = 0;
- return {
-  settings,
-  get progress() { return progress; },
-  // 0 while freezing or holding, 1 while the ice melts: pass it to the water surface as settings.freezeThaw.
-  get thaw() { return thaw; },
-  update(dt, temperature) {
-   if (!Number.isFinite(dt) || dt < 0 || !Number.isFinite(temperature)) throw Error('Water freeze needs finite temperature and non-negative time');
-   const {phase, freezeSeconds, thawSeconds} = settings;
-   freezing = phase === 'Frozen' || (phase === 'Weather' && (temperature <= -1 || (freezing && temperature < 1)));
-   const duration = freezing ? freezeSeconds : thawSeconds;
-   if (!Number.isFinite(duration) || duration <= 0) throw Error('Water phase duration must be positive');
-   progress = freezing ? Math.min(1, progress + dt / duration) : Math.max(0, progress - dt / duration);
-   if (progress < 1e-9) progress = 0;
-   if (progress > 1 - 1e-9) progress = 1;
-   const melting = !freezing && progress > 0 ? 1 : 0;
-   thaw += (melting - thaw) * Math.min(1, dt / THAW_BLEND_SECONDS);
-   return progress;
-  },
- };
+  const settings = {phase: 'Weather', freezeSeconds: 6, thawSeconds: 5};
+  let progress = 0,
+    freezing = false,
+    thaw = 0;
+  return {
+    settings,
+    get progress() {
+      return progress;
+    },
+    // 0 while freezing or holding, 1 while the ice melts: pass it to the water surface as settings.freezeThaw.
+    get thaw() {
+      return thaw;
+    },
+    update(dt, temperature) {
+      if (!Number.isFinite(dt) || dt < 0 || !Number.isFinite(temperature))
+        throw Error('Water freeze needs finite temperature and non-negative time');
+      const {phase, freezeSeconds, thawSeconds} = settings;
+      freezing = phase === 'Frozen' || (phase === 'Weather' && (temperature <= -1 || (freezing && temperature < 1)));
+      const duration = freezing ? freezeSeconds : thawSeconds;
+      if (!Number.isFinite(duration) || duration <= 0) throw Error('Water phase duration must be positive');
+      progress = freezing ? Math.min(1, progress + dt / duration) : Math.max(0, progress - dt / duration);
+      if (progress < 1e-9) progress = 0;
+      if (progress > 1 - 1e-9) progress = 1;
+      const melting = !freezing && progress > 0 ? 1 : 0;
+      thaw += (melting - thaw) * Math.min(1, dt / THAW_BLEND_SECONDS);
+      return progress;
+    },
+  };
 }

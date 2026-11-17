@@ -1,5 +1,5 @@
 // WebAquarium ocean/surface.js volume and crest scattering.
-export const SCATTER_GLSL = /* glsl */`
+export const SCATTER_GLSL = /* glsl */ `
 #define SCATTER_PHASE_FLOOR 1e-4
 #define SSS_AMPLITUDE_EPSILON 1e-3
 uniform vec3 uScatterColor, uScatterAmbient; uniform float uScatterIntensity, uScatterAnisotropy, uScatterAmbientTerm, uScatterSunTerm;

@@ -5,21 +5,40 @@
 import * as THREE from 'three';
 import {createLighting, NOISE_GLSL} from '../core/lighting.js';
 
-export function createLeavedMaterial({lighting = createLighting(), leafTexture, barkTexture, barkRect = [0, 0, 1, 1], leafCutoff = .5, leafLuminance = .56, canopy = null, nearHole = false} = {}) {
+export function createLeavedMaterial({
+  lighting = createLighting(),
+  leafTexture,
+  barkTexture,
+  barkRect = [0, 0, 1, 1],
+  leafCutoff = 0.5,
+  leafLuminance = 0.56,
+  canopy = null,
+  nearHole = false,
+} = {}) {
   const defines = {};
   if (canopy) defines.USE_CANOPY_MAP = 1;
   if (nearHole) defines.USE_NEAR_HOLE = 1;
   if (barkTexture) defines.USE_BARK_TEXTURE = 1;
   const uniforms = {
     ...lighting.uniforms,
-    uTime: {value: 0}, uWind: {value: 1}, uLeaf: {value: leafTexture}, uLeafCutoff: {value: leafCutoff}, uLeafLuminance: {value: leafLuminance},
-    uCanopy: {value: canopy?.texture ?? null}, uExtent: {value: canopy?.extent ?? new THREE.Vector2(1, 1)},
-    uNearCentre: {value: new THREE.Vector2()}, uNearRadius: {value: new THREE.Vector2(0, 0)},
-    uBark: {value: barkTexture ?? null}, uBarkRect: {value: new THREE.Vector4(...barkRect)},
+    uTime: {value: 0},
+    uWind: {value: 1},
+    uLeaf: {value: leafTexture},
+    uLeafCutoff: {value: leafCutoff},
+    uLeafLuminance: {value: leafLuminance},
+    uCanopy: {value: canopy?.texture ?? null},
+    uExtent: {value: canopy?.extent ?? new THREE.Vector2(1, 1)},
+    uNearCentre: {value: new THREE.Vector2()},
+    uNearRadius: {value: new THREE.Vector2(0, 0)},
+    uBark: {value: barkTexture ?? null},
+    uBarkRect: {value: new THREE.Vector4(...barkRect)},
   };
   return new THREE.ShaderMaterial({
-    uniforms, defines, side: THREE.DoubleSide, vertexColors: true,   // declares `attribute vec3 color` (the baked shade)
-    vertexShader: /* glsl */`
+    uniforms,
+    defines,
+    side: THREE.DoubleSide,
+    vertexColors: true, // declares `attribute vec3 color` (the baked shade)
+    vertexShader: /* glsl */ `
       attribute float sway; attribute float leaf;
       uniform float uTime; uniform float uWind;
       varying vec3 vColor; varying vec3 vNormal; varying vec3 vWorld; varying vec2 vUv; varying float vLeaf;
@@ -35,7 +54,7 @@ export function createLeavedMaterial({lighting = createLighting(), leafTexture, 
         vNormal = normalize(mat3(modelMatrix * instanceMatrix) * normal);
         gl_Position = projectionMatrix * viewMatrix * world;
       }`,
-    fragmentShader: /* glsl */`
+    fragmentShader: /* glsl */ `
       ${lighting.glsl}
       ${NOISE_GLSL}
       uniform sampler2D uLeaf; uniform float uLeafCutoff, uLeafLuminance;
@@ -81,9 +100,21 @@ export function createLeavedMaterial({lighting = createLighting(), leafTexture, 
 
 // Mean luminance of the opaque texels of a DataTexture (for uLeafLuminance when the leaf mask is generated).
 export function meanLeafLuminance(texture, rect = [0, 0, 1, 1]) {
-  const {data, width, height} = texture.image; if (!data) return .56;
-  const x0 = Math.floor(rect[0] * width), y0 = Math.floor(rect[1] * height), x1 = Math.ceil((rect[0] + rect[2]) * width), y1 = Math.ceil((rect[1] + rect[3]) * height);
-  let sum = 0, n = 0;
-  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * width + x) * 4; if (data[i + 3] > 128) { sum += (data[i] * .2126 + data[i + 1] * .7152 + data[i + 2] * .0722) / 255; n++; } }
-  return n ? sum / n : .56;
+  const {data, width, height} = texture.image;
+  if (!data) return 0.56;
+  const x0 = Math.floor(rect[0] * width),
+    y0 = Math.floor(rect[1] * height),
+    x1 = Math.ceil((rect[0] + rect[2]) * width),
+    y1 = Math.ceil((rect[1] + rect[3]) * height);
+  let sum = 0,
+    n = 0;
+  for (let y = y0; y < y1; y++)
+    for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] > 128) {
+        sum += (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722) / 255;
+        n++;
+      }
+    }
+  return n ? sum / n : 0.56;
 }

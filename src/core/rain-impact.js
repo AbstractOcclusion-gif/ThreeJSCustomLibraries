@@ -1,5 +1,5 @@
 // Raindrop rings on standing water, in world space. Needs NOISE_GLSL (hash12, hash13) before it.
-export const RAIN_IMPACT_GLSL = /* glsl */`
+export const RAIN_IMPACT_GLSL = /* glsl */ `
 // One layer of drops on a grid of cells. Every cycle each cell may receive one drop at a new random spot: a short
 // train of rings spreads from it and dies before it reaches the cell edge.
 // Returns xy = slope of the water surface along world X and Z, z = the brief splash at the point of impact (0..1).

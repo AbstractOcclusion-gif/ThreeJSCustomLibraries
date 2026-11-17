@@ -18,7 +18,7 @@ import {benchRenderer, bindResize, onLeave, startFrameLoop, STATUS_REFRESH_MS} f
 import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {loadTerrainPalette} from '../terrain/textures.js';
 import {createTerrainPlay} from '../terrain/play.js';
-import {CONTACT_SURFACES} from '../terrain/impacts.js';
+import {CONTACT_SURFACES} from '../../src/terrain/physics.js';
 import {groundTrackControls} from '../terrain/controls.js';
 import {createBenchPanel} from '../panel.js';
 import {worldCostControls, worldDressingControls, worldGroundControls, worldLightControls} from '../kit/world-controls.js';

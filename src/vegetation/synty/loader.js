@@ -9,23 +9,35 @@
 import * as THREE from 'three';
 
 const join = (base, path) => new URL(path, base.endsWith('/') ? base : base + '/').href;
-const getJson = async (url, fetcher, signal) => { const r = await fetcher(url, {signal}); if (!r.ok) throw Error(`${url}: ${r.status}`); return r.json(); };
+const getJson = async (url, fetcher, signal) => {
+  const r = await fetcher(url, {signal});
+  if (!r.ok) throw Error(`${url}: ${r.status}`);
+  return r.json();
+};
 
-export async function loadSyntyVegetation({baseUrl, loader = new THREE.TextureLoader(), fetch: fetcher = globalThis.fetch} = {}) {
+export async function loadSyntyVegetation({
+  baseUrl,
+  loader = new THREE.TextureLoader(),
+  fetch: fetcher = globalThis.fetch,
+} = {}) {
   if (!baseUrl) throw Error('loadSyntyVegetation needs baseUrl');
   const [atlasResult, ...dataResults] = await Promise.allSettled([
     loader.loadAsync(join(baseUrl, 'specimen-atlas.png')),
-    getJson(join(baseUrl, 'grass.json'), fetcher), getJson(join(baseUrl, 'specimens.json'), fetcher),
+    getJson(join(baseUrl, 'grass.json'), fetcher),
+    getJson(join(baseUrl, 'specimens.json'), fetcher),
     getJson(join(baseUrl, 'specimen-atlas.json'), fetcher),
   ]);
-  const failure = dataResults.find(result => result.status === 'rejected') ?? (atlasResult.status === 'rejected' ? atlasResult : null);
+  const failure =
+    dataResults.find(result => result.status === 'rejected') ??
+    (atlasResult.status === 'rejected' ? atlasResult : null);
   if (failure) {
     if (atlasResult.status === 'fulfilled') atlasResult.value.dispose();
     throw failure.reason;
   }
   const [grassLods, parts, atlasLayout] = dataResults.map(result => result.value);
   const atlas = atlasResult.value;
-  atlas.colorSpace = THREE.SRGBColorSpace; atlas.anisotropy = 4;
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  atlas.anisotropy = 4;
   const grassGeometries = [];
   let specimenRects;
   try {
@@ -36,7 +48,13 @@ export async function loadSyntyVegetation({baseUrl, loader = new THREE.TextureLo
       const geometry = new THREE.BufferGeometry();
       grassGeometries.push(geometry);
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
-      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv.map((value, index) => index % 2 === 0 ? u + width * value : v + height * value), 2));
+      geometry.setAttribute(
+        'uv',
+        new THREE.Float32BufferAttribute(
+          uv.map((value, index) => (index % 2 === 0 ? u + width * value : v + height * value)),
+          2,
+        ),
+      );
       geometry.setAttribute('bendWeight', new THREE.Float32BufferAttribute(bend, 1));
       geometry.computeVertexNormals();
     }
@@ -45,34 +63,82 @@ export async function loadSyntyVegetation({baseUrl, loader = new THREE.TextureLo
     atlas.dispose();
     throw error;
   }
-  const atlasRects = Object.fromEntries(['bushTrunk', 'birchTrunk', 'leaf', 'branch'].map((name, index) => [name, specimenRects[index]]));
-  return {atlas, grassGeometries, parts, atlasRects, atlasLayout, dispose() { for (const g of grassGeometries) g.dispose(); atlas.dispose(); }};
+  const atlasRects = Object.fromEntries(
+    ['bushTrunk', 'birchTrunk', 'leaf', 'branch'].map((name, index) => [name, specimenRects[index]]),
+  );
+  return {
+    atlas,
+    grassGeometries,
+    parts,
+    atlasRects,
+    atlasLayout,
+    dispose() {
+      for (const g of grassGeometries) g.dispose();
+      atlas.dispose();
+    },
+  };
 }
 
-export function createSyntyVariantLoader({baseUrl, loader = new THREE.TextureLoader(), fetch: fetcher = globalThis.fetch} = {}) {
+export function createSyntyVariantLoader({
+  baseUrl,
+  loader = new THREE.TextureLoader(),
+  fetch: fetcher = globalThis.fetch,
+} = {}) {
   if (!baseUrl) throw Error('createSyntyVariantLoader needs baseUrl');
-  let atlasPromise, manifestPromise, disposed = false;
-  const manifest = () => manifestPromise ??= getJson(join(baseUrl, 'expansion/manifest.json'), fetcher).catch(e => { manifestPromise = undefined; throw e; });
+  let atlasPromise,
+    manifestPromise,
+    disposed = false;
+  const manifest = () =>
+    (manifestPromise ??= getJson(join(baseUrl, 'expansion/manifest.json'), fetcher).catch(e => {
+      manifestPromise = undefined;
+      throw e;
+    }));
   return {
     variants: () => manifest().then(m => m.variants),
     async load(id, signal) {
       const {variants, rectangles} = await manifest();
       const entry = variants[id];
       if (disposed || !entry) throw Error('Unknown or unavailable vegetation variant');
-      atlasPromise ??= loader.loadAsync(join(baseUrl, 'expansion/atlas.png')).then(texture => {
-        texture.colorSpace = THREE.SRGBColorSpace; texture.anisotropy = 4; if (disposed) texture.dispose(); return texture;
-      }).catch(error => { atlasPromise = undefined; throw error; });
-      const [atlas, bytes] = await Promise.all([atlasPromise, fetcher(join(baseUrl, `expansion/${id}.bin`), {signal}).then(r => { if (!r.ok) throw Error(`Mesh download failed (${r.status})`); return r.arrayBuffer(); })]);
+      atlasPromise ??= loader
+        .loadAsync(join(baseUrl, 'expansion/atlas.png'))
+        .then(texture => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.anisotropy = 4;
+          if (disposed) texture.dispose();
+          return texture;
+        })
+        .catch(error => {
+          atlasPromise = undefined;
+          throw error;
+        });
+      const [atlas, bytes] = await Promise.all([
+        atlasPromise,
+        fetcher(join(baseUrl, `expansion/${id}.bin`), {signal}).then(r => {
+          if (!r.ok) throw Error(`Mesh download failed (${r.status})`);
+          return r.arrayBuffer();
+        }),
+      ]);
       signal?.throwIfAborted();
       if (disposed) throw Error('Vegetation loader disposed');
       const data = new Float32Array(bytes);
       const parts = entry.parts.map(({material, foliage, offset, vertices}) => {
-        const position = new Float32Array(vertices * 3), uv = new Float32Array(vertices * 2);
-        for (let i = 0; i < vertices; i++) { const p = offset + i * 5; position.set(data.subarray(p, p + 3), i * 3); uv.set(data.subarray(p + 3, p + 5), i * 2); }
+        const position = new Float32Array(vertices * 3),
+          uv = new Float32Array(vertices * 2);
+        for (let i = 0; i < vertices; i++) {
+          const p = offset + i * 5;
+          position.set(data.subarray(p, p + 3), i * 3);
+          uv.set(data.subarray(p + 3, p + 5), i * 2);
+        }
         return {material, foliage, position, uv};
       });
       return {...entry, atlas, atlasRects: rectangles, parts};
     },
-    dispose() { disposed = true; atlasPromise?.then(texture => texture.dispose(), () => {}); },
+    dispose() {
+      disposed = true;
+      atlasPromise?.then(
+        texture => texture.dispose(),
+        () => {},
+      );
+    },
   };
 }

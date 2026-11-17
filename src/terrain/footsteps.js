@@ -1,15 +1,22 @@
 // Metres: stride, half stance width, heel and toe offsets along the stride and print radii.
 // load is the share of the packable snow depth a foot presses out (field.compactSnow).
 export const FOOTSTEP_DEFAULTS = Object.freeze({
-  spacing: .68, offset: .19, heelOffset: .10, toeOffset: .12,
-  heelRadius: .19, toeRadius: .23, load: .55,
+  spacing: 0.68,
+  offset: 0.19,
+  heelOffset: 0.1,
+  toeOffset: 0.12,
+  heelRadius: 0.19,
+  toeRadius: 0.23,
+  load: 0.55,
 });
 
 export function stampFootstepTrail({field, tracks, from, to, onSample, step = FOOTSTEP_DEFAULTS}) {
-  const dx = to.x - from.x, dz = to.z - from.z;
+  const dx = to.x - from.x,
+    dz = to.z - from.z;
   const length = Math.hypot(dx, dz);
   if (!(length > 0)) return;
-  const forwardX = dx / length, forwardZ = dz / length;
+  const forwardX = dx / length,
+    forwardZ = dz / length;
   let side = -1;
   for (let distance = 0; distance <= length; distance += step.spacing) {
     const offset = side * step.offset;

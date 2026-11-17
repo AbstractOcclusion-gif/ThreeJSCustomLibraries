@@ -8,7 +8,7 @@ import {createTerrainField, createTerrainMaterial, SNOW_DEFAULTS} from '../../sr
 import {samplePlayArea} from './play-samples.js';
 import {createDataTexture} from '../../src/core/data-texture.js';
 import {createTrackMask} from '../../src/surface/index.js';
-import {createTerrainImpacts} from './impacts.js';
+import {createTerrainImpacts} from '../../src/terrain/physics.js';
 
 export const PLAY = {size: 64, cells: 256, snap: 16, margin: 1, skyTexel: 2, trackResolution: 512, trackContrast: .12, edge: 12, ahead: 6,
   ball: {radius: 1.5, minRadius: .4, maxRadius: 4, baseRadius: .72, speed: 7, color: 0x8d8478, roughness: .8}, fallBelow: 12,

@@ -18,34 +18,47 @@ const CLOUD_SHADOW = `
  }`;
 
 export function createCloudShadows(cloudUniforms) {
- const receivers = new Map();
- const direction = new THREE.Vector3(), target = new THREE.Vector3(), color = new THREE.Color();
- const strength = {value: 0};
- const uniforms = {...cloudUniforms, uWeatherShadowSun: {value: direction}, uWeatherShadowColor: {value: color}, uWeatherShadowStrength: strength};
- return {
-  add(material) {
-   if (!material?.isMeshStandardMaterial) throw Error('Cloud shadows need a Three.js standard or physical material');
-   if (receivers.has(material)) return receivers.get(material);
-   if (boundMaterials.has(material)) throw Error('Cloud shadow material already belongs to another weather view');
-   const remove = addLightSlot(material, {key: SLOT, uniforms, worldPosition: true, declarations: DECLARATIONS, directional: CLOUD_SHADOW});
-   const detach = () => {
-    if (receivers.get(material) !== detach) return;
-    remove();
-    receivers.delete(material);
-    boundMaterials.delete(material);
-   };
-   receivers.set(material, detach);
-   boundMaterials.add(material);
-   return detach;
-  },
-  update(sun, amount) {
-   strength.value = receivers.size ? amount : 0;
-   if (strength.value === 0) return;
-   sun.getWorldPosition(direction).sub(sun.target.getWorldPosition(target)).normalize();
-   color.copy(sun.color).multiplyScalar(sun.intensity);
-  },
-  dispose() {
-   for (const detach of receivers.values()) detach();
-  },
- };
+  const receivers = new Map();
+  const direction = new THREE.Vector3(),
+    target = new THREE.Vector3(),
+    color = new THREE.Color();
+  const strength = {value: 0};
+  const uniforms = {
+    ...cloudUniforms,
+    uWeatherShadowSun: {value: direction},
+    uWeatherShadowColor: {value: color},
+    uWeatherShadowStrength: strength,
+  };
+  return {
+    add(material) {
+      if (!material?.isMeshStandardMaterial) throw Error('Cloud shadows need a Three.js standard or physical material');
+      if (receivers.has(material)) return receivers.get(material);
+      if (boundMaterials.has(material)) throw Error('Cloud shadow material already belongs to another weather view');
+      const remove = addLightSlot(material, {
+        key: SLOT,
+        uniforms,
+        worldPosition: true,
+        declarations: DECLARATIONS,
+        directional: CLOUD_SHADOW,
+      });
+      const detach = () => {
+        if (receivers.get(material) !== detach) return;
+        remove();
+        receivers.delete(material);
+        boundMaterials.delete(material);
+      };
+      receivers.set(material, detach);
+      boundMaterials.add(material);
+      return detach;
+    },
+    update(sun, amount) {
+      strength.value = receivers.size ? amount : 0;
+      if (strength.value === 0) return;
+      sun.getWorldPosition(direction).sub(sun.target.getWorldPosition(target)).normalize();
+      color.copy(sun.color).multiplyScalar(sun.intensity);
+    },
+    dispose() {
+      for (const detach of receivers.values()) detach();
+    },
+  };
 }

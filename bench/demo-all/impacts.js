@@ -1,5 +1,5 @@
 import {createChips} from '../../src/particles/index.js';
-import {createTerrainImpacts as createTerrainContacts} from '../terrain/impacts.js';
+import {createTerrainImpacts as createTerrainContacts} from '../../src/terrain/physics.js';
 
 // Here the track mask mostly flattens grass, and grass bends under the whole width of a body, not only in its rut:
 // the boulder is .72 m in radius and the block about .9 m long.

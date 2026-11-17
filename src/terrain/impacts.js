@@ -1,0 +1,346 @@
+import * as THREE from 'three';
+import {Body, Box, Material, Sphere, Vec3, World} from 'cannon-es';
+import {TERRAIN_LAYERS} from './terrain-rules.js';
+import {createSurroundCollider, createTerrainCollider} from './colliders.js';
+
+const STEP = 1 / 120;
+// Per ground type: print and impact are the dig depths in metres of a rolling contact and of a hard landing.
+// On lying snow, load and impactLoad replace them: the share of the packable snow depth pressed out (field.compactSnow).
+// rimShare is the share of the displaced soil pushed up around the mark. Bare ground is 'mud'; where the field has
+// sand, the contact blends toward 'sand' by the sand weight.
+export const CONTACT_SURFACES = Object.freeze({
+  mud: {print: 0.06, impact: 0.29, rimShare: 0.35, chip: {color: 0x59412d, bounce: 0, groundMotion: {stick: true}}},
+  sand: {
+    print: 0.09,
+    impact: 0.24,
+    rimShare: 0.6,
+    chip: {color: 0xcdb78d, bounce: 0, groundMotion: {slope: 0.1, drag: 8, spin: 0.45}},
+  },
+  snow: {
+    print: 0.12,
+    impact: 0.45,
+    load: 0.7,
+    impactLoad: 1,
+    chip: {color: 0xd9e4e9, bounce: 0.12, groundMotion: {slope: 0.1, drag: 8, spin: 0.45}},
+  },
+});
+
+// Ground contact: an impact is a speed change over impactSpeed m/s, at most once per cooldown s; rolling prints are stamped
+// every printSpacing m and joined to the last print within joinDistance m. Dig radius (m) and print depth share per contact.
+const CONTACT = Object.freeze({
+  impactSpeed: 2.7,
+  cooldown: 0.24,
+  printSpacing: 0.24,
+  joinDistance: 1.1,
+  rollingStrength: 0.8,
+  radius: {impact: 1.3, box: 0.85, sphere: 0.65},
+  printDepthShare: 0.36,
+  sandChipShare: 0.5,
+}); // sand weight from which an impact throws sand chips instead of the base ground's
+// Radius (m) of the mark a body leaves in the track mask. The default is the narrow rut it presses into snow or mud.
+export const TRACK_RADIUS = Object.freeze({sphere: 0.31, box: 0.39});
+// Chips thrown by an impact: count from the dug volume (m^3 x perVolume, at most max), shock from the speed change.
+const IMPACT_CHIPS = Object.freeze({max: 26, perVolume: 30, size: 1.2, maxShock: 70, shockPerSpeed: 6});
+const MAX_BLOCKS = 8,
+  ICE_BREAK_ENERGY = 1100,
+  ICE_CRACK_RADIUS = 1.8,
+  FALL_OUT_HEIGHT = -12; // blocks; J; m; m
+const MAX_SUBSTEPS = 6;
+// Outside contacts (the press hook): rock weight from which the ground keeps no mark, and what stands still.
+const ROCK_SHARE = 0.5,
+  ROCK_LAYER = TERRAIN_LAYERS.indexOf('rock'),
+  AT_REST = Object.freeze(new Vec3());
+// Ground beyond the field (the `surround` option): a square `size` m wide sampled every `cell` m, laid again around
+// the latest body when it comes within `margin` m of the edge. Bodies it leaves behind are removed. Under the field
+// it is sunk by `sink` m.
+export const SURROUND = Object.freeze({size: 192, cell: 1, margin: 40, sink: 60});
+export function createTerrainImpacts({
+  scene,
+  field,
+  tracks,
+  material,
+  ice,
+  lightOccluders,
+  onIceBreak,
+  onSphereStep,
+  chips,
+  surfaces = CONTACT_SURFACES,
+  trackRadius = TRACK_RADIUS,
+  fallOutHeight = FALL_OUT_HEIGHT,
+  surround,
+}) {
+  const world = new World({gravity: new Vec3(0, -9.82, 0), allowSleep: true});
+  world.defaultContactMaterial.friction = 0.52;
+  world.defaultContactMaterial.restitution = 0.12;
+  const ground = createTerrainCollider(field);
+  const [shape] = ground.shapes;
+  world.addBody(ground);
+  chips?.setGround(field.heightAt);
+  // surround: {heightAt(x, z), lift()}: the relief around the field and how far lying snow raises it. With it a body
+  // that rolls off the field keeps rolling on the relief (without marking it) and never drops through.
+  if (surround && typeof surround.heightAt !== 'function') throw Error('The surround of the field needs heightAt');
+  let outer = null;
+  function laySurround(center) {
+    if (outer) world.removeBody(outer.body);
+    outer = createSurroundCollider({
+      heightAt: surround.heightAt,
+      center,
+      size: SURROUND.size,
+      cell: SURROUND.cell,
+      sink: SURROUND.sink,
+      samples: surround.samples,
+      hole: {x: field.bounds.x, z: field.bounds.y, size: field.bounds.z},
+      lift: surround.lift?.() ?? 0,
+    });
+    world.addBody(outer.body);
+    for (const body of active.keys()) body.wakeUp();
+  }
+  const geometries = {sphere: new THREE.SphereGeometry(0.72, 24, 16), box: new THREE.BoxGeometry(1.42, 0.94, 1.8)};
+  const active = new Map(),
+    strongest = new Map();
+  const blockMaterial = new Material({friction: 1, restitution: 0.12});
+  ice?.addContactMaterial(world, blockMaterial);
+  const fractures = [];
+  const axis = new Vec3(),
+    bestAxis = new Vec3(),
+    localAxes = [new Vec3(1, 0, 0), new Vec3(0, 1, 0), new Vec3(0, 0, 1)];
+  // The fixed envelope contains soil cuts and the snow layer. Cannon invalidates only the edited pillars.
+  const updateSample = (x, z, value) => shape.setHeightValueAtIndex(z, x, value);
+  function remove(entry) {
+    world.removeBody(entry.body);
+    scene.remove(entry.mesh);
+    active.delete(entry.body);
+    const index = lightOccluders?.indexOf(entry.mesh) ?? -1;
+    if (index >= 0) lightOccluders.splice(index, 1);
+  }
+
+  function stamp(entry, point, previous, strength) {
+    if (entry.kind === 'sphere') {
+      tracks.stamp(previous ?? point, point, trackRadius.sphere * entry.scale, strength);
+      return;
+    }
+    // Extend along the longest projected box axis. The stamp follows body orientation.
+    const dimensions = [0.71, 0.47, 0.9].map(half => half * entry.scale);
+    let extent = 0;
+    localAxes.forEach((basis, i) => {
+      entry.body.quaternion.vmult(basis, axis);
+      const projected = Math.hypot(axis.x, axis.z) * dimensions[i];
+      if (projected > extent) {
+        extent = projected;
+        bestAxis.copy(axis);
+      }
+    });
+    const angle = Math.atan2(bestAxis.z, bestAxis.x),
+      dx = Math.cos(angle) * extent * 0.7,
+      dz = Math.sin(angle) * extent * 0.7;
+    tracks.stamp(
+      {x: point.x - dx, z: point.z - dz},
+      {x: point.x + dx, z: point.z + dz},
+      trackRadius.box * entry.scale,
+      strength,
+    );
+    if (previous) tracks.stamp(previous, point, trackRadius.box * entry.scale, strength);
+  }
+
+  // One ground contact: the track stamp, the dig or the packed snow, and the chips of an impact.
+  function mark(entry, point, impact, speedChange) {
+    if (!impact && entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.printSpacing)
+      return;
+    const y = field.heightAt(point.x, point.z);
+    if (y === undefined) return;
+    const snowy = field.snowCover.value;
+    const sand = snowy ? 0 : field.sandWeightAt(point.x, point.z);
+    const base = surfaces[entry.surface],
+      style = sand > CONTACT.sandChipShare ? surfaces.sand : base;
+    const mix = key => THREE.MathUtils.lerp(base[key] ?? 0, surfaces.sand[key], sand);
+    const joined = entry.last && Math.hypot(point.x - entry.last.x, point.z - entry.last.z) < CONTACT.joinDistance;
+    stamp(entry, point, joined ? entry.last : null, impact ? 1 : CONTACT.rollingStrength);
+    const radius =
+      (impact ? CONTACT.radius.impact : entry.kind === 'box' ? CONTACT.radius.box : CONTACT.radius.sphere) *
+      entry.scale;
+    const volume =
+      style.load !== undefined && snowy
+        ? field.compactSnow(point.x, point.z, radius, impact ? style.impactLoad : style.load, updateSample)
+        : field.deform(
+            point.x,
+            point.z,
+            radius,
+            impact ? mix('impact') : mix('print') * CONTACT.printDepthShare,
+            updateSample,
+            {rimShare: snowy ? 0 : mix('rimShare')},
+          );
+    if (impact) {
+      entry.lastImpact = world.time;
+      if (volume > 0)
+        chips?.emit(
+          new THREE.Vector3(point.x, y, point.z),
+          {
+            ...style.chip,
+            chips: Math.min(IMPACT_CHIPS.max, Math.ceil(volume * IMPACT_CHIPS.perVolume)),
+            size: IMPACT_CHIPS.size,
+          },
+          Math.min(IMPACT_CHIPS.maxShock, speedChange * IMPACT_CHIPS.shockPerSpeed),
+          entry.body.velocity,
+        );
+    }
+    entry.last = point;
+  }
+
+  world.addEventListener('postStep', () => {
+    strongest.clear();
+    for (const contact of world.contacts) {
+      const other = contact.bi === ground ? contact.bj : contact.bj === ground ? contact.bi : null;
+      const entry = active.get(other);
+      if (entry && contact.enabled && contact.multiplier > (strongest.get(entry)?.multiplier ?? 0))
+        strongest.set(entry, contact);
+    }
+    for (const entry of active.values()) {
+      if (onSphereStep && entry.kind === 'sphere') {
+        const {position, previousPosition, velocity, shapes} = entry.body;
+        // Only read the live vectors during this callback. The host decides what counts as a contact with its scene.
+        onSphereStep(position, previousPosition, velocity, shapes[0].radius);
+      }
+      const contact = strongest.get(entry);
+      if (!contact) continue;
+      const offset = contact.bi === ground ? contact.ri : contact.rj;
+      const point = {x: ground.position.x + offset.x, z: ground.position.z + offset.z};
+      const speedChange = contact.multiplier * STEP * entry.body.invMass;
+      const impact = speedChange > CONTACT.impactSpeed && world.time - entry.lastImpact > CONTACT.cooldown;
+      mark(entry, point, impact, speedChange);
+    }
+  });
+
+  // Whether the ground at a point takes marks: rock does not.
+  const takesMarks = (x, z) => field.layerWeightAt(x, z, ROCK_LAYER) < ROCK_SHARE;
+  const outside = new Map();
+
+  return {
+    onHeightSample: updateSample,
+    takesMarks,
+    // Hook for a contact the tool's own bodies did not make (a wheel, a foot of the host's): the same mark as theirs.
+    // key: what touches (one trail per key). point: {x, z}. scale: its size against the tool's test sphere.
+    // speedChange (m/s): above the impact speed it lands (deeper mark, chips). velocity: where its chips fly.
+    press(key, point, {scale = 1, speedChange = 0, velocity = AT_REST} = {}) {
+      if (!takesMarks(point.x, point.z)) {
+        outside.delete(key);
+        return;
+      }
+      let entry = outside.get(key);
+      if (!entry) outside.set(key, (entry = {kind: 'sphere', last: null, lastImpact: -Infinity, body: {velocity}}));
+      entry.scale = scale;
+      entry.surface = field.snowCover.value ? 'snow' : 'mud';
+      entry.body.velocity = velocity;
+      mark(
+        entry,
+        {x: point.x, z: point.z},
+        speedChange > CONTACT.impactSpeed && world.time - entry.lastImpact > CONTACT.cooldown,
+        speedChange,
+      );
+    },
+    // Hook: the chip the ground throws at (x, z), as the tool's own contacts choose it: lying snow's, sand's where sand
+    // lies, else the bare ground's (its colour, and whether it bounces, sticks or rolls).
+    chipAt(x, z) {
+      const snowy = field.snowCover.value;
+      return (
+        !snowy && field.sandWeightAt(x, z) > CONTACT.sandChipShare ? surfaces.sand : surfaces[snowy ? 'snow' : 'mud']
+      ).chip;
+    },
+    // Ends the trail of an outside contact, so its next mark is not joined to the last.
+    lift(key) {
+      outside.delete(key);
+    },
+    get moving() {
+      return (chips?.active ?? 0) > 0 || [...active.keys()].some(body => body.sleepState !== Body.SLEEPING);
+    },
+    setSurface(surface) {
+      for (const entry of active.values()) remove(entry);
+      chips?.clear();
+      if (outer) {
+        world.removeBody(outer.body);
+        outer = null;
+      } // laid again, at the new height, under the next body
+      return field.setSnowCover(surface === 'snow', updateSample);
+    },
+    // at: {position: [x, z], velocity: [x, z], scale} places the body anywhere on the field, `scale` times its size.
+    launch(kind, surface, iceDrop, at) {
+      if (active.size >= MAX_BLOCKS) remove(active.values().next().value);
+      const rolling = kind === 'sphere',
+        scale = at?.scale ?? 1;
+      if (!(scale > 0)) throw Error('A launched body needs a positive scale');
+      const x = at?.position?.[0] ?? (iceDrop ? (iceDrop.hard ? -7 : -12) : rolling ? 10 : 7.5);
+      const z = at?.position?.[1] ?? (iceDrop ? 2 : rolling ? 13.5 : 12.5);
+      const ground = field.heightAt(x, z);
+      if (!iceDrop && ground === undefined) throw Error('A body must be launched over the field');
+      const y =
+        at?.height ?? (iceDrop ? iceDrop.level + (iceDrop.hard ? 8 : 0.65) : ground + (rolling ? 0.88 : 6) * scale);
+      // Mass follows the volume.
+      const body = new Body({
+        mass: (rolling ? 22 : 36) * scale ** 3,
+        shape: rolling ? new Sphere(0.72 * scale) : new Box(new Vec3(0.71, 0.47, 0.9).scale(scale)),
+        material: blockMaterial,
+        position: new Vec3(x, y, z),
+        velocity: new Vec3(
+          at?.velocity?.[0] ?? (iceDrop ? (iceDrop.hard ? 0 : 3.2) : rolling ? -5.5 : -0.9),
+          at?.verticalSpeed ?? 0,
+          at?.velocity?.[1] ?? (rolling ? -0.75 : 0),
+        ),
+        angularDamping: 0.34,
+      });
+      if (rolling) body.angularVelocity.set(-1, 0, 7.5);
+      else body.quaternion.setFromEuler(iceDrop ? 0 : 0.13, 0.52, iceDrop ? 0 : 0.16);
+      if (ice)
+        body.addEventListener('collide', ({body: other, contact}) => {
+          if (!ice.owns(other) || body.velocity.y >= 0) return;
+          const energy = 0.5 * body.mass * contact.getImpactVelocityAlongNormal() ** 2;
+          if (energy > ICE_BREAK_ENERGY) fractures.push({x: body.position.x, z: body.position.z, energy});
+        });
+      const mesh = new THREE.Mesh(geometries[kind], material);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.scale.setScalar(scale);
+      mesh.position.copy(body.position);
+      mesh.quaternion.copy(body.quaternion);
+      scene.add(mesh);
+      world.addBody(body);
+      lightOccluders?.push(mesh);
+      active.set(body, {body, mesh, kind, surface, scale, last: null, lastImpact: -Infinity});
+    },
+    update(dt, iceProgress = 0, waterLevel = 0) {
+      if (ice?.sync(world, iceProgress, waterLevel)) for (const body of active.keys()) body.wakeUp();
+      if (surround && active.size) {
+        const lead = [...active.keys()].at(-1).position;
+        if (!outer || outer.inset(lead.x, lead.z) < SURROUND.margin) laySurround(lead);
+      }
+      if (active.size) world.step(STEP, dt, MAX_SUBSTEPS);
+      if (fractures.length) {
+        for (const {x, z, energy} of fractures) {
+          if (ice.crack(x, z, ICE_CRACK_RADIUS)) onIceBreak?.(x, waterLevel, z, energy);
+        }
+        fractures.length = 0;
+        if (ice.sync(world, iceProgress, waterLevel)) for (const body of active.keys()) body.wakeUp();
+      }
+      for (const entry of active.values()) {
+        const {x, y, z} = entry.body.position;
+        if (y < (outer ? outer.low - SURROUND.sink : fallOutHeight) || (outer && outer.inset(x, z) < 0)) {
+          remove(entry);
+          continue;
+        }
+        entry.mesh.position.copy(entry.body.position);
+        entry.mesh.quaternion.copy(entry.body.quaternion);
+      }
+      chips?.tick(dt);
+      return field.flushDeformation();
+    },
+    reset() {
+      for (const entry of active.values()) remove(entry);
+      chips?.clear();
+      tracks.clear();
+      ice?.clear();
+      return field.resetDeformation(updateSample);
+    },
+    dispose() {
+      for (const entry of active.values()) remove(entry);
+      chips?.dispose();
+      Object.values(geometries).forEach(geometry => geometry.dispose());
+    },
+  };
+}

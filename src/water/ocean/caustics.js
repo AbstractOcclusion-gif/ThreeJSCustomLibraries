@@ -7,8 +7,14 @@ import {sunCovers} from '../../core/lighting.js';
 
 // WebAquarium ocean/caustics.js. Each ocean owns the projected grid and map.
 export const OCEAN_CAUSTIC_DEFAULTS = Object.freeze({
- on: true, resolution: 512, halfSize: 40, referenceDepth: 6,
- strength: 1, depthFade: .06, normalStrength: 1, gridSegments: 200,
+  on: true,
+  resolution: 512,
+  halfSize: 40,
+  referenceDepth: 6,
+  strength: 1,
+  depthFade: 0.06,
+  normalStrength: 1,
+  gridSegments: 200,
 });
 export const OCEAN_CAUSTIC_GLSL = `
  #define COAST_CAUSTICS
@@ -28,20 +34,30 @@ export const OCEAN_CAUSTIC_GLSL = `
  }`;
 
 export function createOceanCaustics(fft, sun, settings, wake, cover) {
- const renderer = fft.renderer;
- const scope = createTargetScope(renderer);
- const s = {...OCEAN_CAUSTIC_DEFAULTS, ...settings};
- const target = new THREE.WebGLRenderTarget(s.resolution, s.resolution, {type: THREE.HalfFloatType, depthBuffer: false});
- const geometry = new THREE.PlaneGeometry(2, 2, s.gridSegments, s.gridSegments).rotateX(-Math.PI / 2);
- const uniforms = {
-  tCaustics: {value: target.texture}, uCausticCenter: {value: new THREE.Vector2()},
-  uCausticHalf: {value: s.halfSize}, uCausticDepth: {value: s.referenceDepth},
-  uRefrLight: {value: new THREE.Vector3(0, -1, 0)}, uCausticOn: {value: 0},
-  uCausticStrength: {value: s.strength}, uCausticDepthFade: {value: s.depthFade},
- };
- const covers = sunCovers(cover);
- const coverUniforms = Object.assign({}, ...covers.map(part => part.uniforms));
- const glsl = OCEAN_CAUSTIC_GLSL + (covers.length ? `
+  const renderer = fft.renderer;
+  const scope = createTargetScope(renderer);
+  const s = {...OCEAN_CAUSTIC_DEFAULTS, ...settings};
+  const target = new THREE.WebGLRenderTarget(s.resolution, s.resolution, {
+    type: THREE.HalfFloatType,
+    depthBuffer: false,
+  });
+  const geometry = new THREE.PlaneGeometry(2, 2, s.gridSegments, s.gridSegments).rotateX(-Math.PI / 2);
+  const uniforms = {
+    tCaustics: {value: target.texture},
+    uCausticCenter: {value: new THREE.Vector2()},
+    uCausticHalf: {value: s.halfSize},
+    uCausticDepth: {value: s.referenceDepth},
+    uRefrLight: {value: new THREE.Vector3(0, -1, 0)},
+    uCausticOn: {value: 0},
+    uCausticStrength: {value: s.strength},
+    uCausticDepthFade: {value: s.depthFade},
+  };
+  const covers = sunCovers(cover);
+  const coverUniforms = Object.assign({}, ...covers.map(part => part.uniforms));
+  const glsl =
+    OCEAN_CAUSTIC_GLSL +
+    (covers.length
+      ? `
  #define OCEAN_SUN_COVER
  ${covers.map(part => part.glsl).join('\n')}
  vec3 oceanSunVisibility(vec3 p) {
@@ -49,11 +65,22 @@ export function createOceanCaustics(fft, sun, settings, wake, cover) {
   vec3 worldPosition = vec3(entry.x, 0.0, entry.y);
   vec3 n = vec3(0.0);
   return ${covers.map(part => `(${part.air ?? part.read})`).join(' * ')};
- }` : '\n vec3 oceanSunVisibility(vec3 p) { return vec3(1.0); }');
- const material = new THREE.ShaderMaterial({
-  uniforms: {...fft.uniforms, ...wake?.uniforms, ...uniforms, uLight: sun, uNormalStrength: {value: s.normalStrength}},
-  side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: true,
-  vertexShader: `
+ }`
+      : '\n vec3 oceanSunVisibility(vec3 p) { return vec3(1.0); }');
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      ...fft.uniforms,
+      ...wake?.uniforms,
+      ...uniforms,
+      uLight: sun,
+      uNormalStrength: {value: s.normalStrength},
+    },
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+    transparent: true,
+    vertexShader: `
    uniform vec2 uCausticCenter;
    uniform float uCausticHalf, uCausticDepth, uNormalStrength;
    uniform vec3 uLight;
@@ -77,41 +104,47 @@ export function createOceanCaustics(fft, sun, settings, wake, cover) {
     vec2 mapXZ = vNew.xz + flatRay.xz * (uCausticDepth / flatRay.y);
     gl_Position = vec4((mapXZ - uCausticCenter) / uCausticHalf, 0.0, 1.0);
    }`,
-  fragmentShader: `
+    fragmentShader: `
    varying vec3 vOld, vNew;
    void main() {
     float oa = length(dFdx(vOld)) * length(dFdy(vOld));
     float na = length(dFdx(vNew)) * length(dFdy(vNew));
     gl_FragColor = vec4(min(oa / max(na, 1e-7), 8.0), 0.0, 0.0, 1.0);
    }`,
- });
- const scene = new THREE.Scene(), camera = new THREE.Camera();
- scene.background = new THREE.Color(0);
- const mesh = new THREE.Mesh(geometry, material);
- mesh.frustumCulled = false;
- scene.add(mesh);
- return {
-  settings: s, uniforms: {...uniforms, ...coverUniforms}, glsl,
-  update(position) {
-   const direction = sun.value;
-   const active = s.on && s.strength > 0 && direction.y > .025;
-   uniforms.uCausticOn.value = active ? 1 : 0;
-   if (!active) return;
-   uniforms.uCausticStrength.value = s.strength;
-   uniforms.uCausticCenter.value.set(position.x, position.z);
-   const eta = 1 / WATER_IOR;
-   uniforms.uRefrLight.value.set(-direction.x * eta,
-    -Math.sqrt(1 - eta * eta * (1 - direction.y ** 2)), -direction.z * eta);
-   scope(() => {
-    renderer.setRenderTarget(target);
-    renderer.clear();
-    renderer.render(scene, camera);
-   });
-  },
-  dispose() {
-   target.dispose();
-   geometry.dispose();
-   material.dispose();
-  },
- };
+  });
+  const scene = new THREE.Scene(),
+    camera = new THREE.Camera();
+  scene.background = new THREE.Color(0);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return {
+    settings: s,
+    uniforms: {...uniforms, ...coverUniforms},
+    glsl,
+    update(position) {
+      const direction = sun.value;
+      const active = s.on && s.strength > 0 && direction.y > 0.025;
+      uniforms.uCausticOn.value = active ? 1 : 0;
+      if (!active) return;
+      uniforms.uCausticStrength.value = s.strength;
+      uniforms.uCausticCenter.value.set(position.x, position.z);
+      const eta = 1 / WATER_IOR;
+      uniforms.uRefrLight.value.set(
+        -direction.x * eta,
+        -Math.sqrt(1 - eta * eta * (1 - direction.y ** 2)),
+        -direction.z * eta,
+      );
+      scope(() => {
+        renderer.setRenderTarget(target);
+        renderer.clear();
+        renderer.render(scene, camera);
+      });
+    },
+    dispose() {
+      target.dispose();
+      geometry.dispose();
+      material.dispose();
+    },
+  };
 }

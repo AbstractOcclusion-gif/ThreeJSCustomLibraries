@@ -20,54 +20,89 @@ export const POND_SHADOW_GLSL = `
  }`;
 
 export function createPondShadow(renderer, casters, resolution = 512) {
- const target = new THREE.WebGLRenderTarget(resolution, resolution, {
-  type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
- });
- const scope = createRenderScope(renderer), scene = new THREE.Scene(), camera = new THREE.OrthographicCamera();
- scene.background = new THREE.Color(0);
- const material = new THREE.ShaderMaterial({side: THREE.DoubleSide,
-  vertexShader: `varying float vY; void main() {
+  const target = new THREE.WebGLRenderTarget(resolution, resolution, {
+    type: THREE.HalfFloatType,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+  const scope = createRenderScope(renderer),
+    scene = new THREE.Scene(),
+    camera = new THREE.OrthographicCamera();
+  scene.background = new THREE.Color(0);
+  const material = new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    vertexShader: `varying float vY; void main() {
    vec4 wp = vec4(position, 1.0);
    #ifdef USE_INSTANCING
    wp = instanceMatrix * wp;
    #endif
    wp = modelMatrix * wp; vY = wp.y; gl_Position = projectionMatrix * viewMatrix * wp;
   }`,
-  fragmentShader: `varying float vY; void main(){ gl_FragColor = vec4(vY + ${HEIGHT_OFFSET.toFixed(1)}, 0.0, 0.0, 1.0); }`,
- });
- const copies = new Map(), center = new THREE.Vector3();
- const uniforms = {tPondShadow: {value: target.texture}, pondShadowVP: {value: new THREE.Matrix4()},
-  pondShadowOn: {value: 0}, pondShadowStrength: {value: .7}, pondShaftSoftness: {value: 4}, pondShadowTexel: {value: 1 / resolution}};
- let frame = 0;
- return {
-  uniforms,
-  render(bounds, level, direction, {shadowStrength = .7, shaftSoftness = 4, shadowEvery = 2} = {}) {
-   uniforms.pondShadowOn.value = shadowStrength > 0 && casters.length > 0 ? 1 : 0;
-   uniforms.pondShadowStrength.value = shadowStrength;
-   uniforms.pondShaftSoftness.value = shaftSoftness;
-   if (!uniforms.pondShadowOn.value || frame++ % Math.max(1, shadowEvery | 0)) return;
-   const half = Math.max(bounds.z, bounds.w) * .62;
-   Object.assign(camera, {left: -half, right: half, top: half, bottom: -half, near: .05, far: 4 * half});
-   center.set(bounds.x + bounds.z * .5, level - .5, bounds.y + bounds.w * .5);
-   camera.position.copy(center).addScaledVector(direction, -2 * half);
-   camera.up.set(0, 0, -1);
-   camera.lookAt(center);
-   camera.updateProjectionMatrix(); camera.updateMatrixWorld();
-   uniforms.pondShadowVP.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-   for (const [mesh, copy] of copies) if (!casters.includes(mesh)) { scene.remove(copy); copies.delete(mesh); }
-   for (const mesh of casters) {
-    let copy = copies.get(mesh);
-    if (!copy) {
-     copy = mesh.isInstancedMesh ? new THREE.InstancedMesh(mesh.geometry, material, 0) : new THREE.Mesh(mesh.geometry, material);
-     copy.matrixAutoUpdate = false; copy.frustumCulled = false;
-     copies.set(mesh, copy); scene.add(copy);
-    }
-    mesh.updateWorldMatrix(true, false);
-    copy.geometry = mesh.geometry; copy.matrix.copy(mesh.matrixWorld); copy.visible = mesh.visible;
-    if (mesh.isInstancedMesh) { copy.instanceMatrix = mesh.instanceMatrix; copy.count = mesh.count; }
-   }
-   scope(() => { renderer.setRenderTarget(target); renderer.clear(); renderer.render(scene, camera); });
-  },
-  dispose() { material.dispose(); target.dispose(); scene.clear(); copies.clear(); },
- };
+    fragmentShader: `varying float vY; void main(){ gl_FragColor = vec4(vY + ${HEIGHT_OFFSET.toFixed(1)}, 0.0, 0.0, 1.0); }`,
+  });
+  const copies = new Map(),
+    center = new THREE.Vector3();
+  const uniforms = {
+    tPondShadow: {value: target.texture},
+    pondShadowVP: {value: new THREE.Matrix4()},
+    pondShadowOn: {value: 0},
+    pondShadowStrength: {value: 0.7},
+    pondShaftSoftness: {value: 4},
+    pondShadowTexel: {value: 1 / resolution},
+  };
+  let frame = 0;
+  return {
+    uniforms,
+    render(bounds, level, direction, {shadowStrength = 0.7, shaftSoftness = 4, shadowEvery = 2} = {}) {
+      uniforms.pondShadowOn.value = shadowStrength > 0 && casters.length > 0 ? 1 : 0;
+      uniforms.pondShadowStrength.value = shadowStrength;
+      uniforms.pondShaftSoftness.value = shaftSoftness;
+      if (!uniforms.pondShadowOn.value || frame++ % Math.max(1, shadowEvery | 0)) return;
+      const half = Math.max(bounds.z, bounds.w) * 0.62;
+      Object.assign(camera, {left: -half, right: half, top: half, bottom: -half, near: 0.05, far: 4 * half});
+      center.set(bounds.x + bounds.z * 0.5, level - 0.5, bounds.y + bounds.w * 0.5);
+      camera.position.copy(center).addScaledVector(direction, -2 * half);
+      camera.up.set(0, 0, -1);
+      camera.lookAt(center);
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld();
+      uniforms.pondShadowVP.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      for (const [mesh, copy] of copies)
+        if (!casters.includes(mesh)) {
+          scene.remove(copy);
+          copies.delete(mesh);
+        }
+      for (const mesh of casters) {
+        let copy = copies.get(mesh);
+        if (!copy) {
+          copy = mesh.isInstancedMesh
+            ? new THREE.InstancedMesh(mesh.geometry, material, 0)
+            : new THREE.Mesh(mesh.geometry, material);
+          copy.matrixAutoUpdate = false;
+          copy.frustumCulled = false;
+          copies.set(mesh, copy);
+          scene.add(copy);
+        }
+        mesh.updateWorldMatrix(true, false);
+        copy.geometry = mesh.geometry;
+        copy.matrix.copy(mesh.matrixWorld);
+        copy.visible = mesh.visible;
+        if (mesh.isInstancedMesh) {
+          copy.instanceMatrix = mesh.instanceMatrix;
+          copy.count = mesh.count;
+        }
+      }
+      scope(() => {
+        renderer.setRenderTarget(target);
+        renderer.clear();
+        renderer.render(scene, camera);
+      });
+    },
+    dispose() {
+      material.dispose();
+      target.dispose();
+      scene.clear();
+      copies.clear();
+    },
+  };
 }

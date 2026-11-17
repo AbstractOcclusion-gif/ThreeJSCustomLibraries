@@ -7,10 +7,30 @@ import * as THREE from 'three';
 import {createLighting} from '../core/lighting.js';
 import {valueNoise, fbm} from '../core/value-noise.js';
 
-export const TERRAIN_DEFAULTS = Object.freeze({ on: true, centerX: 0, centerZ: 220, peakHeight: 18, hillRadius: 70, beachRadius: 85, slopeEndRadius: 330, abyssDepth: 100, noiseAmp: 5, noiseScale: 55, seed: 7 });
-const ISLAND_EXTENT = 400, CELL = 2, ABYSS_EXTENT = 20000;   // island mesh half-size (m), grid cell (m), abyss plane half-size (m)
+export const TERRAIN_DEFAULTS = Object.freeze({
+  on: true,
+  centerX: 0,
+  centerZ: 220,
+  peakHeight: 18,
+  hillRadius: 70,
+  beachRadius: 85,
+  slopeEndRadius: 330,
+  abyssDepth: 100,
+  noiseAmp: 5,
+  noiseScale: 55,
+  seed: 7,
+});
+const ISLAND_EXTENT = 400,
+  CELL = 2,
+  ABYSS_EXTENT = 20000; // island mesh half-size (m), grid cell (m), abyss plane half-size (m)
 // WaterTerrain.shader wetness defaults: _WetStrength 1, _WetBandHeight .25, _WetSwashStrength 1, _BeachWetDarken .85, _BeachWetSmoothness .85.
-export const WET_DEFAULTS = Object.freeze({ strength: 1, bandHeight: 0.25, swashStrength: 1, darken: 0.85, smoothness: 0.85 });
+export const WET_DEFAULTS = Object.freeze({
+  strength: 1,
+  bandHeight: 0.25,
+  swashStrength: 1,
+  darken: 0.85,
+  smoothness: 0.85,
+});
 
 // 5-octave fbm over the shared terrain value noise (core/value-noise.js), deterministic per seed
 const COAST_FBM = Object.freeze({octaves: 5, amplitude: 0.5, gain: 0.5, lacunarity: 2.1});
@@ -18,14 +38,20 @@ function makeNoise(seed) {
   const value = valueNoise(seed);
   return (x, y) => fbm(value, x, y, COAST_FBM);
 }
-const smooth01 = (a, b, x) => { const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const smooth01 = (a, b, x) => {
+  const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 
 export class OceanCoastTerrain {
   constructor({scene, settings, water, onHeightField, lighting = createLighting()} = {}) {
     this.lighting = lighting;
     this.scene = scene;
     this.water = water;
+    // Hooks: subscribe(listener) hears 'coast:height-field' ({heightAt(x, z), centerX, centerZ, half, offFieldDepth})
+    // each time the shore is baked, for a host's collider; an onHeightField(heightAt, bounds) option is told too.
     this.onHeightField = onHeightField;
+    this.listeners = new Set();
     this.s = {...TERRAIN_DEFAULTS, ...settings};
     this.wetUniforms = createWetUniforms();
     this.group = new THREE.Group();
@@ -34,43 +60,111 @@ export class OceanCoastTerrain {
   }
   // Height of the sea floor / island at a world xz (also used by anything that needs the bed: caustic plane, camera clamp).
   heightAt(x, z) {
-    const s = this.s, n = this.noise, warp = n((x + 500) / 180, (z - 500) / 180) * 25;
+    const s = this.s,
+      n = this.noise,
+      warp = n((x + 500) / 180, (z - 500) / 180) * 25;
     const r = Math.hypot(x - s.centerX, z - s.centerZ) + warp;
-    const hill = s.peakHeight * smooth01(s.hillRadius, 0, r), slope = -s.abyssDepth * smooth01(s.beachRadius, s.slopeEndRadius, r);
-    const detail = n(x / s.noiseScale, z / s.noiseScale) * s.noiseAmp * (0.4 + 0.6 * smooth01(s.beachRadius, s.slopeEndRadius, r)) * (1 - 0.7 * smooth01(s.beachRadius + 10, s.beachRadius - 10, r));
-    const edge = smooth01(ISLAND_EXTENT * 0.8, ISLAND_EXTENT, Math.max(Math.abs(x - s.centerX), Math.abs(z - s.centerZ)));   // sink under the abyss plane at the mesh border
+    const hill = s.peakHeight * smooth01(s.hillRadius, 0, r),
+      slope = -s.abyssDepth * smooth01(s.beachRadius, s.slopeEndRadius, r);
+    const detail =
+      n(x / s.noiseScale, z / s.noiseScale) *
+      s.noiseAmp *
+      (0.4 + 0.6 * smooth01(s.beachRadius, s.slopeEndRadius, r)) *
+      (1 - 0.7 * smooth01(s.beachRadius + 10, s.beachRadius - 10, r));
+    const edge = smooth01(
+      ISLAND_EXTENT * 0.8,
+      ISLAND_EXTENT,
+      Math.max(Math.abs(x - s.centerX), Math.abs(z - s.centerZ)),
+    ); // sink under the abyss plane at the mesh border
     return THREE.MathUtils.lerp(hill + slope + detail, -s.abyssDepth - 2, edge);
   }
   // Match the rendered triangles rather than sampling the smoother generating function.
   collisionHeightAt(x, z) {
     if (!this.s.on) return undefined;
-    const gx = (x - this.s.centerX + ISLAND_EXTENT) / CELL, gz = (z - this.s.centerZ + ISLAND_EXTENT) / CELL;
-    const n = Math.round(2 * ISLAND_EXTENT / CELL);
+    const gx = (x - this.s.centerX + ISLAND_EXTENT) / CELL,
+      gz = (z - this.s.centerZ + ISLAND_EXTENT) / CELL;
+    const n = Math.round((2 * ISLAND_EXTENT) / CELL);
     if (gx < 0 || gz < 0 || gx >= n || gz >= n) return -this.s.abyssDepth;
-    const ix = Math.floor(gx), iz = Math.floor(gz), tx = gx - ix, tz = gz - iz, p = this.island.geometry.attributes.position;
-    const a = iz * (n + 1) + ix, b = a + n + 1, d = a + 1, c = b + 1;
-    const h = tx + tz <= 1 ? p.getY(a) * (1 - tx - tz) + p.getY(d) * tx + p.getY(b) * tz
-      : p.getY(c) * (tx + tz - 1) + p.getY(b) * (1 - tx) + p.getY(d) * (1 - tz);
+    const ix = Math.floor(gx),
+      iz = Math.floor(gz),
+      tx = gx - ix,
+      tz = gz - iz,
+      p = this.island.geometry.attributes.position;
+    const a = iz * (n + 1) + ix,
+      b = a + n + 1,
+      d = a + 1,
+      c = b + 1;
+    const h =
+      tx + tz <= 1
+        ? p.getY(a) * (1 - tx - tz) + p.getY(d) * tx + p.getY(b) * tz
+        : p.getY(c) * (tx + tz - 1) + p.getY(b) * (1 - tx) + p.getY(d) * (1 - tz);
     return Math.max(h, -this.s.abyssDepth);
   }
   build() {
-    const s = this.s; this.noise = makeNoise(s.seed); this.dispose(false);
-    const n = Math.round(2 * ISLAND_EXTENT / CELL), geo = new THREE.PlaneGeometry(2 * ISLAND_EXTENT, 2 * ISLAND_EXTENT, n, n); geo.rotateX(-Math.PI / 2);
-    const p = geo.attributes.position; for (let i = 0; i < p.count; i++) { const x = p.getX(i) + s.centerX, z = p.getZ(i) + s.centerZ; p.setX(i, x); p.setZ(i, z); p.setY(i, this.heightAt(x, z)); }
-    geo.computeVertexNormals(); geo.computeBoundingSphere();
+    const s = this.s;
+    this.noise = makeNoise(s.seed);
+    this.dispose(false);
+    const n = Math.round((2 * ISLAND_EXTENT) / CELL),
+      geo = new THREE.PlaneGeometry(2 * ISLAND_EXTENT, 2 * ISLAND_EXTENT, n, n);
+    geo.rotateX(-Math.PI / 2);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i) + s.centerX,
+        z = p.getZ(i) + s.centerZ;
+      p.setX(i, x);
+      p.setZ(i, z);
+      p.setY(i, this.heightAt(x, z));
+    }
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
     this.material = terrainMaterial(this.water, this.wetUniforms, this.lighting);
-    this.island = new THREE.Mesh(geo, this.material); this.island.frustumCulled = true; this.island.castShadow = true; this.group.add(this.island);
-    const abyss = new THREE.Mesh(new THREE.PlaneGeometry(2 * ABYSS_EXTENT, 2 * ABYSS_EXTENT, 1, 1).rotateX(-Math.PI / 2), this.material); abyss.position.y = -s.abyssDepth; abyss.frustumCulled = false; this.abyss = abyss; this.group.add(abyss);
-    this.group.visible = s.on; this.bakeBed();
+    this.island = new THREE.Mesh(geo, this.material);
+    this.island.frustumCulled = true;
+    this.island.castShadow = true;
+    this.group.add(this.island);
+    const abyss = new THREE.Mesh(
+      new THREE.PlaneGeometry(2 * ABYSS_EXTENT, 2 * ABYSS_EXTENT, 1, 1).rotateX(-Math.PI / 2),
+      this.material,
+    );
+    abyss.position.y = -s.abyssDepth;
+    abyss.frustumCulled = false;
+    this.abyss = abyss;
+    this.group.add(abyss);
+    this.group.visible = s.on;
+    this.bakeBed();
   }
   // The shore substrate is baked from the RENDERED triangles (collisionHeightAt), so wave damping and the ground agree exactly.
   bakeBed() {
     const {centerX, centerZ, abyssDepth} = this.s;
-    this.onHeightField?.((x, z) => this.collisionHeightAt(x, z) ?? -abyssDepth,
-      {centerX, centerZ, half: ISLAND_EXTENT, offFieldDepth: abyssDepth});
+    const heightAt = (x, z) => this.collisionHeightAt(x, z) ?? -abyssDepth,
+      bounds = {centerX, centerZ, half: ISLAND_EXTENT, offFieldDepth: abyssDepth};
+    this.onHeightField?.(heightAt, bounds);
+    const event = Object.freeze({type: 'coast:height-field', heightAt, ...bounds});
+    for (const listener of this.listeners) listener(event);
   }
-  applySettings(settings) { const rebuild = ['centerX', 'centerZ', 'peakHeight', 'hillRadius', 'beachRadius', 'slopeEndRadius', 'abyssDepth', 'noiseAmp', 'noiseScale', 'seed'].some(k => k in settings && settings[k] !== this.s[k]);
-    Object.assign(this.s, settings); if (rebuild) this.build(); else if ('on' in settings) this.bakeBed(); this.group.visible = this.s.on; }
+  subscribe(listener) {
+    if (typeof listener !== 'function') throw Error('Coast listener must be a function');
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  applySettings(settings) {
+    const rebuild = [
+      'centerX',
+      'centerZ',
+      'peakHeight',
+      'hillRadius',
+      'beachRadius',
+      'slopeEndRadius',
+      'abyssDepth',
+      'noiseAmp',
+      'noiseScale',
+      'seed',
+    ].some(k => k in settings && settings[k] !== this.s[k]);
+    Object.assign(this.s, settings);
+    if (rebuild) this.build();
+    else if ('on' in settings) this.bakeBed();
+    this.group.visible = this.s.on;
+  }
   // Lighting comes from the shared `lighting` uniforms (drive them with syncLighting or by hand); this stays for convenience.
   update({sunDirection, sunColor, skyColor, groundColor} = {}) {
     const u = this.lighting.uniforms;
@@ -79,18 +173,41 @@ export class OceanCoastTerrain {
     if (skyColor) u.uHemiSky.value.copy(skyColor);
     if (groundColor) u.uHemiGround.value.copy(groundColor);
   }
-  applyWet(w) { const u = this.wetUniforms; u.uWetStrength.value = w.strength; u.uWetBandHeight.value = w.bandHeight; u.uWetSwashStrength.value = w.swashStrength; u.uWetDarken.value = w.darken; u.uWetSmoothness.value = w.smoothness; }
-  dispose(all = true) { for (const m of [this.island, this.abyss]) if (m) { this.group.remove(m); m.geometry.dispose(); } if (this.material) this.material.dispose(); if (all) this.group.removeFromParent(); }
+  applyWet(w) {
+    const u = this.wetUniforms;
+    u.uWetStrength.value = w.strength;
+    u.uWetBandHeight.value = w.bandHeight;
+    u.uWetSwashStrength.value = w.swashStrength;
+    u.uWetDarken.value = w.darken;
+    u.uWetSmoothness.value = w.smoothness;
+  }
+  dispose(all = true) {
+    for (const m of [this.island, this.abyss])
+      if (m) {
+        this.group.remove(m);
+        m.geometry.dispose();
+      }
+    if (this.material) this.material.dispose();
+    if (!all) return;
+    this.group.removeFromParent();
+    this.listeners.clear();
+  }
 }
 
 // Shared underwater uniforms hook: depth darkening (downwelling) and caustics are filled in by the underwater batch; defaults = none.
-const createWetUniforms = () => ({ uWetStrength: { value: 1 }, uWetBandHeight: { value: 0.25 }, uWetSwashStrength: { value: 1 }, uWetDarken: { value: 0.85 }, uWetSmoothness: { value: 0.85 } });
+const createWetUniforms = () => ({
+  uWetStrength: {value: 1},
+  uWetBandHeight: {value: 0.25},
+  uWetSwashStrength: {value: 1},
+  uWetDarken: {value: 0.85},
+  uWetSmoothness: {value: 0.85},
+});
 function terrainMaterial(water, wet, lighting) {
   return new THREE.ShaderMaterial({
     uniforms: {...lighting.uniforms, ...wet, ...water?.uniforms},
     defines: water ? {COAST_WATER: 1} : {},
-    vertexShader: /* glsl */`varying vec3 vWorld, vNormal; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; vNormal = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: /* glsl */`${lighting.glsl}
+    vertexShader: /* glsl */ `varying vec3 vWorld, vNormal; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; vNormal = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: /* glsl */ `${lighting.glsl}
       varying vec3 vWorld, vNormal;
       ${water?.glsl ?? ''}
       // ---- wetness model (WaterWetness.hlsl): HOW wet looks; where it is wet is decided in main() from the band + the swash
@@ -146,5 +263,6 @@ function terrainMaterial(water, wet, lighting) {
         gl_FragColor = vec4(applyFog(color, distance(vWorld, cameraPosition)), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
-      }` });
+      }`,
+  });
 }

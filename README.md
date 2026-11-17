@@ -99,7 +99,7 @@ Register a standard or physical material with `view.addCloudShadowReceiver(mater
 | water (channel and pond surfaces, waves, ripples, flow bake, foam layer, freezing and ice; ocean surface) | `three-kit/water` | `bench/water/`, `bench/pond/`, `bench/ocean/` | ✓ |
 | flocking (instanced fish and schooling) | `three-kit/flocking` | `bench/flocking/` | ✓ |
 | weathered surfaces (wetness, runoff streaks, snow, puddles, rain rings, tracks, albedo anti-tiling) | `three-kit/surface` | `bench/terrain/` | ✓ |
-| terrain (relief recipes, biomes, stitched worlds with water, camera-centred LOD rings, deformable field with 3D snow, terrain-driven texture layers, CC0 texture catalogue) | `three-kit/terrain`, `/terrain/textures` | `bench/terrain/` | ✓ |
+| terrain (relief recipes, biomes, stitched worlds with water, camera-centred LOD rings, deformable field with 3D snow, terrain-driven texture layers, CC0 texture catalogue, footprints; Cannon colliders and the contacts tool in its own entry) | `three-kit/terrain`, `/terrain/textures`, `/terrain/physics` | `bench/terrain/` | ✓ |
 | vegetation (grass with per-instance tint, specimens, procedural meadow tree, generated free assets, Synty loader code) | `three-kit/vegetation` | `bench/vegetation/` | ✓ |
 | leaved trees (instanced lobed crowns + leaf cards, JSON profiles) | `three-kit/trees` | `bench/vegetation/` | ✓ |
 | rocks (seeded stones, boulders, scatter and cliff runs) | `three-kit/rocks` | `bench/rocks/` | ✓ |
@@ -125,7 +125,7 @@ everything in the last column is optional and has a calm, clear-noon default.
 | `water` | `particles/water` spray pump (the boat) | three | `sky` hook, `environment` (`ocean.setEnvironment`, `proceduralSky().setEnvironment`) |
 | `flocking` | — | three | `modelsUrl` / `models`, `surfaceHeight` / `floorHeight` callbacks |
 | `surface` | — | three | — |
-| `terrain` | `surface` | three | `lighting` hook (coast), water `shoreBinding` |
+| `terrain` | `surface` | three (`/terrain/physics`: cannon-es) | `lighting` hook (coast), water `shoreBinding` |
 | `vegetation` | — | three | `environment` (`setEnvironment` on grass and specimens, or per call in `update`) |
 | `trees` | — | three | `lighting` hook, `environment` (`setEnvironment`) |
 | `boundaries` | `trees` (hedges) | three | `lighting` hook, `environment` (`setEnvironment`), `assets` |
@@ -142,6 +142,12 @@ Conventions:
   wrap the host's own `world.step`. Fire, chips, puffs and prefabs expose `tick` as an alias of `update`.
   Destruction views and debris effects also expose `tick(dt)` to advance effects. The camera director's `tick(dt)`
   returns the time scale.
+- Hooks: a tool tells what it does through `subscribe(listener)`, which returns the unsubscribe function, with events typed
+  `module:event` (`terrain:crater`, `vehicle:track`, `character:land`, `floor:fractured`, `masonry:facade-revealed`,
+  `coast:height-field`, `puzzle:changed`, …). A callback option (`onEvent`, `onChange`, `onFacadeReveal`, `onHeightField`)
+  is its first listener. Per-sample callbacks on hot paths stay plain callbacks: `onSample` (a field's changed heights)
+  and `onDeposit` (spray droplets landing). Mixed demos wire tools together only through these hooks.
+- A factory's options have exported `*_DEFAULTS` (or presets) a host can read, show in a panel or spread.
 - Most `create*()` factories return plain objects. Use `new` for classes such as `LeavedTrees`, `OceanCoastTerrain`,
   `Motes`, `SprayPump`, the ocean internals and the weather simulation's `Weather` / `DayCycle`.
 - Asset-loading factories such as `createPuffs`, `createParticlePrefab`, `createFishFlock`, `createDebrisFX` and

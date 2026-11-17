@@ -40,6 +40,7 @@
     "./terrain": "./src/terrain/index.js",
     "./lighting": "./src/lighting/index.js",
     "./terrain/textures": "./src/terrain/textures.js",
+    "./terrain/physics": "./src/terrain/physics.js",
     "./vegetation": "./src/vegetation/index.js",
     "./trees": "./src/trees/index.js",
     "./rocks": "./src/rocks/index.js",

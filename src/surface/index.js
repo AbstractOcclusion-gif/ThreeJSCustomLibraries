@@ -6,47 +6,59 @@ import {NOISE_GLSL} from '../core/lighting.js';
 export {createTrackMask} from '../core/track-mask.js';
 
 // Level change per second: wetting and snowing at full precipitation, drying and thaw without any; rain adds rainThaw.
-export const SURFACE_WEATHER_RATES = Object.freeze({wetting: .23, drying: .035, snowing: .17, thaw: .018, rainThaw: .09});
+export const SURFACE_WEATHER_RATES = Object.freeze({
+  wetting: 0.23,
+  drying: 0.035,
+  snowing: 0.17,
+  thaw: 0.018,
+  rainThaw: 0.09,
+});
 
 // How standing water changes a surface. Pass one look to every material that should match.
 export function createSurfaceLook() {
- return {
-  wetDarkening: {value: .42},     // albedo lost when soaked
-  wetRoughness: {value: .4},      // roughness scale of a soaked surface: lower is glossier
-  puddleDarkening: {value: .38},  // extra albedo lost under a puddle
-  rippleSize: {value: 1},         // scale on the raindrop rings
-  rippleRate: {value: 1},         // scale on how often drops fall
-  rippleStrength: {value: 1},     // scale on the ring relief
- };
+  return {
+    wetDarkening: {value: 0.42}, // albedo lost when soaked
+    wetRoughness: {value: 0.4}, // roughness scale of a soaked surface: lower is glossier
+    puddleDarkening: {value: 0.38}, // extra albedo lost under a puddle
+    rippleSize: {value: 1}, // scale on the raindrop rings
+    rippleRate: {value: 1}, // scale on how often drops fall
+    rippleStrength: {value: 1}, // scale on the ring relief
+  };
 }
 
 export function createSurfaceWeather({rates: rateOverrides} = {}) {
- const rates = {...SURFACE_WEATHER_RATES, ...rateOverrides};
- if (!Object.values(rates).every(rate => Number.isFinite(rate) && rate >= 0)) throw Error('Surface weather rates must be finite and non-negative');
- const levels = {value: new THREE.Vector2()};
- const time = {value: 0};
- const unit = value => THREE.MathUtils.clamp(value, 0, 1);
- return {
-  levels, time, rates,
-  set({wetness = levels.value.x, snow = levels.value.y} = {}) {
-   if (![wetness, snow].every(Number.isFinite)) throw Error('Surface weather levels must be finite');
-   levels.value.set(unit(wetness), unit(snow));
-  },
-  // Null advances animation while retaining manually set surface levels.
-  update(dt, precipitation = {}) {
-   let {rain = 0, snow = 0} = precipitation ?? {};
-   if (!Number.isFinite(dt) || dt < 0 || ![rain, snow].every(Number.isFinite)) throw Error('Invalid surface weather update');
-   time.value += dt;
-   if (precipitation === null) return;
-   rain = unit(rain);
-   snow = unit(snow);
-   levels.value.x = unit(levels.value.x + dt * (rates.wetting * rain - rates.drying * (1 - rain)));
-   levels.value.y = unit(levels.value.y + dt * (rates.snowing * snow - (rates.thaw + rates.rainThaw * rain) * (1 - snow)));
-  },
- };
+  const rates = {...SURFACE_WEATHER_RATES, ...rateOverrides};
+  if (!Object.values(rates).every(rate => Number.isFinite(rate) && rate >= 0))
+    throw Error('Surface weather rates must be finite and non-negative');
+  const levels = {value: new THREE.Vector2()};
+  const time = {value: 0};
+  const unit = value => THREE.MathUtils.clamp(value, 0, 1);
+  return {
+    levels,
+    time,
+    rates,
+    set({wetness = levels.value.x, snow = levels.value.y} = {}) {
+      if (![wetness, snow].every(Number.isFinite)) throw Error('Surface weather levels must be finite');
+      levels.value.set(unit(wetness), unit(snow));
+    },
+    // Null advances animation while retaining manually set surface levels.
+    update(dt, precipitation = {}) {
+      let {rain = 0, snow = 0} = precipitation ?? {};
+      if (!Number.isFinite(dt) || dt < 0 || ![rain, snow].every(Number.isFinite))
+        throw Error('Invalid surface weather update');
+      time.value += dt;
+      if (precipitation === null) return;
+      rain = unit(rain);
+      snow = unit(snow);
+      levels.value.x = unit(levels.value.x + dt * (rates.wetting * rain - rates.drying * (1 - rain)));
+      levels.value.y = unit(
+        levels.value.y + dt * (rates.snowing * snow - (rates.thaw + rates.rainThaw * rain) * (1 - snow)),
+      );
+    },
+  };
 }
 
-const SURFACE_GLSL = /* glsl */`
+const SURFACE_GLSL = /* glsl */ `
 uniform vec2 surfaceWeather;
 #ifdef SURFACE_RAIN_IMPACTS
 uniform float surfaceRainAmount;
@@ -104,44 +116,71 @@ vec3 surfaceUntile(vec2 uv) {
 `;
 
 // Standard PBR stays responsible for lights, shadows, fog and the host's environment map.
-export function createWeatherSurfaceMaterial(parameters = {}, {
- weather = createSurfaceWeather(), rainAmount, tracks, snowColor = '#eaf3fa', puddles = 1, antiTiling = 0, runoff = 1, trackContrast = .08,
- look = createSurfaceLook(),
-} = {}) {
- if (![puddles, antiTiling, runoff].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
-  throw Error('Puddle, anti-tiling and runoff amounts must be between zero and one');
- }
- if (!Number.isFinite(trackContrast) || trackContrast < 0 || trackContrast > 1) throw Error('Track contrast must be between zero and one');
- const material = new THREE.MeshStandardMaterial(parameters);
- if (rainAmount) material.defines = {...material.defines, SURFACE_RAIN_IMPACTS: 1};
- if (tracks) material.defines = {...material.defines, SURFACE_TRACKS: 1};
- const uniforms = {
-  surfaceRainAmount: rainAmount ?? {value: 0},
-  surfaceWeather: weather.levels, surfaceSnowColor: {value: new THREE.Color(snowColor)},
-  surfacePuddles: {value: puddles}, surfaceAntiTile: {value: antiTiling},
-  surfaceRunoff: {value: runoff}, surfaceTime: weather.time,
-  surfaceTracks: {value: tracks?.texture ?? null}, surfaceHasTracks: {value: Boolean(tracks)},
-  surfaceTrackContrast: {value: trackContrast},
-  surfaceWetDarkening: look.wetDarkening, surfaceWetRoughness: look.wetRoughness, surfacePuddleDarkening: look.puddleDarkening,
-  surfaceRippleSize: look.rippleSize, surfaceRippleRate: look.rippleRate, surfaceRippleStrength: look.rippleStrength,
-  surfaceTrackBounds: {value: tracks?.bounds ?? new THREE.Vector4(0, 0, 1, 1)},
- };
- material.onBeforeCompile = shader => {
-  Object.assign(shader.uniforms, uniforms);
-  shader.vertexShader = injectWorldPosition(shader.vertexShader, 'vSurfaceWorld');
-  const map = THREE.ShaderChunk.map_fragment.replace('diffuseColor *= sampledDiffuseColor;', `
+export function createWeatherSurfaceMaterial(
+  parameters = {},
+  {
+    weather = createSurfaceWeather(),
+    rainAmount,
+    tracks,
+    snowColor = '#eaf3fa',
+    puddles = 1,
+    antiTiling = 0,
+    runoff = 1,
+    trackContrast = 0.08,
+    look = createSurfaceLook(),
+  } = {},
+) {
+  if (![puddles, antiTiling, runoff].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
+    throw Error('Puddle, anti-tiling and runoff amounts must be between zero and one');
+  }
+  if (!Number.isFinite(trackContrast) || trackContrast < 0 || trackContrast > 1)
+    throw Error('Track contrast must be between zero and one');
+  const material = new THREE.MeshStandardMaterial(parameters);
+  if (rainAmount) material.defines = {...material.defines, SURFACE_RAIN_IMPACTS: 1};
+  if (tracks) material.defines = {...material.defines, SURFACE_TRACKS: 1};
+  const uniforms = {
+    surfaceRainAmount: rainAmount ?? {value: 0},
+    surfaceWeather: weather.levels,
+    surfaceSnowColor: {value: new THREE.Color(snowColor)},
+    surfacePuddles: {value: puddles},
+    surfaceAntiTile: {value: antiTiling},
+    surfaceRunoff: {value: runoff},
+    surfaceTime: weather.time,
+    surfaceTracks: {value: tracks?.texture ?? null},
+    surfaceHasTracks: {value: Boolean(tracks)},
+    surfaceTrackContrast: {value: trackContrast},
+    surfaceWetDarkening: look.wetDarkening,
+    surfaceWetRoughness: look.wetRoughness,
+    surfacePuddleDarkening: look.puddleDarkening,
+    surfaceRippleSize: look.rippleSize,
+    surfaceRippleRate: look.rippleRate,
+    surfaceRippleStrength: look.rippleStrength,
+    surfaceTrackBounds: {value: tracks?.bounds ?? new THREE.Vector4(0, 0, 1, 1)},
+  };
+  material.onBeforeCompile = shader => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = injectWorldPosition(shader.vertexShader, 'vSurfaceWorld');
+    const map = THREE.ShaderChunk.map_fragment.replace(
+      'diffuseColor *= sampledDiffuseColor;',
+      `
    #ifndef DECODE_VIDEO_TEXTURE
     if (surfaceAntiTile > 0.0) sampledDiffuseColor.rgb = mix(sampledDiffuseColor.rgb, surfaceUntile(vMapUv), surfaceAntiTile);
    #endif
    diffuseColor *= sampledDiffuseColor;
-  `);
-  shader.fragmentShader = shader.fragmentShader
-   .replace('#include <map_fragment>', map)
-   .replace('void main() {', `${SURFACE_GLSL}\nvoid main() {`)
-   .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+  `,
+    );
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <map_fragment>', map)
+      .replace('void main() {', `${SURFACE_GLSL}\nvoid main() {`)
+      .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
     vec3 surfaceGeometricNormal = normal;
-   `)
-   .replace('#include <lights_physical_fragment>', `
+   `,
+      )
+      .replace(
+        '#include <lights_physical_fragment>',
+        `
     ${weatherStage('ground')}
     float snowCoverage = 0.0;
     if (surfaceWeather.y > 0.0) {
@@ -191,7 +230,8 @@ export function createWeatherSurfaceMaterial(parameters = {}, {
     ${weatherStage('snowRoughness')}
     metalnessFactor *= 1.0 - snowCoverage;
     #include <lights_physical_fragment>
-   `);
- };
- return material;
+   `,
+      );
+  };
+  return material;
 }

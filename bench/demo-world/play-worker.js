@@ -1,6 +1,6 @@
 import {createTerrainWorld} from '../../src/terrain/index.js';
 import {samplePlayArea} from '../terrain/play-samples.js';
-import {SURROUND} from '../terrain/impacts.js';
+import {SURROUND} from '../../src/terrain/physics.js';
 
 let world;
 self.onmessage = ({data}) => {

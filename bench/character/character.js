@@ -56,10 +56,10 @@ function jointKey(name) {
   .replace(/^(Left|Right)/, side => side[0].toLowerCase() + '_').toLowerCase();
 }
 
-function retargetLocomotion(source, target) {
+export function retargetLocomotion(source, target, {clips = CLIPS, targetJointKey = jointKey} = {}) {
  const sourceBones = new Map(), targetBones = new Map();
  source.scene.traverse(node => { if (node.isBone) sourceBones.set(node.name, node); });
- target.scene.traverse(node => { if (node.isBone) targetBones.set(jointKey(node.name), node); });
+ target.scene.traverse(node => { if (node.isBone) targetBones.set(targetJointKey(node.name), node); });
  source.scene.updateMatrixWorld(true);
  target.scene.updateMatrixWorld(true);
  const bindings = new Map();
@@ -90,7 +90,7 @@ function retargetLocomotion(source, target) {
  const worldToPelvis = new THREE.Matrix3().setFromMatrix4(pelvis.parent.matrixWorld).invert();
 
  // Transfer rotation relative to each bind pose, expressed in the target bone's axes.
- return CLIPS.map(name => {
+ return clips.map(name => {
   const clip = THREE.AnimationClip.findByName(source.animations, name);
   if (!clip) throw Error('Missing locomotion clip ' + name);
   const tracks = [];

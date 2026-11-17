@@ -11,19 +11,39 @@ import {createDataTexture} from '../../core/data-texture.js';
 
 // Unity BedDepthSettings defaults: shoreShoalDepth 4, shoreRefraction .7, shoreCompression .6, shoreGreens 1.35. The compression
 // reach is 2 x the surf front wavelength (SURF_WARP_REACH_SPACINGS, published by applySurf) -- one curve for swell and fronts.
-let lastBake = null;   // last shore bake stats {size, sdf, ms}
-export const SHORE_DEFAULTS = Object.freeze({ on: true, resolution: 512, shoalDepth: 4, refraction: 0.7, compression: 0.6, greens: 1.35, debug: 'off' });
+let lastBake = null; // last shore bake stats {size, sdf, ms}
+export const SHORE_DEFAULTS = Object.freeze({
+  on: true,
+  resolution: 512,
+  shoalDepth: 4,
+  refraction: 0.7,
+  compression: 0.6,
+  greens: 1.35,
+  debug: 'off',
+});
 export const SHORE_DEBUG_MODES = Object.freeze(['off', 'depth', 'sdf']);
-const SHOAL_BAND_SIGNIFICANT_HEIGHT_MULTIPLE = 2;        // WaterVolume.ShoreShoalDepthEffective: a big sea starts flattening further out
-const DIRECTION_SMOOTH_PASSES = 2;                       // WaterShoreDepthField.DirectionSmoothPasses (3x3 box, direction + slope)
+const SHOAL_BAND_SIGNIFICANT_HEIGHT_MULTIPLE = 2; // WaterVolume.ShoreShoalDepthEffective: a big sea starts flattening further out
+const DIRECTION_SMOOTH_PASSES = 2; // WaterShoreDepthField.DirectionSmoothPasses (3x3 box, direction + slope)
 const SDF_DIR_EPSILON = 1e-4;
 
-const createShoreUniforms = () => ({ tShore: { value: null }, uShoreCenter: { value: new THREE.Vector2() }, uShoreHalf: { value: 1 },
-  uShoreOn: { value: 0 }, uShoreSdfOn: { value: 0 }, uShoreOffFieldDepth: { value: 100 }, uShoreDebug: { value: 0 },
-  uShoreShoalDepth: { value: 4 }, uShoreGreenBandDepth: { value: 4 }, uShoreCompression: { value: 0.6 }, uShoreGreens: { value: 1.35 }, uShoreWarpReach: { value: 52 }, uShoreRefraction: { value: 0.7 } });
+const createShoreUniforms = () => ({
+  tShore: {value: null},
+  uShoreCenter: {value: new THREE.Vector2()},
+  uShoreHalf: {value: 1},
+  uShoreOn: {value: 0},
+  uShoreSdfOn: {value: 0},
+  uShoreOffFieldDepth: {value: 100},
+  uShoreDebug: {value: 0},
+  uShoreShoalDepth: {value: 4},
+  uShoreGreenBandDepth: {value: 4},
+  uShoreCompression: {value: 0.6},
+  uShoreGreens: {value: 1.35},
+  uShoreWarpReach: {value: 52},
+  uShoreRefraction: {value: 0.7},
+});
 
 // Include-guarded: the FFT sampling and the analytic bands both carry it, and the surface stages include both.
-export const SHORE_GLSL = /* glsl */`
+export const SHORE_GLSL = /* glsl */ `
 #ifndef SHORE_GLSL_INCLUDED
 #define SHORE_GLSL_INCLUDED
 #define SHORE_DEEP_SENTINEL 1e9
@@ -88,81 +108,187 @@ vec3 shoreDebugColor(vec2 xz){ ShoreData s = shoreSample(xz);
 // Bake: heightAt(x, z) -> depth, SDF and slope over [center +- half]. heightAt should be the RENDERED/collision surface so the
 // damping and the ground agree. offFieldDepth: what bedDepthAt reports outside the field (the abyss).
 export function createOceanShore(renderer) {
- const SHORE_U = createShoreUniforms();
- const floatFilter = renderer.extensions.has('OES_texture_float_linear') ? THREE.LinearFilter : THREE.NearestFilter;
- function bakeShore(heightAt, centerX, centerZ, half, settings = {}, offFieldDepth = 100) {
-  const s = { ...SHORE_DEFAULTS, ...settings }, n = s.resolution, started = performance.now();
-  if (!Number.isInteger(n) || n < 2) throw new RangeError('Ocean shore resolution must be an integer of at least 2');
-  const depth = new Float32Array(n * n), worldX = new Float32Array(n), worldZ = new Float32Array(n);
-  for (let i = 0; i < n; i++) { worldX[i] = centerX + ((i + 0.5) / n - 0.5) * 2 * half; worldZ[i] = centerZ + ((i + 0.5) / n - 0.5) * 2 * half; }
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) depth[j * n + i] = -heightAt(worldX[i], worldZ[j]);
-  const packed = new Float32Array(n * n * 4), hasSdf = buildSdf(depth, n, worldX, worldZ, 2 * half / n, packed);
-  for (let i = 0; i < n * n; i++) packed[i * 4] = depth[i];
-  if (SHORE_U.tShore.value) SHORE_U.tShore.value.dispose();
-  const t = createDataTexture(packed, n, n, {type: THREE.FloatType, filter: floatFilter});
-  SHORE_U.tShore.value = t; SHORE_U.uShoreCenter.value.set(centerX, centerZ); SHORE_U.uShoreHalf.value = half; SHORE_U.uShoreOffFieldDepth.value = offFieldDepth;
-  shoreSdfBaked = hasSdf; applyShore(s);
-  lastBake = {size: n, sdf: hasSdf, ms: performance.now() - started};
-}
-// warpReach: compression e-folding reach (m), 2 x the surf front wavelength. The attenuation band is floored at 2 x the live Hs
-// (setShoreSeaState, per frame); the Green band stays on the authored coastal profile, as in the package.
-let authoredShoalDepth = SHORE_DEFAULTS.shoalDepth, shoreSdfBaked = false;
-function applyShore(s, warpReach = SHORE_U.uShoreWarpReach.value) {
-  const u = SHORE_U, baked = !!u.tShore.value; authoredShoalDepth = s.shoalDepth;
-  u.uShoreOn.value = s.on && baked ? 1 : 0; u.uShoreSdfOn.value = s.on && shoreSdfBaked ? 1 : 0;
-  u.uShoreGreenBandDepth.value = s.shoalDepth; u.uShoreCompression.value = s.compression; u.uShoreGreens.value = s.greens; u.uShoreWarpReach.value = warpReach; u.uShoreRefraction.value = s.refraction;
-  u.uShoreDebug.value = SHORE_DEBUG_MODES.indexOf(s.debug);
-}
-function setShoreSeaState(significantHeight) { SHORE_U.uShoreShoalDepth.value = Math.max(authoredShoalDepth, SHOAL_BAND_SIGNIFICANT_HEIGHT_MULTIPLE * significantHeight); }
- return {uniforms: SHORE_U, bake: bakeShore, apply: applyShore, setSeaState: setShoreSeaState, get lastBake() { return lastBake; },
-  dispose() {
-   SHORE_U.tShore.value?.dispose();
-   SHORE_U.tShore.value = null;
-   SHORE_U.uShoreOn.value = 0;
-   SHORE_U.uShoreSdfOn.value = 0;
-  }};
+  const SHORE_U = createShoreUniforms();
+  const floatFilter = renderer.extensions.has('OES_texture_float_linear') ? THREE.LinearFilter : THREE.NearestFilter;
+  function bakeShore(heightAt, centerX, centerZ, half, settings = {}, offFieldDepth = 100) {
+    const s = {...SHORE_DEFAULTS, ...settings},
+      n = s.resolution,
+      started = performance.now();
+    if (!Number.isInteger(n) || n < 2) throw new RangeError('Ocean shore resolution must be an integer of at least 2');
+    const depth = new Float32Array(n * n),
+      worldX = new Float32Array(n),
+      worldZ = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      worldX[i] = centerX + ((i + 0.5) / n - 0.5) * 2 * half;
+      worldZ[i] = centerZ + ((i + 0.5) / n - 0.5) * 2 * half;
+    }
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) depth[j * n + i] = -heightAt(worldX[i], worldZ[j]);
+    const packed = new Float32Array(n * n * 4),
+      hasSdf = buildSdf(depth, n, worldX, worldZ, (2 * half) / n, packed);
+    for (let i = 0; i < n * n; i++) packed[i * 4] = depth[i];
+    if (SHORE_U.tShore.value) SHORE_U.tShore.value.dispose();
+    const t = createDataTexture(packed, n, n, {type: THREE.FloatType, filter: floatFilter});
+    SHORE_U.tShore.value = t;
+    SHORE_U.uShoreCenter.value.set(centerX, centerZ);
+    SHORE_U.uShoreHalf.value = half;
+    SHORE_U.uShoreOffFieldDepth.value = offFieldDepth;
+    shoreSdfBaked = hasSdf;
+    applyShore(s);
+    lastBake = {size: n, sdf: hasSdf, ms: performance.now() - started};
+  }
+  // warpReach: compression e-folding reach (m), 2 x the surf front wavelength. The attenuation band is floored at 2 x the live Hs
+  // (setShoreSeaState, per frame); the Green band stays on the authored coastal profile, as in the package.
+  let authoredShoalDepth = SHORE_DEFAULTS.shoalDepth,
+    shoreSdfBaked = false;
+  function applyShore(s, warpReach = SHORE_U.uShoreWarpReach.value) {
+    const u = SHORE_U,
+      baked = !!u.tShore.value;
+    authoredShoalDepth = s.shoalDepth;
+    u.uShoreOn.value = s.on && baked ? 1 : 0;
+    u.uShoreSdfOn.value = s.on && shoreSdfBaked ? 1 : 0;
+    u.uShoreGreenBandDepth.value = s.shoalDepth;
+    u.uShoreCompression.value = s.compression;
+    u.uShoreGreens.value = s.greens;
+    u.uShoreWarpReach.value = warpReach;
+    u.uShoreRefraction.value = s.refraction;
+    u.uShoreDebug.value = SHORE_DEBUG_MODES.indexOf(s.debug);
+  }
+  function setShoreSeaState(significantHeight) {
+    SHORE_U.uShoreShoalDepth.value = Math.max(
+      authoredShoalDepth,
+      SHOAL_BAND_SIGNIFICANT_HEIGHT_MULTIPLE * significantHeight,
+    );
+  }
+  return {
+    uniforms: SHORE_U,
+    bake: bakeShore,
+    apply: applyShore,
+    setSeaState: setShoreSeaState,
+    get lastBake() {
+      return lastBake;
+    },
+    dispose() {
+      SHORE_U.tShore.value?.dispose();
+      SHORE_U.tShore.value = null;
+      SHORE_U.uShoreOn.value = 0;
+      SHORE_U.uShoreSdfOn.value = 0;
+    },
+  };
 }
 
 // CPU jump-flood signed distance + direction to the waterline, and the beach slope (WaterShoreDepthField.BuildSdf / BuildSlope),
 // written into the GBA channels of `out` (G = distance, B = direction angle, A = slope). Seeds are the texels whose submerged state
 // differs from a 4-neighbour (a crisp 1-texel waterline). Returns false with no waterline (channels left at 0 / no direction).
 function buildSdf(depth, n, worldX, worldZ, texel, out) {
-  const count = n * n; let src = new Int32Array(count), dst = new Int32Array(count), seeds = 0;
-  for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) { const i = z * n + x, wet = depth[i] > 0;
-    const boundary = (x > 0 && (depth[i - 1] > 0) !== wet) || (x < n - 1 && (depth[i + 1] > 0) !== wet) || (z > 0 && (depth[i - n] > 0) !== wet) || (z < n - 1 && (depth[i + n] > 0) !== wet);
-    src[i] = boundary ? i : -1; if (boundary) seeds++; }
-  if (!seeds) { for (let i = 0; i < count; i++) out[i * 4 + 2] = -1; return false; }
-  const distSq = (seed, x, z) => { const dx = worldX[seed % n] - worldX[x], dz = worldZ[(seed / n) | 0] - worldZ[z]; return dx * dx + dz * dz; };
+  const count = n * n;
+  let src = new Int32Array(count),
+    dst = new Int32Array(count),
+    seeds = 0;
+  for (let z = 0; z < n; z++)
+    for (let x = 0; x < n; x++) {
+      const i = z * n + x,
+        wet = depth[i] > 0;
+      const boundary =
+        (x > 0 && depth[i - 1] > 0 !== wet) ||
+        (x < n - 1 && depth[i + 1] > 0 !== wet) ||
+        (z > 0 && depth[i - n] > 0 !== wet) ||
+        (z < n - 1 && depth[i + n] > 0 !== wet);
+      src[i] = boundary ? i : -1;
+      if (boundary) seeds++;
+    }
+  if (!seeds) {
+    for (let i = 0; i < count; i++) out[i * 4 + 2] = -1;
+    return false;
+  }
+  const distSq = (seed, x, z) => {
+    const dx = worldX[seed % n] - worldX[x],
+      dz = worldZ[(seed / n) | 0] - worldZ[z];
+    return dx * dx + dz * dz;
+  };
   for (let step = n >> 1; step >= 1; step >>= 1) {
-    for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) { const i = z * n + x; let best = src[i], bestSq = best < 0 ? Infinity : distSq(best, x, z);
-      for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) { if (!ox && !oz) continue; const nx = x + ox * step, nz = z + oz * step;
-        if (nx < 0 || nx >= n || nz < 0 || nz >= n) continue; const cand = src[nz * n + nx]; if (cand < 0) continue;
-        const sq = distSq(cand, x, z); if (sq < bestSq) { bestSq = sq; best = cand; } }
-      dst[i] = best; }
+    for (let z = 0; z < n; z++)
+      for (let x = 0; x < n; x++) {
+        const i = z * n + x;
+        let best = src[i],
+          bestSq = best < 0 ? Infinity : distSq(best, x, z);
+        for (let oz = -1; oz <= 1; oz++)
+          for (let ox = -1; ox <= 1; ox++) {
+            if (!ox && !oz) continue;
+            const nx = x + ox * step,
+              nz = z + oz * step;
+            if (nx < 0 || nx >= n || nz < 0 || nz >= n) continue;
+            const cand = src[nz * n + nx];
+            if (cand < 0) continue;
+            const sq = distSq(cand, x, z);
+            if (sq < bestSq) {
+              bestSq = sq;
+              best = cand;
+            }
+          }
+        dst[i] = best;
+      }
     [src, dst] = [dst, src];
   }
-  const dirX = new Float32Array(count), dirZ = new Float32Array(count), dist = new Float32Array(count), slope = new Float32Array(count);
-  for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) { const i = z * n + x, seed = src[i]; if (seed < 0) continue;
-    const dx = worldX[seed % n] - worldX[x], dz = worldZ[(seed / n) | 0] - worldZ[z], d = Math.hypot(dx, dz);
-    dist[i] = (depth[i] > 0 ? 1 : -1) * d; const inv = d > SDF_DIR_EPSILON ? 1 / d : 0; dirX[i] = dx * inv; dirZ[i] = dz * inv; }
+  const dirX = new Float32Array(count),
+    dirZ = new Float32Array(count),
+    dist = new Float32Array(count),
+    slope = new Float32Array(count);
+  for (let z = 0; z < n; z++)
+    for (let x = 0; x < n; x++) {
+      const i = z * n + x,
+        seed = src[i];
+      if (seed < 0) continue;
+      const dx = worldX[seed % n] - worldX[x],
+        dz = worldZ[(seed / n) | 0] - worldZ[z],
+        d = Math.hypot(dx, dz);
+      dist[i] = (depth[i] > 0 ? 1 : -1) * d;
+      const inv = d > SDF_DIR_EPSILON ? 1 / d : 0;
+      dirX[i] = dx * inv;
+      dirZ[i] = dz * inv;
+    }
   // local beach slope tan(beta) = |grad depth|, central differences
-  for (let z = 0; z < n; z++) { const zm = Math.max(z - 1, 0), zp = Math.min(z + 1, n - 1);
-    for (let x = 0; x < n; x++) { const xm = Math.max(x - 1, 0), xp = Math.min(x + 1, n - 1);
-      const ddx = (depth[z * n + xp] - depth[z * n + xm]) / ((xp - xm) * texel), ddz = (depth[zp * n + x] - depth[zm * n + x]) / ((zp - zm) * texel);
-      slope[z * n + x] = Math.hypot(ddx, ddz); } }
+  for (let z = 0; z < n; z++) {
+    const zm = Math.max(z - 1, 0),
+      zp = Math.min(z + 1, n - 1);
+    for (let x = 0; x < n; x++) {
+      const xm = Math.max(x - 1, 0),
+        xp = Math.min(x + 1, n - 1);
+      const ddx = (depth[z * n + xp] - depth[z * n + xm]) / ((xp - xm) * texel),
+        ddz = (depth[zp * n + x] - depth[zm * n + x]) / ((zp - zm) * texel);
+      slope[z * n + x] = Math.hypot(ddx, ddz);
+    }
+  }
   // the raw jump-flood direction is piecewise-constant per nearest seed: smooth it (and the slope) like the package
   const scratch = new Float32Array(count);
-  boxBlur3x3(dirX, scratch, n, DIRECTION_SMOOTH_PASSES); boxBlur3x3(dirZ, scratch, n, DIRECTION_SMOOTH_PASSES); boxBlur3x3(slope, scratch, n, DIRECTION_SMOOTH_PASSES);
-  for (let i = 0; i < count; i++) { const len = Math.hypot(dirX[i], dirZ[i]);
-    out[i * 4 + 1] = dist[i]; out[i * 4 + 2] = len > SDF_DIR_EPSILON ? (Math.atan2(dirZ[i], dirX[i]) / (2 * Math.PI) + 1) % 1 : -1; out[i * 4 + 3] = slope[i]; }
+  boxBlur3x3(dirX, scratch, n, DIRECTION_SMOOTH_PASSES);
+  boxBlur3x3(dirZ, scratch, n, DIRECTION_SMOOTH_PASSES);
+  boxBlur3x3(slope, scratch, n, DIRECTION_SMOOTH_PASSES);
+  for (let i = 0; i < count; i++) {
+    const len = Math.hypot(dirX[i], dirZ[i]);
+    out[i * 4 + 1] = dist[i];
+    out[i * 4 + 2] = len > SDF_DIR_EPSILON ? (Math.atan2(dirZ[i], dirX[i]) / (2 * Math.PI) + 1) % 1 : -1;
+    out[i * 4 + 3] = slope[i];
+  }
   return true;
 }
 function boxBlur3x3(data, scratch, n, passes) {
   for (let p = 0; p < passes; p++) {
-    for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) { let sum = 0, cnt = 0;
-      for (let oz = -1; oz <= 1; oz++) { const zz = z + oz; if (zz < 0 || zz >= n) continue;
-        for (let ox = -1; ox <= 1; ox++) { const xx = x + ox; if (xx < 0 || xx >= n) continue; sum += data[zz * n + xx]; cnt++; } }
-      scratch[z * n + x] = sum / cnt; }
+    for (let z = 0; z < n; z++)
+      for (let x = 0; x < n; x++) {
+        let sum = 0,
+          cnt = 0;
+        for (let oz = -1; oz <= 1; oz++) {
+          const zz = z + oz;
+          if (zz < 0 || zz >= n) continue;
+          for (let ox = -1; ox <= 1; ox++) {
+            const xx = x + ox;
+            if (xx < 0 || xx >= n) continue;
+            sum += data[zz * n + xx];
+            cnt++;
+          }
+        }
+        scratch[z * n + x] = sum / cnt;
+      }
     data.set(scratch);
   }
 }

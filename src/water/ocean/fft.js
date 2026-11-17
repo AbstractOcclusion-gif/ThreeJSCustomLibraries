@@ -9,23 +9,37 @@
 // current drift, no direction map (see aperiodic.js), and the normal array has no mip chain (array render targets are not mipmapped),
 // so far-field slope is tamed by the cascade distance fade + far slope floor only.
 import * as THREE from 'three';
-import { createDataTexture } from '../../core/data-texture.js';
-import { QV, createPass, createTargetScope, pingPong } from './passes.js';
-import { APERIODIC_GLSL } from './aperiodic.js';
-import { SHORE_GLSL, createOceanShore } from './bed.js';
-import { SURF_GLSL, createSurfUniforms } from './surf-waves.js';
-import { CASCADE_TILE_OVERSAMPLE, JONSWAP_PEAK_DECAY, JONSWAP_SIGMA_HIGH, JONSWAP_SIGMA_LOW, SWELL_DIR_POWER, SWELL_WIDTH, TMA_OFFSET, TMA_SLOPE,
-  buildLayout, computeUnitVariances, gainForHeight, peakAngularFrequency, SHORT_WAVE_ROLLOFF_SPAN } from './fft-spectrum.js';
+import {createDataTexture} from '../../core/data-texture.js';
+import {QV, createPass, createTargetScope, pingPong} from './passes.js';
+import {APERIODIC_GLSL} from './aperiodic.js';
+import {SHORE_GLSL, createOceanShore} from './bed.js';
+import {SURF_GLSL, createSurfUniforms} from './surf-waves.js';
+import {
+  CASCADE_TILE_OVERSAMPLE,
+  JONSWAP_PEAK_DECAY,
+  JONSWAP_SIGMA_HIGH,
+  JONSWAP_SIGMA_LOW,
+  SWELL_DIR_POWER,
+  SWELL_WIDTH,
+  TMA_OFFSET,
+  TMA_SLOPE,
+  buildLayout,
+  computeUnitVariances,
+  gainForHeight,
+  peakAngularFrequency,
+  SHORT_WAVE_ROLLOFF_SPAN,
+} from './fft-spectrum.js';
 
 export const SUPPORTED_RESOLUTIONS = [64, 128, 256];
-export const MAX_CASCADES = 4;                            // OCEAN_FFT_MAX_CASCADES
+export const MAX_CASCADES = 4; // OCEAN_FFT_MAX_CASCADES
 const SPECTRUM_SEED = 1337;
-const MAX_FOAM_DELTA_TIME = 0.1;                          // clamp dt so a frame hitch can't over-accumulate foam
-const FAR_SLOPE_FLOOR = [0.15, 0.20, 0.25, 0.25];         // OceanFftFarSlopeFloor: the far field never goes mirror-flat
-const CASCADE_WAVELENGTH_FRACTION = 0.25 / CASCADE_TILE_OVERSAMPLE;   // OCEAN_FFT_CASCADE_WAVELENGTH_FRACTION
+const MAX_FOAM_DELTA_TIME = 0.1; // clamp dt so a frame hitch can't over-accumulate foam
+const FAR_SLOPE_FLOOR = [0.15, 0.2, 0.25, 0.25]; // OceanFftFarSlopeFloor: the far field never goes mirror-flat
+const CASCADE_WAVELENGTH_FRACTION = 0.25 / CASCADE_TILE_OVERSAMPLE; // OCEAN_FFT_CASCADE_WAVELENGTH_FRACTION
 // "Wind Drives Ambient Sea State": the authored Hs / peak wavelength are exact at the reference wind; other winds scale them
 // by (wind / reference) ^ exponent (Settings.Ocean.cs WindSeaGrowth). Swell stays independent.
-export const WIND_SEA_HEIGHT_EXPONENT = 1, WIND_SEA_LENGTH_EXPONENT = 2 / 3;
+export const WIND_SEA_HEIGHT_EXPONENT = 1,
+  WIND_SEA_LENGTH_EXPONENT = 2 / 3;
 const REFERENCE_WIND_MIN = 0.01;
 export function windSeaGrowth(sea, exponent) {
   if (!sea.windDrivesSeaState) return 1;
@@ -33,20 +47,55 @@ export function windSeaGrowth(sea, exponent) {
 }
 
 // Unity defaults (WaterVolume.Settings.Ocean.cs).
-export const SEA_STATE_DEFAULTS = Object.freeze({ significantWaveHeight: 1.5, peakWavelength: 60, peakSharpness: 3.3, seaDepth: 0,
-  windSpeed: 8, windDrivesSeaState: true, referenceWindSpeed: 8, windHeadingDeg: 0, windTurbulence: 0.25, swellHeight: 0, swellWavelength: 140, swellHeadingDeg: 20,
-  choppiness: 1, cascadeReach: 3, aperiodic: false, aperiodicTileScale: 1,
-  shortestWavelength: 0, fineNormal: 1, waveSpeed: 1 });   // shortestWavelength m (0 = full JONSWAP tail), fineNormal = finest cascade tilt weight, waveSpeed = dispersion time scale   // Unity ships windDrivesAmbientSeaState off; on here so the wind slider means something
-export const FOAM_DEFAULTS = Object.freeze({ windThreshold: 4, coverage: 0.75, strength: 1, fadeRate: 0.5, maxBuildup: 1, deposit: 0.85, drift: 0.08,
-  crestAnisotropy: 1, crestGate: 0.8, faceBias: 0.6, cascadeMix: 1 });
+export const SEA_STATE_DEFAULTS = Object.freeze({
+  significantWaveHeight: 1.5,
+  peakWavelength: 60,
+  peakSharpness: 3.3,
+  seaDepth: 0,
+  windSpeed: 8,
+  windDrivesSeaState: true,
+  referenceWindSpeed: 8,
+  windHeadingDeg: 0,
+  windTurbulence: 0.25,
+  swellHeight: 0,
+  swellWavelength: 140,
+  swellHeadingDeg: 20,
+  choppiness: 1,
+  cascadeReach: 3,
+  aperiodic: false,
+  aperiodicTileScale: 1,
+  shortestWavelength: 0,
+  fineNormal: 1,
+  waveSpeed: 1,
+}); // shortestWavelength m (0 = full JONSWAP tail), fineNormal = finest cascade tilt weight, waveSpeed = dispersion time scale   // Unity ships windDrivesAmbientSeaState off; on here so the wind slider means something
+export const FOAM_DEFAULTS = Object.freeze({
+  windThreshold: 4,
+  coverage: 0.75,
+  strength: 1,
+  fadeRate: 0.5,
+  maxBuildup: 1,
+  deposit: 0.85,
+  drift: 0.08,
+  crestAnisotropy: 1,
+  crestGate: 0.8,
+  faceBias: 0.6,
+  cascadeMix: 1,
+});
 
 // Shared by the surface material (written by OceanFft.update).
-const createFftUniforms = () => ({ tOceanDisp: { value: null }, tOceanNormal: { value: null }, uOceanDomainSizes: { value: new THREE.Vector4() },
-  uOceanVisibleAreas: { value: new THREE.Vector4() }, uOceanCascadeCount: { value: 0 }, uOceanFftActive: { value: 0 },
-  uOceanAperiodic: { value: new THREE.Vector2(0, 1) }, uOceanFineNormal: { value: 1 } });   // x = enabled, y = tile scale
+const createFftUniforms = () => ({
+  tOceanDisp: {value: null},
+  tOceanNormal: {value: null},
+  uOceanDomainSizes: {value: new THREE.Vector4()},
+  uOceanVisibleAreas: {value: new THREE.Vector4()},
+  uOceanCascadeCount: {value: 0},
+  uOceanFftActive: {value: 0},
+  uOceanAperiodic: {value: new THREE.Vector2(0, 1)},
+  uOceanFineNormal: {value: 1},
+}); // x = enabled, y = tile scale
 
 const glf = x => Number(x).toPrecision(9);
-const COMMON_GLSL = /* glsl */`
+const COMMON_GLSL = /* glsl */ `
 #define OCEAN_TWO_PI 6.28318530718
 #define OCEAN_GRAVITY 9.81
 #define OCEAN_KMIN 1e-4
@@ -55,7 +104,7 @@ vec2 cmul(vec2 a, vec2 b){ return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * 
 vec2 oceanWaveVector(ivec2 xy, int slice){ vec2 centred = vec2(xy) - float(uResolution) * 0.5; return OCEAN_TWO_PI * centred / max(uDomainSizes[slice], 1e-3); }`;
 
 // SpectrumInit: static random spectrum H0 (h0(k), conj(h0(-k))), rebuilt only when the sea state changes.
-const SPECTRUM_INIT_GLSL = /* glsl */`
+const SPECTRUM_INIT_GLSL = /* glsl */ `
 #define OCEAN_JONSWAP_PEAK_DECAY ${glf(JONSWAP_PEAK_DECAY)}
 #define OCEAN_JONSWAP_SIGMA_LOW ${glf(JONSWAP_SIGMA_LOW)}
 #define OCEAN_JONSWAP_SIGMA_HIGH ${glf(JONSWAP_SIGMA_HIGH)}
@@ -117,7 +166,7 @@ void main(){
 }`;
 
 // SpectrumUpdate: evolve H0 to time t; pack P = H + i*Sx, Q = Sz (see the header).
-const SPECTRUM_UPDATE_GLSL = /* glsl */`
+const SPECTRUM_UPDATE_GLSL = /* glsl */ `
 uniform sampler2DArray tH0; uniform float uTime, uChoppiness;
 void main(){
   ivec2 xy = ivec2(gl_FragCoord.xy);
@@ -134,7 +183,7 @@ void main(){
 
 // One butterfly stage (horizontal or vertical). Stage 0 reads bit-reversed indices through the butterfly texture, as the compute.
 // The last vertical stage resolves the packed pair into (dispX, height, dispZ, 0) with the (-1)^(x+y) centring sign.
-const BUTTERFLY_GLSL = /* glsl */`
+const BUTTERFLY_GLSL = /* glsl */ `
 uniform sampler2DArray tSpec; uniform sampler2D tButterfly; uniform int uStage, uHorizontal, uResolve;
 void main(){
   ivec2 xy = ivec2(gl_FragCoord.xy);
@@ -150,7 +199,7 @@ void main(){
 }`;
 
 // ComputeNormal: finite-difference normal + Jacobian fold -> whitecap accumulation (history = last frame's normal.w).
-const NORMAL_GLSL = /* glsl */`
+const NORMAL_GLSL = /* glsl */ `
 #define OCEAN_FOAM_ACCUM_RATE 5.0
 #define OCEAN_FOAM_CASCADE1_DAMP 0.25
 #define OCEAN_FOAM_DENSE_REFERENCE 0.6
@@ -202,7 +251,7 @@ void main(){
 }`;
 
 // Surface-side sampling (WaterLargeWaves.hlsl cascade sums), shared by the vertex (displacement) and fragment (normal/foam) stages.
-export const FFT_SAMPLE_GLSL = /* glsl */`
+export const FFT_SAMPLE_GLSL = /* glsl */ `
 ${APERIODIC_GLSL}
 ${SHORE_GLSL}
 ${SURF_GLSL}
@@ -286,101 +335,228 @@ OceanFftSum oceanFftNormalSumShore(vec2 worldXZ, ShoreData shore){
 OceanFftSum oceanFftNormalSum(vec2 worldXZ){ return oceanFftNormalSumShore(worldXZ, shoreSample(worldXZ)); }`;
 
 const DEG = Math.PI / 180;
-const bitReverse = (x, bits) => { let r = 0; for (let i = 0; i < bits; i++) { r = (r << 1) | (x & 1); x >>= 1; } return r; };
+const bitReverse = (x, bits) => {
+  let r = 0;
+  for (let i = 0; i < bits; i++) {
+    r = (r << 1) | (x & 1);
+    x >>= 1;
+  }
+  return r;
+};
 // (twiddle.x, twiddle.y, indexA, indexB) per (stage, element) -- WaterOceanFft.BuildButterfly.
 function buildButterfly(size, stages) {
   const px = new Float32Array(stages * size * 4);
   for (let stage = 0; stage < stages; stage++) {
-    const span = 1 << stage, block = 1 << (stage + 1);
+    const span = 1 << stage,
+      block = 1 << (stage + 1);
     for (let y = 0; y < size; y++) {
-      const k = (y * (size >> (stage + 1))) % size, ang = 2 * Math.PI * k / size;
-      const top = (y % block) < span;
+      const k = (y * (size >> (stage + 1))) % size,
+        ang = (2 * Math.PI * k) / size;
+      const top = y % block < span;
       let a, b;
-      if (stage === 0) { a = top ? bitReverse(y, stages) : bitReverse(y - span, stages); b = top ? bitReverse(y + span, stages) : bitReverse(y, stages); }
-      else { a = top ? y : y - span; b = top ? y + span : y; }
-      const i = (y * stages + stage) * 4; px[i] = Math.cos(ang); px[i + 1] = Math.sin(ang); px[i + 2] = a; px[i + 3] = b;
+      if (stage === 0) {
+        a = top ? bitReverse(y, stages) : bitReverse(y - span, stages);
+        b = top ? bitReverse(y + span, stages) : bitReverse(y, stages);
+      } else {
+        a = top ? y : y - span;
+        b = top ? y + span : y;
+      }
+      const i = (y * stages + stage) * 4;
+      px[i] = Math.cos(ang);
+      px[i + 1] = Math.sin(ang);
+      px[i + 2] = a;
+      px[i + 3] = b;
     }
   }
   return createDataTexture(px, stages, size, {type: THREE.FloatType, filter: 'nearest'});
 }
 function arrayTarget(size, layers, type, filter, wrap) {
   const rt = new THREE.WebGLArrayRenderTarget(size, size, layers);
-  rt.texture.type = type; rt.texture.format = THREE.RGBAFormat; rt.texture.minFilter = rt.texture.magFilter = filter;
-  rt.texture.wrapS = rt.texture.wrapT = wrap; rt.texture.generateMipmaps = false; rt.depthBuffer = false;
+  rt.texture.type = type;
+  rt.texture.format = THREE.RGBAFormat;
+  rt.texture.minFilter = rt.texture.magFilter = filter;
+  rt.texture.wrapS = rt.texture.wrapT = wrap;
+  rt.texture.generateMipmaps = false;
+  rt.depthBuffer = false;
   return rt;
 }
-const passMaterial = (glsl, uniforms) => new THREE.ShaderMaterial({ vertexShader: QV, fragmentShader: COMMON_GLSL + glsl, uniforms, depthTest: false, depthWrite: false });
+const passMaterial = (glsl, uniforms) =>
+  new THREE.ShaderMaterial({
+    vertexShader: QV,
+    fragmentShader: COMMON_GLSL + glsl,
+    uniforms,
+    depthTest: false,
+    depthWrite: false,
+  });
 
 export class OceanFft {
-  constructor(renderer, { resolution = 128, cascades = 4 } = {}) {
-    if (!SUPPORTED_RESOLUTIONS.includes(resolution)) throw new RangeError(`OceanFft: resolution ${resolution} not in ${SUPPORTED_RESOLUTIONS}`);
-    if (!Number.isInteger(cascades) || cascades < 1 || cascades > MAX_CASCADES) throw new RangeError(`OceanFft: cascades ${cascades} must be 1..${MAX_CASCADES}`);
+  constructor(renderer, {resolution = 128, cascades = 4} = {}) {
+    if (!SUPPORTED_RESOLUTIONS.includes(resolution))
+      throw new RangeError(`OceanFft: resolution ${resolution} not in ${SUPPORTED_RESOLUTIONS}`);
+    if (!Number.isInteger(cascades) || cascades < 1 || cascades > MAX_CASCADES)
+      throw new RangeError(`OceanFft: cascades ${cascades} must be 1..${MAX_CASCADES}`);
     if (!renderer.capabilities.isWebGL2) throw new Error('OceanFft needs WebGL2 (array render targets)');
     this.renderer = renderer;
     this.pass = createPass(renderer);
     this.scope = createTargetScope(renderer);
     this.shore = createOceanShore(renderer);
     this.surf = createSurfUniforms();
-    this.uniforms = { ...this.shore.uniforms, ...this.surf, ...createFftUniforms() };
-    this.resolution = resolution; this.cascades = cascades; this.stages = Math.round(Math.log2(resolution));
+    this.uniforms = {...this.shore.uniforms, ...this.surf, ...createFftUniforms()};
+    this.resolution = resolution;
+    this.cascades = cascades;
+    this.stages = Math.round(Math.log2(resolution));
     this.h0 = arrayTarget(resolution, cascades, THREE.FloatType, THREE.NearestFilter, THREE.RepeatWrapping);
-    this.spec = pingPong(() => arrayTarget(resolution, cascades, THREE.HalfFloatType, THREE.NearestFilter, THREE.RepeatWrapping));
+    this.spec = pingPong(() =>
+      arrayTarget(resolution, cascades, THREE.HalfFloatType, THREE.NearestFilter, THREE.RepeatWrapping),
+    );
     this.disp = arrayTarget(resolution, cascades, THREE.HalfFloatType, THREE.LinearFilter, THREE.RepeatWrapping);
-    this.normal = pingPong(() => arrayTarget(resolution, cascades, THREE.HalfFloatType, THREE.LinearFilter, THREE.RepeatWrapping));
+    this.normal = pingPong(() =>
+      arrayTarget(resolution, cascades, THREE.HalfFloatType, THREE.LinearFilter, THREE.RepeatWrapping),
+    );
     this.butterfly = buildButterfly(resolution, this.stages);
-    const shared = { uResolution: { value: resolution }, uSlice: { value: 0 }, uDomainSizes: { value: new THREE.Vector4() } };
+    const shared = {uResolution: {value: resolution}, uSlice: {value: 0}, uDomainSizes: {value: new THREE.Vector4()}};
     this.shared = shared;
-    this.initMat = passMaterial(SPECTRUM_INIT_GLSL, { ...shared, uBandMin: { value: new THREE.Vector4() }, uBandMax: { value: new THREE.Vector4() }, uShortestWavelength: { value: 0 },
-      uWindDir: { value: new THREE.Vector2(1, 0) }, uSwellDir: { value: new THREE.Vector2(1, 0) }, uSeed: { value: SPECTRUM_SEED }, uCascades: { value: cascades },
-      uWindTurbulence: { value: 0 }, uPeakAngularFreq: { value: 1 }, uPeakSharpness: { value: 1 }, uSeaDepth: { value: 0 }, uSpectrumGain: { value: 0 },
-      uSwellGain: { value: 0 }, uSwellWavelength: { value: 1 }, uSwellHeight: { value: 0 } });
-    this.updateMat = passMaterial(SPECTRUM_UPDATE_GLSL, { ...shared, tH0: { value: this.h0.texture }, uTime: { value: 0 }, uChoppiness: { value: 1 } });
-    this.butterflyMat = passMaterial(BUTTERFLY_GLSL, { ...shared, tSpec: { value: null }, tButterfly: { value: this.butterfly }, uStage: { value: 0 },
-      uHorizontal: { value: 1 }, uResolve: { value: 0 } });
-    this.normalMat = passMaterial(NORMAL_GLSL, { ...shared, tDisp: { value: this.disp.texture }, tFoamPrev: { value: null }, uTileMask: { value: resolution - 1 },
-      uCascades: { value: cascades }, uWindDir: { value: new THREE.Vector2(1, 0) }, uWindSpeed: { value: 0 }, uFoamDeltaTime: { value: 0 }, uFoamHistoryValid: { value: 0 },
-      uFoamMinWind: { value: 0 }, uFoamAnisotropy: { value: 0 }, uFoamCrestGate: { value: 0 }, uFoamFaceBias: { value: 0 }, uFoamCascadeMix: { value: 0 },
-      uFoamCoverage: { value: 0 }, uFoamStrength: { value: 0 }, uFoamFadeRate: { value: 0 }, uFoamMax: { value: 1 }, uFoamSlowFadeFraction: { value: 0 }, uFoamDriftFraction: { value: 0 } });
-    this.sea = { ...SEA_STATE_DEFAULTS }; this.foam = { ...FOAM_DEFAULTS };
-    this.layout = null; this.shapeKey = ''; this.unitVariances = null; this.h0Dirty = true; this.foamHistoryValid = false;
-    this.setSeaState(this.sea); this.setFoam(this.foam);
+    this.initMat = passMaterial(SPECTRUM_INIT_GLSL, {
+      ...shared,
+      uBandMin: {value: new THREE.Vector4()},
+      uBandMax: {value: new THREE.Vector4()},
+      uShortestWavelength: {value: 0},
+      uWindDir: {value: new THREE.Vector2(1, 0)},
+      uSwellDir: {value: new THREE.Vector2(1, 0)},
+      uSeed: {value: SPECTRUM_SEED},
+      uCascades: {value: cascades},
+      uWindTurbulence: {value: 0},
+      uPeakAngularFreq: {value: 1},
+      uPeakSharpness: {value: 1},
+      uSeaDepth: {value: 0},
+      uSpectrumGain: {value: 0},
+      uSwellGain: {value: 0},
+      uSwellWavelength: {value: 1},
+      uSwellHeight: {value: 0},
+    });
+    this.updateMat = passMaterial(SPECTRUM_UPDATE_GLSL, {
+      ...shared,
+      tH0: {value: this.h0.texture},
+      uTime: {value: 0},
+      uChoppiness: {value: 1},
+    });
+    this.butterflyMat = passMaterial(BUTTERFLY_GLSL, {
+      ...shared,
+      tSpec: {value: null},
+      tButterfly: {value: this.butterfly},
+      uStage: {value: 0},
+      uHorizontal: {value: 1},
+      uResolve: {value: 0},
+    });
+    this.normalMat = passMaterial(NORMAL_GLSL, {
+      ...shared,
+      tDisp: {value: this.disp.texture},
+      tFoamPrev: {value: null},
+      uTileMask: {value: resolution - 1},
+      uCascades: {value: cascades},
+      uWindDir: {value: new THREE.Vector2(1, 0)},
+      uWindSpeed: {value: 0},
+      uFoamDeltaTime: {value: 0},
+      uFoamHistoryValid: {value: 0},
+      uFoamMinWind: {value: 0},
+      uFoamAnisotropy: {value: 0},
+      uFoamCrestGate: {value: 0},
+      uFoamFaceBias: {value: 0},
+      uFoamCascadeMix: {value: 0},
+      uFoamCoverage: {value: 0},
+      uFoamStrength: {value: 0},
+      uFoamFadeRate: {value: 0},
+      uFoamMax: {value: 1},
+      uFoamSlowFadeFraction: {value: 0},
+      uFoamDriftFraction: {value: 0},
+    });
+    this.sea = {...SEA_STATE_DEFAULTS};
+    this.foam = {...FOAM_DEFAULTS};
+    this.layout = null;
+    this.shapeKey = '';
+    this.unitVariances = null;
+    this.h0Dirty = true;
+    this.foamHistoryValid = false;
+    this.setSeaState(this.sea);
+    this.setFoam(this.foam);
   }
   // Any change rebuilds the layout + gains and marks H0 for re-init (one pass per cascade). Shape-only work is cached by key.
   setSeaState(settings) {
-    const s = { ...SEA_STATE_DEFAULTS, ...settings };
-    const bad = (k, ok) => { if (!ok) throw new RangeError(`OceanFft.setSeaState: invalid ${k} = ${s[k]}`); };
-    bad('significantWaveHeight', s.significantWaveHeight >= 0); bad('peakWavelength', s.peakWavelength > 0); bad('peakSharpness', s.peakSharpness >= 1);
-    bad('swellWavelength', s.swellWavelength > 0); bad('cascadeReach', s.cascadeReach > 0); bad('windSpeed', s.windSpeed >= 0); bad('referenceWindSpeed', s.referenceWindSpeed > 0);
-    bad('shortestWavelength', s.shortestWavelength >= 0); bad('fineNormal', s.fineNormal >= 0); bad('waveSpeed', s.waveSpeed >= 0);
+    const s = {...SEA_STATE_DEFAULTS, ...settings};
+    const bad = (k, ok) => {
+      if (!ok) throw new RangeError(`OceanFft.setSeaState: invalid ${k} = ${s[k]}`);
+    };
+    bad('significantWaveHeight', s.significantWaveHeight >= 0);
+    bad('peakWavelength', s.peakWavelength > 0);
+    bad('peakSharpness', s.peakSharpness >= 1);
+    bad('swellWavelength', s.swellWavelength > 0);
+    bad('cascadeReach', s.cascadeReach > 0);
+    bad('windSpeed', s.windSpeed >= 0);
+    bad('referenceWindSpeed', s.referenceWindSpeed > 0);
+    bad('shortestWavelength', s.shortestWavelength >= 0);
+    bad('fineNormal', s.fineNormal >= 0);
+    bad('waveSpeed', s.waveSpeed >= 0);
     this.sea = s;
     const significantHeight = s.significantWaveHeight * windSeaGrowth(s, WIND_SEA_HEIGHT_EXPONENT);
     const peakWavelength = Math.max(s.peakWavelength * windSeaGrowth(s, WIND_SEA_LENGTH_EXPONENT), 0.1);
-    this.effective = { significantHeight, peakWavelength };
+    this.effective = {significantHeight, peakWavelength};
     this.layout = buildLayout(this.resolution, this.cascades, peakWavelength, s.cascadeReach);
     const peakAngularFreq = peakAngularFrequency(peakWavelength);
     const shapeKey = [peakWavelength, s.peakSharpness, s.seaDepth, s.swellWavelength, s.shortestWavelength].join('|');
-    if (shapeKey !== this.shapeKey) { this.unitVariances = computeUnitVariances(this.layout, peakAngularFreq, s.peakSharpness, s.seaDepth, s.swellWavelength, s.shortestWavelength); this.shapeKey = shapeKey; }
-    const u = this.initMat.uniforms, L = this.layout;
+    if (shapeKey !== this.shapeKey) {
+      this.unitVariances = computeUnitVariances(
+        this.layout,
+        peakAngularFreq,
+        s.peakSharpness,
+        s.seaDepth,
+        s.swellWavelength,
+        s.shortestWavelength,
+      );
+      this.shapeKey = shapeKey;
+    }
+    const u = this.initMat.uniforms,
+      L = this.layout;
     this.shared.uDomainSizes.value.fromArray(L.domainSizes);
-    u.uBandMin.value.fromArray(L.bandMin); u.uBandMax.value.fromArray(L.bandMax);
+    u.uBandMin.value.fromArray(L.bandMin);
+    u.uBandMax.value.fromArray(L.bandMax);
     u.uWindDir.value.set(Math.cos(s.windHeadingDeg * DEG), Math.sin(s.windHeadingDeg * DEG));
     u.uSwellDir.value.set(Math.cos(s.swellHeadingDeg * DEG), Math.sin(s.swellHeadingDeg * DEG));
-    u.uWindTurbulence.value = s.windTurbulence; u.uPeakAngularFreq.value = peakAngularFreq; u.uPeakSharpness.value = s.peakSharpness; u.uSeaDepth.value = s.seaDepth;
+    u.uWindTurbulence.value = s.windTurbulence;
+    u.uPeakAngularFreq.value = peakAngularFreq;
+    u.uPeakSharpness.value = s.peakSharpness;
+    u.uSeaDepth.value = s.seaDepth;
     u.uSpectrumGain.value = gainForHeight(significantHeight, this.unitVariances.windSeaVariance);
     u.uSwellGain.value = gainForHeight(s.swellHeight, this.unitVariances.swellVariance);
-    u.uSwellWavelength.value = s.swellWavelength; u.uSwellHeight.value = s.swellHeight; u.uShortestWavelength.value = s.shortestWavelength;
+    u.uSwellWavelength.value = s.swellWavelength;
+    u.uSwellHeight.value = s.swellHeight;
+    u.uShortestWavelength.value = s.shortestWavelength;
     this.updateMat.uniforms.uChoppiness.value = s.choppiness;
-    const n = this.normalMat.uniforms; n.uWindDir.value.copy(u.uWindDir.value); n.uWindSpeed.value = s.windSpeed;
+    const n = this.normalMat.uniforms;
+    n.uWindDir.value.copy(u.uWindDir.value);
+    n.uWindSpeed.value = s.windSpeed;
     const fft = this.uniforms;
-    fft.uOceanDomainSizes.value.fromArray(L.domainSizes); fft.uOceanVisibleAreas.value.fromArray(L.visibleAreas);
-    fft.uOceanCascadeCount.value = this.cascades; fft.uOceanAperiodic.value.set(s.aperiodic ? 1 : 0, Math.max(0.5, s.aperiodicTileScale)); fft.uOceanFineNormal.value = s.fineNormal;
+    fft.uOceanDomainSizes.value.fromArray(L.domainSizes);
+    fft.uOceanVisibleAreas.value.fromArray(L.visibleAreas);
+    fft.uOceanCascadeCount.value = this.cascades;
+    fft.uOceanAperiodic.value.set(s.aperiodic ? 1 : 0, Math.max(0.5, s.aperiodicTileScale));
+    fft.uOceanFineNormal.value = s.fineNormal;
     this.h0Dirty = true;
   }
   setFoam(settings) {
-    const f = { ...FOAM_DEFAULTS, ...settings }; this.foam = f; const n = this.normalMat.uniforms;
-    n.uFoamMinWind.value = f.windThreshold; n.uFoamCoverage.value = f.coverage; n.uFoamStrength.value = f.strength; n.uFoamFadeRate.value = f.fadeRate;
-    n.uFoamMax.value = f.maxBuildup; n.uFoamSlowFadeFraction.value = 1 - f.deposit; n.uFoamDriftFraction.value = f.drift;
-    n.uFoamAnisotropy.value = f.crestAnisotropy; n.uFoamCrestGate.value = f.crestGate; n.uFoamFaceBias.value = f.faceBias; n.uFoamCascadeMix.value = f.cascadeMix;
+    const f = {...FOAM_DEFAULTS, ...settings};
+    this.foam = f;
+    const n = this.normalMat.uniforms;
+    n.uFoamMinWind.value = f.windThreshold;
+    n.uFoamCoverage.value = f.coverage;
+    n.uFoamStrength.value = f.strength;
+    n.uFoamFadeRate.value = f.fadeRate;
+    n.uFoamMax.value = f.maxBuildup;
+    n.uFoamSlowFadeFraction.value = 1 - f.deposit;
+    n.uFoamDriftFraction.value = f.drift;
+    n.uFoamAnisotropy.value = f.crestAnisotropy;
+    n.uFoamCrestGate.value = f.crestGate;
+    n.uFoamFaceBias.value = f.faceBias;
+    n.uFoamCascadeMix.value = f.cascadeMix;
   }
   // Weather varies wind-sea energy while retaining the authored cascade layout,
   // wavelength, phases and swell. No wavelength reallocation during a transition.
@@ -388,12 +564,16 @@ export class OceanFft {
     const height = this.sea.significantWaveHeight * windSeaGrowth(this.sea, WIND_SEA_HEIGHT_EXPONENT) * heightScale;
     if (Math.abs(height - this.effective.significantHeight) > 0.0001) {
       this.initMat.uniforms.uSpectrumGain.value = gainForHeight(height, this.unitVariances.windSeaVariance);
-      this.effective.significantHeight = height; this.h0Dirty = true;
+      this.effective.significantHeight = height;
+      this.h0Dirty = true;
     }
     this.normalMat.uniforms.uWindSpeed.value = windSpeed;
-    const angle = heading * DEG, direction = this.initMat.uniforms.uWindDir.value;
-    if(Math.abs(direction.x-Math.cos(angle))+Math.abs(direction.y-Math.sin(angle)) > 0.0001) {
-      direction.set(Math.cos(angle),Math.sin(angle)); this.normalMat.uniforms.uWindDir.value.copy(direction); this.h0Dirty = true;
+    const angle = heading * DEG,
+      direction = this.initMat.uniforms.uWindDir.value;
+    if (Math.abs(direction.x - Math.cos(angle)) + Math.abs(direction.y - Math.sin(angle)) > 0.0001) {
+      direction.set(Math.cos(angle), Math.sin(angle));
+      this.normalMat.uniforms.uWindDir.value.copy(direction);
+      this.h0Dirty = true;
     }
   }
   // Per frame: (init) -> update -> 2*log2(N) butterfly stages -> normal/foam, for every cascade layer.
@@ -406,32 +586,50 @@ export class OceanFft {
     for (let c = 0; c < this.cascades; c++) {
       this.shared.uSlice.value = c;
       if (this.h0Dirty) pass(this.initMat, this.h0, c);
-      this.updateMat.uniforms.uTime.value = waveTime * this.sea.waveSpeed; pass(this.updateMat, this.spec.write, c); this.spec.swap();
+      this.updateMat.uniforms.uTime.value = waveTime * this.sea.waveSpeed;
+      pass(this.updateMat, this.spec.write, c);
+      this.spec.swap();
       const b = this.butterflyMat.uniforms;
       for (let dir = 0; dir < 2; dir++) {
         b.uHorizontal.value = dir === 0 ? 1 : 0;
         for (let stage = 0; stage < this.stages; stage++) {
           const last = dir === 1 && stage === this.stages - 1;
-          b.uStage.value = stage; b.uResolve.value = last ? 1 : 0; b.tSpec.value = this.spec.read.texture;
+          b.uStage.value = stage;
+          b.uResolve.value = last ? 1 : 0;
+          b.tSpec.value = this.spec.read.texture;
           pass(this.butterflyMat, last ? this.disp : this.spec.write, c);
           if (!last) this.spec.swap();
         }
       }
       const n = this.normalMat.uniforms;
-      n.uFoamDeltaTime.value = THREE.MathUtils.clamp(dt, 0, MAX_FOAM_DELTA_TIME); n.uFoamHistoryValid.value = this.foamHistoryValid ? 1 : 0;
-      n.tFoamPrev.value = this.normal.read.texture; pass(this.normalMat, this.normal.write, c);
+      n.uFoamDeltaTime.value = THREE.MathUtils.clamp(dt, 0, MAX_FOAM_DELTA_TIME);
+      n.uFoamHistoryValid.value = this.foamHistoryValid ? 1 : 0;
+      n.tFoamPrev.value = this.normal.read.texture;
+      pass(this.normalMat, this.normal.write, c);
     }
-    this.normal.swap(); this.h0Dirty = false; this.foamHistoryValid = true;
+    this.normal.swap();
+    this.h0Dirty = false;
+    this.foamHistoryValid = true;
     this.uniforms.tOceanDisp.value = this.disp.texture;
     this.uniforms.tOceanNormal.value = this.normal.read.texture;
     this.uniforms.uOceanFftActive.value = 1;
   }
-  get passesPerFrame() { return this.cascades * (2 + 2 * this.stages); }
+  get passesPerFrame() {
+    return this.cascades * (2 + 2 * this.stages);
+  }
   dispose() {
-    this.uniforms.uOceanFftActive.value = 0; this.uniforms.tOceanDisp.value = this.uniforms.tOceanNormal.value = null;
+    this.uniforms.uOceanFftActive.value = 0;
+    this.uniforms.tOceanDisp.value = this.uniforms.tOceanNormal.value = null;
     this.pass.dispose();
     this.shore.dispose();
-    this.h0.dispose(); this.spec.dispose(); this.disp.dispose(); this.normal.dispose(); this.butterfly.dispose();
-    this.initMat.dispose(); this.updateMat.dispose(); this.butterflyMat.dispose(); this.normalMat.dispose();
+    this.h0.dispose();
+    this.spec.dispose();
+    this.disp.dispose();
+    this.normal.dispose();
+    this.butterfly.dispose();
+    this.initMat.dispose();
+    this.updateMat.dispose();
+    this.butterflyMat.dispose();
+    this.normalMat.dispose();
   }
 }

@@ -1,5 +1,5 @@
 // WebAquarium ocean/surface.js foam shading, shared by whitecaps, wakes and swash.
-export const FOAM_GLSL = /* glsl */`
+export const FOAM_GLSL = /* glsl */ `
 #define OCEAN_WHITECAP_OCTAVE2_SCALE 2.37
 #define OCEAN_WHITECAP_OCTAVE2_ROT_COS 0.8660254
 #define OCEAN_WHITECAP_OCTAVE2_ROT_SIN 0.5

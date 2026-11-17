@@ -3,5 +3,5 @@ import {createPrecipitation as createSharedPrecipitation} from '../../particles/
 export {validatePrecipitation} from '../../particles/water/precipitation.js';
 
 export function createPrecipitation(group, options = {}) {
- return createSharedPrecipitation({THREE, group, ...options});
+  return createSharedPrecipitation({THREE, group, ...options});
 }

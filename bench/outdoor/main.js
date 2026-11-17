@@ -7,7 +7,7 @@ import {createTerrainField} from '../../src/terrain/index.js';
 import {createCameraCollision, createCameraDirector, createThirdPersonRig} from '../../src/camera/index.js';
 import {createCharacterController} from '../../src/character/index.js';
 import {createJoltDriver} from '../../src/destruction/jolt-driver.js';
-import {createTerrainCollider} from '../terrain/heightfield.js';
+import {createTerrainCollider} from '../../src/terrain/physics.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
 import {loadCharacter} from '../character/character.js';
 import {createOutdoorProps} from './props.js';

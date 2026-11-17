@@ -13,18 +13,28 @@ import {LIGHTING_DEFAULTS, DEFAULT_SUN_DIRECTION} from './lighting.js';
 export function createEnvironment() {
   return {
     wind: {x: 0, z: 0, speed: 0, gust: 0},
-    sun: {direction: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize(), color: new THREE.Color(LIGHTING_DEFAULTS.sunColor).multiplyScalar(LIGHTING_DEFAULTS.sunIntensity)},
-    ambient: {sky: new THREE.Color(LIGHTING_DEFAULTS.hemiSky).multiplyScalar(LIGHTING_DEFAULTS.ambientIntensity),
-      ground: new THREE.Color(LIGHTING_DEFAULTS.hemiGround).multiplyScalar(LIGHTING_DEFAULTS.ambientIntensity)},
+    sun: {
+      direction: new THREE.Vector3(...DEFAULT_SUN_DIRECTION).normalize(),
+      color: new THREE.Color(LIGHTING_DEFAULTS.sunColor).multiplyScalar(LIGHTING_DEFAULTS.sunIntensity),
+    },
+    ambient: {
+      sky: new THREE.Color(LIGHTING_DEFAULTS.hemiSky).multiplyScalar(LIGHTING_DEFAULTS.ambientIntensity),
+      ground: new THREE.Color(LIGHTING_DEFAULTS.hemiGround).multiplyScalar(LIGHTING_DEFAULTS.ambientIntensity),
+    },
     light: new THREE.Color(1, 1, 1),
-    daylight: 1, rain: 0, snow: 0,
+    daylight: 1,
+    rain: 0,
+    snow: 0,
   };
 }
 
 // Wind from a speed (m/s) and the heading it blows toward (degrees, 0 = +X, 90 = +Z: the weather module's convention).
 export function setEnvironmentWind(environment, speed, headingDegrees) {
-  if (!Number.isFinite(speed) || speed < 0 || !Number.isFinite(headingDegrees)) throw Error('Wind needs a non-negative speed and a finite heading');
+  if (!Number.isFinite(speed) || speed < 0 || !Number.isFinite(headingDegrees))
+    throw Error('Wind needs a non-negative speed and a finite heading');
   const heading = THREE.MathUtils.degToRad(headingDegrees);
-  environment.wind.x = Math.cos(heading) * speed; environment.wind.z = Math.sin(heading) * speed; environment.wind.speed = speed;
+  environment.wind.x = Math.cos(heading) * speed;
+  environment.wind.z = Math.sin(heading) * speed;
+  environment.wind.speed = speed;
   return environment;
 }

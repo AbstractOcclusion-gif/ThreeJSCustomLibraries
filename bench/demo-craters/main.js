@@ -19,7 +19,7 @@ import {createBenchWeather, mountWeatherControls} from '../kit/weather.js';
 import {createShadowReceivers} from '../kit/shadow-receivers.js';
 import {aimRay} from '../kit/input.js';
 import {loadTerrainPalette} from '../terrain/textures.js';
-import {createTerrainCollider} from '../terrain/heightfield.js';
+import {createTerrainCollider} from '../../src/terrain/physics.js';
 import {craterControls, craterLook, craterTool} from '../terrain/controls.js';
 import {createCraterEffects, CRATER_DUST as DUST, CRATER_SHARDS as SHARDS, STRATA_TINT} from '../kit/crater-effects.js';
 import '../bench.css';

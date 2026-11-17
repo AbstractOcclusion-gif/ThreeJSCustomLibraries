@@ -3,7 +3,7 @@
 // variance preservation: divide the barycentric blend by sqrt(sum(weights^2)).
 // Divergence from Unity: the authored direction map (per-tile rotation) is not ported yet -- tiles are hashed-offset, never
 // rotated (the same result Unity gives with no map / strength 0).
-export const APERIODIC_GLSL = /* glsl */`
+export const APERIODIC_GLSL = /* glsl */ `
 #define OCEAN_APERIODIC_GRID_SCALE 3.46410161514   // 2 * sqrt(3)
 #define OCEAN_APERIODIC_SKEW_X -0.57735026919      // -1 / sqrt(3)
 #define OCEAN_APERIODIC_SKEW_Y 1.15470053838       //  2 / sqrt(3)

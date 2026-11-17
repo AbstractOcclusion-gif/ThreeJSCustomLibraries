@@ -16,6 +16,8 @@ export function createFixedStep({step = FIXED_STEP_DEFAULTS.step, maxSteps = FIX
       if (owed >= step) owed %= step;
       return steps;
     },
+    // Share (0..1) of a step already owed: where a frame sits between the last two steps, to draw moving things between them.
+    get alpha() { return owed / step; },
     reset() { owed = 0; },
   };
 }

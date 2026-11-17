@@ -24,3 +24,34 @@ test('cable builds links between fixed anchors, steps, cuts into sections and di
  assert.equal(world.bodies.length, 0);
  assert.equal(scene.children.length, 0);
 });
+
+test('a cable is reeled in and paid out: its links share the new length and its attachments hold', () => {
+ const world = new C.World({gravity: new C.Vec3(0, -9.82, 0)});
+ world.solver.iterations = 32;
+ // A rope hanging from a fixed point to a hook that is raised, as a winch does.
+ const cable = createCable({world, endpoints: [{kind: 'fixed', position: [0, 8, 0]}, {kind: 'driven', position: [0, 2, 0]}], length: 6.1, breakStrength: 1e6});
+ const events = []; cable.subscribe(event => events.push(event.type));
+ const settle = steps => { for (let i = 0; i < steps; i++) { cable.beforeStep(1 / 120); world.step(1 / 120); cable.afterStep(1 / 120); } };
+ settle(60);
+ for (let i = 1; i <= 240; i++) {
+  const hook = 2 + 3 * i / 240;   // up 3 m in two seconds
+  cable.moveEndpoint(1, [0, hook, 0]);
+  cable.setLength((8 - hook) * 1.01);
+  settle(1);
+ }
+ settle(120);
+ assert.ok(Math.abs(cable.length - 3.03) < 1e-9, 'the cable is as long as asked');
+ assert.ok(Math.abs(cable.links.reduce((sum, link) => sum + link.length, 0) - cable.length) < 1e-9, 'its links add up to that length');
+ assert.ok(events.includes('cable:reeled'));
+ const top = cable.links[0].body, tip = top.pointToWorldFrame(new C.Vec3(-cable.links[0].length / 2, 0, 0));
+ assert.ok(tip.distanceTo(new C.Vec3(0, 8, 0)) < .05, 'it still hangs from its fixing');
+ const last = cable.links.at(-1), end = last.body.pointToWorldFrame(new C.Vec3(last.length / 2, 0, 0));
+ assert.ok(end.distanceTo(new C.Vec3(0, 5, 0)) < .05, 'and still holds the hook, 3 m higher');
+ assert.ok(cable.links.every(link => link.body.position.y > 4.9 && link.body.position.y < 8.1 && Math.hypot(link.body.position.x, link.body.position.z) < .4), 'the rope stayed between the two, near its line');
+ cable.setLength(4);
+ assert.equal(cable.length, 4, 'it can be paid out again');
+ assert.throws(() => cable.setLength(.1), /at least/);
+ cable.breakAt(3);
+ assert.throws(() => cable.setLength(3.5), /cut/);
+ cable.dispose();
+});

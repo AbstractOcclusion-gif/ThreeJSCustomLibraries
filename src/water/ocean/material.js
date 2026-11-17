@@ -9,10 +9,16 @@ import {WATER_IOR} from '../water-optics.js';
 
 export function createOceanMaterial({uniforms, sky, fft, wake, useClipmap, sceneOptics}) {
   return new THREE.ShaderMaterial({
-    uniforms, side: sceneOptics ? THREE.DoubleSide : THREE.FrontSide,
-    defines: {...sky.defines, ...(fft ? {OCEAN_FFT: 1} : {}), ...(wake ? {OCEAN_WAKE: 1} : {}), ...(useClipmap ? {OCEAN_CLIPMAP: 1} : {}),
-      ...(sceneOptics ? {OCEAN_SCENE_OPTICS: 1} : {})},
- vertexShader: `
+    uniforms,
+    side: sceneOptics ? THREE.DoubleSide : THREE.FrontSide,
+    defines: {
+      ...sky.defines,
+      ...(fft ? {OCEAN_FFT: 1} : {}),
+      ...(wake ? {OCEAN_WAKE: 1} : {}),
+      ...(useClipmap ? {OCEAN_CLIPMAP: 1} : {}),
+      ...(sceneOptics ? {OCEAN_SCENE_OPTICS: 1} : {}),
+    },
+    vertexShader: `
  uniform float clock, heading, swell, swellLength, chop, choppiness;
  #ifdef OCEAN_CLIPMAP
  uniform float uMorphStart, uMorphScale;
@@ -93,7 +99,7 @@ export function createOceanMaterial({uniforms, sky, fft, wake, useClipmap, scene
   vWorld = rest + vec3(choppiness * field.shift.x, field.height, choppiness * field.shift.y);
   vClip = gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.0);
  }`,
- fragmentShader: `
+    fragmentShader: `
  ${sky.glsl}
  #ifdef OCEAN_FFT
  uniform float uSurfaceDetailLod;
@@ -313,5 +319,5 @@ export function createOceanMaterial({uniforms, sky, fft, wake, useClipmap, scene
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
  }`,
-});
+  });
 }

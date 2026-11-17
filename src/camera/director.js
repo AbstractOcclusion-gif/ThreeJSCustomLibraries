@@ -1,53 +1,235 @@
-import {PerspectiveCamera,Vector3,Quaternion,MathUtils} from 'three';
-const MIN_TIME_SCALE=.02;   // slowest slow motion: the simulation never fully stops
-const BULLET_DEFAULTS=Object.freeze({duration:2,scale:.2,shot:'orbit',fov:45});   // s, time scale, rig, degrees
-const TRANSITION=Object.freeze({select:.4,intoBullet:.3,outOfBullet:.4});   // s of camera blend
+import {PerspectiveCamera, Vector3, Quaternion, MathUtils} from 'three';
+const MIN_TIME_SCALE = 0.02; // slowest slow motion: the simulation never fully stops
+export const BULLET_DEFAULTS = Object.freeze({duration: 2, scale: 0.2, shot: 'orbit', fov: 45}); // s, time scale, rig, degrees
+const TRANSITION = Object.freeze({select: 0.4, intoBullet: 0.3, outOfBullet: 0.4}); // s of camera blend
 // Shake: default strength (m) and duration (s); never shorter than minDuration; x / y sway at two unrelated rates (rad/s).
-const SHAKE=Object.freeze({strength:.15,duration:.25,minDuration:.01,rates:[87,113]});
-const RIG_FOV=55;   // degrees, the orbit rig and the follow rig default
+const SHAKE = Object.freeze({strength: 0.15, duration: 0.25, minDuration: 0.01, rates: [87, 113]});
+const RIG_FOV = 55; // degrees, the orbit rig and the follow rig default
+// The options of each factory, for a host to read, show or spread (s, m, rad, degrees as noted by each factory).
+export const CAMERA_DIRECTOR_DEFAULTS = Object.freeze({timeTransition: 0.35}); // s of blend between time scales
+export const ORBIT_RIG_DEFAULTS = Object.freeze({radius: 12, height: 5, speed: 0.35}); // m, m, rad/s
+export const FOLLOW_RIG_DEFAULTS = Object.freeze({offset: Object.freeze([8, 5, -10]), lookAhead: Object.freeze([0, 0, 0]), smoothing: 5, fov: RIG_FOV});
 // Owns the output camera and shot timing. Never advances a host simulation.
-export function createCameraDirector(camera,{timeTransition=.35}={}){
- const rigs=new Map(),from={position:new Vector3(),quaternion:new Quaternion(),fov:camera.fov};
- let selected=null,transition=0,elapsed=0,manualScale=1,bulletLeft=0,bulletScale=BULLET_DEFAULTS.scale,bulletShot=null,bulletFov=BULLET_DEFAULTS.fov,shakeLeft=0,shakeStrength=0,shakeDuration=1,clock=0,collision=null,cinematic=false;
- const capture=()=>{from.position.copy(camera.position);from.quaternion.copy(camera.quaternion);from.fov=camera.fov;};
- let currentScale=1,scaleTarget=1,scaleFrom=1,scaleElapsed=0;
- return{
-  camera,register(id,rig){rigs.set(id,rig);if(selected===null)selected=id;return this;},
-  select(id,{duration=TRANSITION.select}={}){if(!rigs.has(id))throw Error('Unknown camera: '+id);capture();selected=id;transition=Math.max(0,duration);elapsed=0;},
-  setSlow(scale=1){manualScale=MathUtils.clamp(scale,MIN_TIME_SCALE,1);},
-  bullet({duration=BULLET_DEFAULTS.duration,scale=BULLET_DEFAULTS.scale,shot=BULLET_DEFAULTS.shot,fov=BULLET_DEFAULTS.fov}={}){if(bulletLeft<=0)capture();bulletLeft=Math.max(0,duration);bulletScale=MathUtils.clamp(scale,MIN_TIME_SCALE,1);bulletShot=rigs.has(shot)?shot:null;bulletFov=fov;elapsed=0;transition=TRANSITION.intoBullet;},
-  setCollision(resolver){collision=resolver;},setCinematic(value){cinematic=!!value;},get cinematic(){return cinematic;},
-  shake({strength=SHAKE.strength,duration=SHAKE.duration}={}){shakeLeft=shakeDuration=Math.max(SHAKE.minDuration,duration);shakeStrength=MathUtils.clamp(strength,0,1);},
-  tick(dt){dt=Math.max(0,dt);const was=bulletLeft>0;bulletLeft=Math.max(0,bulletLeft-dt);if(was&&!bulletLeft){capture();elapsed=0;transition=TRANSITION.outOfBullet;}const target=Math.min(manualScale,bulletLeft>0?bulletScale:1);
-   if(target!==scaleTarget){scaleFrom=currentScale;scaleTarget=target;scaleElapsed=0;}scaleElapsed+=dt;const t=MathUtils.smoothstep(timeTransition>0?scaleElapsed/timeTransition:1,0,1);currentScale=scaleFrom+(scaleTarget-scaleFrom)*t;return currentScale;},
-  update(dt,data){const id=bulletLeft>0&&bulletShot?bulletShot:selected,rig=rigs.get(id);if(!rig)return;
-   const pose=rig({dt,data,camera});if(!pose)return;elapsed+=Math.max(0,dt);const a=MathUtils.smoothstep(transition?elapsed/transition:1,0,1);
-   camera.position.lerpVectors(from.position,pose.position,a);camera.quaternion.slerpQuaternions(from.quaternion,pose.quaternion,a);camera.fov=from.fov+((bulletLeft>0?bulletFov:pose.fov??camera.fov)-from.fov)*a;
-   clock+=dt;if(shakeLeft>0){shakeLeft=Math.max(0,shakeLeft-dt);const strength=shakeStrength*shakeLeft/shakeDuration;camera.position.x+=Math.sin(clock*SHAKE.rates[0])*strength;camera.position.y+=Math.sin(clock*SHAKE.rates[1])*strength;}
-   if(collision&&data?.target)collision(data.target,camera.position,camera.position,dt);
-   camera.updateProjectionMatrix();camera.updateMatrixWorld();
-  },
-  reset(){bulletLeft=0;bulletShot=null;shakeLeft=0;transition=0;elapsed=0;currentScale=scaleTarget=scaleFrom=manualScale;scaleElapsed=0;capture();collision?.reset?.();for(const rig of rigs.values())rig.reset?.();},
-  get selected(){return selected;},get timeScale(){return currentScale;},get bulletActive(){return bulletLeft>0;},
- };
+export function createCameraDirector(camera, {timeTransition = CAMERA_DIRECTOR_DEFAULTS.timeTransition} = {}) {
+  const rigs = new Map(),
+    from = {position: new Vector3(), quaternion: new Quaternion(), fov: camera.fov};
+  let selected = null,
+    transition = 0,
+    elapsed = 0,
+    manualScale = 1,
+    bulletLeft = 0,
+    bulletScale = BULLET_DEFAULTS.scale,
+    bulletShot = null,
+    bulletFov = BULLET_DEFAULTS.fov,
+    shakeLeft = 0,
+    shakeStrength = 0,
+    shakeDuration = 1,
+    clock = 0,
+    collision = null,
+    cinematic = false;
+  const capture = () => {
+    from.position.copy(camera.position);
+    from.quaternion.copy(camera.quaternion);
+    from.fov = camera.fov;
+  };
+  let currentScale = 1,
+    scaleTarget = 1,
+    scaleFrom = 1,
+    scaleElapsed = 0;
+  return {
+    camera,
+    register(id, rig) {
+      rigs.set(id, rig);
+      if (selected === null) selected = id;
+      return this;
+    },
+    select(id, {duration = TRANSITION.select} = {}) {
+      if (!rigs.has(id)) throw Error('Unknown camera: ' + id);
+      capture();
+      selected = id;
+      transition = Math.max(0, duration);
+      elapsed = 0;
+    },
+    setSlow(scale = 1) {
+      manualScale = MathUtils.clamp(scale, MIN_TIME_SCALE, 1);
+    },
+    bullet({
+      duration = BULLET_DEFAULTS.duration,
+      scale = BULLET_DEFAULTS.scale,
+      shot = BULLET_DEFAULTS.shot,
+      fov = BULLET_DEFAULTS.fov,
+    } = {}) {
+      if (bulletLeft <= 0) capture();
+      bulletLeft = Math.max(0, duration);
+      bulletScale = MathUtils.clamp(scale, MIN_TIME_SCALE, 1);
+      bulletShot = rigs.has(shot) ? shot : null;
+      bulletFov = fov;
+      elapsed = 0;
+      transition = TRANSITION.intoBullet;
+    },
+    setCollision(resolver) {
+      collision = resolver;
+    },
+    setCinematic(value) {
+      cinematic = !!value;
+    },
+    get cinematic() {
+      return cinematic;
+    },
+    shake({strength = SHAKE.strength, duration = SHAKE.duration} = {}) {
+      shakeLeft = shakeDuration = Math.max(SHAKE.minDuration, duration);
+      shakeStrength = MathUtils.clamp(strength, 0, 1);
+    },
+    tick(dt) {
+      dt = Math.max(0, dt);
+      const was = bulletLeft > 0;
+      bulletLeft = Math.max(0, bulletLeft - dt);
+      if (was && !bulletLeft) {
+        capture();
+        elapsed = 0;
+        transition = TRANSITION.outOfBullet;
+      }
+      const target = Math.min(manualScale, bulletLeft > 0 ? bulletScale : 1);
+      if (target !== scaleTarget) {
+        scaleFrom = currentScale;
+        scaleTarget = target;
+        scaleElapsed = 0;
+      }
+      scaleElapsed += dt;
+      const t = MathUtils.smoothstep(timeTransition > 0 ? scaleElapsed / timeTransition : 1, 0, 1);
+      currentScale = scaleFrom + (scaleTarget - scaleFrom) * t;
+      return currentScale;
+    },
+    update(dt, data) {
+      const id = bulletLeft > 0 && bulletShot ? bulletShot : selected,
+        rig = rigs.get(id);
+      if (!rig) return;
+      const pose = rig({dt, data, camera});
+      if (!pose) return;
+      elapsed += Math.max(0, dt);
+      const a = MathUtils.smoothstep(transition ? elapsed / transition : 1, 0, 1);
+      camera.position.lerpVectors(from.position, pose.position, a);
+      camera.quaternion.slerpQuaternions(from.quaternion, pose.quaternion, a);
+      camera.fov = from.fov + ((bulletLeft > 0 ? bulletFov : (pose.fov ?? camera.fov)) - from.fov) * a;
+      clock += dt;
+      if (shakeLeft > 0) {
+        shakeLeft = Math.max(0, shakeLeft - dt);
+        const strength = (shakeStrength * shakeLeft) / shakeDuration;
+        camera.position.x += Math.sin(clock * SHAKE.rates[0]) * strength;
+        camera.position.y += Math.sin(clock * SHAKE.rates[1]) * strength;
+      }
+      if (collision && data?.target) collision(data.target, camera.position, camera.position, dt);
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld();
+    },
+    reset() {
+      bulletLeft = 0;
+      bulletShot = null;
+      shakeLeft = 0;
+      transition = 0;
+      elapsed = 0;
+      currentScale = scaleTarget = scaleFrom = manualScale;
+      scaleElapsed = 0;
+      capture();
+      collision?.reset?.();
+      for (const rig of rigs.values()) rig.reset?.();
+    },
+    get selected() {
+      return selected;
+    },
+    get timeScale() {
+      return currentScale;
+    },
+    get bulletActive() {
+      return bulletLeft > 0;
+    },
+  };
 }
-export function createOrbitRig({radius=12,height=5,speed=.35}={}){
- const pose=new PerspectiveCamera(),target=new Vector3();let angle=0;
- const rig=({dt,data})=>{angle+=dt*speed;target.copy(data.target);const d=data.distance??1;pose.position.set(target.x+Math.cos(angle)*radius*d,target.y+height*d,target.z+Math.sin(angle)*radius*d);pose.lookAt(target);pose.fov=RIG_FOV;return pose;};rig.reset=()=>angle=0;return rig;
+export function createOrbitRig({
+  radius = ORBIT_RIG_DEFAULTS.radius,
+  height = ORBIT_RIG_DEFAULTS.height,
+  speed = ORBIT_RIG_DEFAULTS.speed,
+} = {}) {
+  const pose = new PerspectiveCamera(),
+    target = new Vector3();
+  let angle = 0;
+  const rig = ({dt, data}) => {
+    angle += dt * speed;
+    target.copy(data.target);
+    const d = data.distance ?? 1;
+    pose.position.set(
+      target.x + Math.cos(angle) * radius * d,
+      target.y + height * d,
+      target.z + Math.sin(angle) * radius * d,
+    );
+    pose.lookAt(target);
+    pose.fov = RIG_FOV;
+    return pose;
+  };
+  rig.reset = () => (angle = 0);
+  return rig;
 }
-export function createFollowRig({offset=[8,5,-10],lookAhead=[0,0,0],smoothing=5,fov=RIG_FOV}={}){
- const pose=new PerspectiveCamera(),desired=new Vector3(),look=new Vector3();let initialized=false;
- const rig=({dt,data})=>{desired.fromArray(offset).multiplyScalar(data.distance??1).add(data.target);if(!initialized)pose.position.copy(desired);else pose.position.lerp(desired,1-Math.exp(-dt*smoothing));look.fromArray(lookAhead).add(data.target);pose.lookAt(look);pose.fov=fov;initialized=true;return pose;};rig.reset=()=>initialized=false;return rig;
+export function createFollowRig({
+  offset = FOLLOW_RIG_DEFAULTS.offset,
+  lookAhead = FOLLOW_RIG_DEFAULTS.lookAhead,
+  smoothing = FOLLOW_RIG_DEFAULTS.smoothing,
+  fov = FOLLOW_RIG_DEFAULTS.fov,
+} = {}) {
+  const pose = new PerspectiveCamera(),
+    desired = new Vector3(),
+    look = new Vector3();
+  let initialized = false;
+  const rig = ({dt, data}) => {
+    desired
+      .fromArray(offset)
+      .multiplyScalar(data.distance ?? 1)
+      .add(data.target);
+    if (!initialized) pose.position.copy(desired);
+    else pose.position.lerp(desired, 1 - Math.exp(-dt * smoothing));
+    look.fromArray(lookAhead).add(data.target);
+    pose.lookAt(look);
+    pose.fov = fov;
+    initialized = true;
+    return pose;
+  };
+  rig.reset = () => (initialized = false);
+  return rig;
 }
 // Third-person rig the player turns: the camera sits `distance` m behind the target along the look direction.
 // yaw is the heading looked toward (0 = +Z, positive toward +X), pitch the angle above the target; both in radians.
 // look(yaw, pitch) adds to them (mouse or stick deltas); `yaw` gives the heading for camera-relative movement.
-const THIRD_PERSON_PITCH=Object.freeze([-.35,1.3]);   // radians, default lowest and highest camera angle
-export function createThirdPersonRig({distance=6,yaw=0,pitch=.4,minPitch=THIRD_PERSON_PITCH[0],maxPitch=THIRD_PERSON_PITCH[1],fov=RIG_FOV}={}){
- const pose=new PerspectiveCamera();let heading=yaw,tilt=pitch;
- const rig=({data})=>{const arm=distance*(data.distance??1),flat=Math.cos(tilt)*arm;pose.position.set(data.target.x-Math.sin(heading)*flat,data.target.y+Math.sin(tilt)*arm,data.target.z-Math.cos(heading)*flat);pose.lookAt(data.target);pose.fov=fov;return pose;};
- rig.look=(deltaYaw,deltaPitch)=>{heading+=deltaYaw;tilt=MathUtils.clamp(tilt+deltaPitch,minPitch,maxPitch);};
- rig.reset=()=>{heading=yaw;tilt=pitch;};
- Object.defineProperty(rig,'yaw',{get:()=>heading});
- return rig;
+export const THIRD_PERSON_RIG_DEFAULTS = Object.freeze({distance: 6, yaw: 0, pitch: 0.4, minPitch: -0.35, maxPitch: 1.3, fov: RIG_FOV}); // m, rad, degrees
+export function createThirdPersonRig({
+  distance = THIRD_PERSON_RIG_DEFAULTS.distance,
+  yaw = THIRD_PERSON_RIG_DEFAULTS.yaw,
+  pitch = THIRD_PERSON_RIG_DEFAULTS.pitch,
+  minPitch = THIRD_PERSON_RIG_DEFAULTS.minPitch,
+  maxPitch = THIRD_PERSON_RIG_DEFAULTS.maxPitch,
+  fov = THIRD_PERSON_RIG_DEFAULTS.fov,
+} = {}) {
+  const pose = new PerspectiveCamera();
+  let heading = yaw,
+    tilt = pitch;
+  const rig = ({data}) => {
+    const arm = distance * (data.distance ?? 1),
+      flat = Math.cos(tilt) * arm;
+    pose.position.set(
+      data.target.x - Math.sin(heading) * flat,
+      data.target.y + Math.sin(tilt) * arm,
+      data.target.z - Math.cos(heading) * flat,
+    );
+    pose.lookAt(data.target);
+    pose.fov = fov;
+    return pose;
+  };
+  rig.look = (deltaYaw, deltaPitch) => {
+    heading += deltaYaw;
+    tilt = MathUtils.clamp(tilt + deltaPitch, minPitch, maxPitch);
+  };
+  rig.reset = () => {
+    heading = yaw;
+    tilt = pitch;
+  };
+  Object.defineProperty(rig, 'yaw', {get: () => heading});
+  return rig;
 }

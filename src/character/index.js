@@ -5,6 +5,8 @@
 // Hooks, so the character needs no other module: subscribe(listener) hears what it does to the ground
 // ('character:track', 'character:jump', 'character:land'), for a host that has ground to mark, grass to bend or water
 // to splash; waterLevelAt(x, z), when the host has water, makes it wade slower. Without them it just walks.
+// For a host that plays landings: `landed` is the speed it came down at on the step it lands, `airTime` how long it has
+// been off the ground, and commit(seconds, speed) takes the controls away for a recovery or a roll.
 import {assertFrameTime} from '../core/validate.js';
 
 export const CHARACTER_DEFAULTS = Object.freeze({
@@ -15,15 +17,23 @@ export const CHARACTER_DEFAULTS = Object.freeze({
   walkSpeed: 2.1,       // m/s
   runSpeed: 5,          // m/s
   acceleration: 18,     // m/s2 on the ground
+  braking: 18,          // m/s2 on the ground when no move is asked or the move goes against its motion: how hard it stops
   airControl: .3,       // share of the ground acceleration and turning left while airborne; 0 = no steering in the air
   jumpSpeed: 4.5,       // m/s at take-off
   jumpCut: .45,         // share of the rising speed kept when jump is released early
+  jumpLaunch: 0,        // m/s it may gain at take-off toward the move asked, so a standing jump travels even with airControl 0
+  landingLoss: 0,       // share of its speed over the ground lost on a landing at landingHard or faster; 0 = landings cost nothing
+  landingSoft: 3,       // m/s of fall under which a landing costs no speed
+  landingHard: 9,       // m/s of fall where it costs the whole landingLoss
   coyoteTime: .12,      // s after walking off a ledge during which a jump still starts
   jumpBuffer: .12,      // s a jump press is remembered before landing
   stepHeight: .35,      // m, tallest stair climbed without jumping
   stickDown: .4,        // m, how far it is pulled down to stay on a descending floor
   maxSlopeDegrees: 45,  // steeper ground is slid down, not walked
   turnSpeed: 10,        // rad/s, how fast it turns to face the way it moves
+  turnFirst: 0,         // rad: from a standstill, a move asked further than this from the way it faces turns it on the spot first; 0 = it sets off at once
+  standTurnSpeed: 0,    // rad/s it turns at while it does that; 0 = turnSpeed
+  turnCoupling: 0,      // share of its speed that goes the way it faces rather than the way asked: 1 = it slows into a sharp turn and pivots, 0 = it slides straight to the new direction
   strideLength: 1.36,   // m walked on the ground between two 'character:track' events: a left and a right step
   wadeFrom: .2,         // m of water at the feet where wading starts to slow it
   wadeFull: 1.1,        // m where it is slowest
@@ -33,6 +43,8 @@ export const CHARACTER_DEFAULTS = Object.freeze({
 const PADDING = .02;
 // m. How far ahead Jolt looks for contacts, so the capsule slows before a wall instead of tunnelling at speed.
 const PREDICTIVE_CONTACT = .1;
+// m/s. Slower than this over the ground it counts as standing still, for turnFirst.
+const STANDING_SPEED = .3;
 // m/s. Rising faster than this relative to the ground means the character has left it (a jump, a launch).
 const LEAVING_GROUND_SPEED = .1;
 
@@ -47,6 +59,8 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
   const o = {...CHARACTER_DEFAULTS, ...options};
   for (const [key, value] of Object.entries(o)) if (!Number.isFinite(value) || value < 0) throw Error(`Character ${key} must be finite and non-negative`);
   if (o.height <= o.radius * 2) throw Error('Character height must exceed twice its radius');
+  if (o.landingHard <= o.landingSoft) throw Error('Character landingHard must exceed landingSoft');
+  for (const key of ['turnCoupling', 'landingLoss']) if (o[key] > 1) throw Error(`Character ${key} is a share: at most 1`);
 
   const system = jolt.GetPhysicsSystem(), allocator = jolt.GetTempAllocator();
   const vector = new J.Vec3(0, 0, 0), gravity = new J.Vec3(0, 0, 0), place = new J.RVec3(0, 0, 0), upright = new J.Quat(0, 0, 0, 1);
@@ -88,7 +102,7 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
 
   let coyote = 0, buffer = 0, jumpHeld = false, rising = false, disposed = false;
   const listeners = new Set(), trail = {x: position[0], y: position[1], z: position[2], walked: 0};
-  let wasGrounded = false, fallSpeed = 0;
+  let wasGrounded = false, fallSpeed = 0, committed = 0, committedSpeed = 0;
   const tell = event => { for (const listener of listeners) listener(Object.freeze(event)); };
   const waterOver = (x, y, z) => Math.max(0, (waterLevelAt?.(x, z) ?? -Infinity) - y);
   const state = {
@@ -102,11 +116,27 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
     grounded: false,
     heading,         // rad about Y the character faces (0 = +Z, positive toward +X); turns toward the move direction
     jumped: false,   // true for the step a jump started
+    rooted: false,   // true while it turns on the spot before setting off (see turnFirst)
+    landed: 0,       // m/s it came down at, on the step it lands; 0 on every other step
+    airTime: 0,      // s since it last stood on the ground; 0 while grounded
+    get committed() { return committed; },   // s left of a commit(); 0 when the controls are free
+    // For `seconds` the move and jump asked are ignored: it travels at `speed` (m/s) the way it faces, or brakes to a
+    // stop when speed is 0. A hard landing's recovery, a roll.
+    commit(seconds, speed = 0) {
+      if (!(seconds >= 0) || !(speed >= 0)) throw Error('Character commit needs a non-negative time and speed');
+      committed = seconds; committedSpeed = speed; buffer = 0;
+    },
     speed: 0,        // m/s really covered over the ground, for animation
     // move: world-space direction on X/Z, length 0..1. run: use runSpeed. jump: whether the jump control is held.
     update(dt, {moveX = 0, moveZ = 0, run = false, jump = false} = {}) {
       assertFrameTime(dt, 'Character');
       if (disposed) throw Error('Character controller was disposed');
+      const driven = committed > 0;
+      if (driven) {
+        committed = Math.max(0, committed - dt);
+        moveX = Math.sin(state.heading) * Math.sign(committedSpeed); moveZ = Math.cos(state.heading) * Math.sign(committedSpeed);
+        jump = false;
+      }
       if (jump && !jumpHeld) buffer = o.jumpBuffer;
       jumpHeld = jump;
 
@@ -128,16 +158,29 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
       if (rising && !jump) { vertical *= o.jumpCut; rising = false; }
       vertical += system.GetGravity().GetY() * dt;
 
+      state.rooted = false;
       if (moveX || moveZ) {
         // Shortest way round, at most turnSpeed; in the air only as far as it can still steer.
-        const turn = ((Math.atan2(moveX, moveZ) - state.heading) % TURN + TURN * 1.5) % TURN - Math.PI, most = o.turnSpeed * (standing ? 1 : o.airControl) * dt;
+        const turn = ((Math.atan2(moveX, moveZ) - state.heading) % TURN + TURN * 1.5) % TURN - Math.PI;
+        state.rooted = o.turnFirst > 0 && standing && !driven && Math.abs(turn) > o.turnFirst && Math.hypot(vx - gx, vz - gz) < STANDING_SPEED;
+        const most = (state.rooted && o.standTurnSpeed ? o.standTurnSpeed : o.turnSpeed) * (standing ? 1 : o.airControl) * dt;
         state.heading += Math.max(-most, Math.min(most, turn));
       }
       state.wading = 1 - o.wadeLoss * smoothstep(waterOver(state.position.x, state.position.y, state.position.z), o.wadeFrom, o.wadeFull);
-      const length = Math.hypot(moveX, moveZ), scale = (run ? o.runSpeed : o.walkSpeed) * state.wading / Math.max(1, length);
-      const wantedX = moveX * scale + (standing ? gx : 0), wantedZ = moveZ * scale + (standing ? gz : 0);
+      const length = Math.hypot(moveX, moveZ), scale = (driven ? committedSpeed : run ? o.runSpeed : o.walkSpeed) * state.wading / Math.max(1, length);
+      let wantedX = state.rooted ? 0 : moveX * scale, wantedZ = state.rooted ? 0 : moveZ * scale;
+      if (o.turnCoupling && length && !state.jumped && !state.rooted) {
+        // Only the speed along the way it faces is kept: none while it still faces away from the move asked.
+        const faceX = Math.sin(state.heading), faceZ = Math.cos(state.heading), along = Math.max(0, wantedX * faceX + wantedZ * faceZ);
+        wantedX += (faceX * along - wantedX) * o.turnCoupling;
+        wantedZ += (faceZ * along - wantedZ) * o.turnCoupling;
+      }
+      if (standing) { wantedX += gx; wantedZ += gz; }
       const changeX = wantedX - vx, changeZ = wantedZ - vz, change = Math.hypot(changeX, changeZ);
-      const limit = o.acceleration * (standing ? 1 : o.airControl) * dt, share = change > limit ? limit / change : 1;
+      // It brakes when no move is asked and when the move asked goes against the way it is still travelling.
+      const driving = length > 0 && (wantedX - (standing ? gx : 0)) * (vx - gx) + (wantedZ - (standing ? gz : 0)) * (vz - gz) >= 0;
+      const rate = standing ? (driving ? o.acceleration : o.braking) : o.acceleration * o.airControl;
+      const limit = Math.max(rate * dt, state.jumped && length ? o.jumpLaunch : 0), share = change > limit ? limit / change : 1;
       vector.Set(vx + changeX * share, vertical, vz + changeZ * share);
       character.SetLinearVelocity(vector);
       gravity.Set(0, system.GetGravity().GetY(), 0);
@@ -150,6 +193,17 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
       const after = character.GetLinearVelocity();
       state.velocity.x = after.GetX(); state.velocity.y = after.GetY(); state.velocity.z = after.GetZ();
       state.grounded = character.GetGroundState() === J.EGroundState_OnGround;
+      state.landed = state.grounded && !wasGrounded ? fallSpeed : 0;
+      state.airTime = state.grounded ? 0 : state.airTime + dt;
+      if (state.grounded && !wasGrounded && o.landingLoss) {
+        // A hard landing takes speed over the ground away; the ground's own motion is kept.
+        const keep = 1 - o.landingLoss * smoothstep(fallSpeed, o.landingSoft, o.landingHard);
+        const landed = character.GetGroundVelocity(), lx = landed.GetX(), lz = landed.GetZ();
+        state.velocity.x = lx + (state.velocity.x - lx) * keep;
+        state.velocity.z = lz + (state.velocity.z - lz) * keep;
+        vector.Set(state.velocity.x, state.velocity.y, state.velocity.z);
+        character.SetLinearVelocity(vector);
+      }
       if (listeners.size) {
         if (state.jumped) tell({type: 'character:jump', x, y, z});
         if (state.grounded && !wasGrounded) {
@@ -169,6 +223,15 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
       fallSpeed = state.grounded ? 0 : Math.max(0, -state.velocity.y);
       return state;
     },
+    // Sets it moving at a velocity (m/s), as when something that carried it lets it go. In the air it keeps that over
+    // the ground as far as airControl leaves it.
+    launch(x, y, z) {
+      if (![x, y, z].every(Number.isFinite)) throw Error('Character launch needs a finite velocity');
+      vector.Set(x, y, z);
+      character.SetLinearVelocity(vector);
+      state.velocity.x = x; state.velocity.y = y; state.velocity.z = z;
+      rising = false;
+    },
     teleport(x, y, z, facing = state.heading) {
       state.heading = facing;
       place.Set(x, y, z);
@@ -177,7 +240,8 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
       character.SetLinearVelocity(vector);
       state.position.x = x; state.position.y = y; state.position.z = z;
       state.velocity.x = state.velocity.y = state.velocity.z = state.speed = 0;
-      state.grounded = state.jumped = jumpHeld = rising = false;
+      state.grounded = state.jumped = state.rooted = jumpHeld = rising = false;
+      state.landed = state.airTime = committed = 0;
       coyote = buffer = 0;
       trail.x = x; trail.y = y; trail.z = z; trail.walked = 0;
       wasGrounded = false; fallSpeed = 0;

@@ -2,13 +2,13 @@ import {SKY_GLSL} from '../core/sky.js';
 import {WEATHER_STAGES, patchWeatherShader} from '../surface/weather-stages.js';
 import {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES} from './terrain-rules.js';
 
-export const TERRAIN_LAYER_ROUGHNESS = Object.freeze({grass: .95, rock: .85, snow: .82, mud: .75, forest: .92});
+export const TERRAIN_LAYER_ROUGHNESS = Object.freeze({grass: 0.95, rock: 0.85, snow: 0.82, mud: 0.75, forest: 0.92});
 // The same for every palette role (TERRAIN_PALETTE_ROLES order).
-export const TERRAIN_PALETTE_ROUGHNESS = Object.freeze({...TERRAIN_LAYER_ROUGHNESS, scree: .9, soil: .93});
+export const TERRAIN_PALETTE_ROUGHNESS = Object.freeze({...TERRAIN_LAYER_ROUGHNESS, scree: 0.9, soil: 0.93});
 
 // The colour each palette role is drawn toward (appearance.harmony): one earthy family, so no layer stands out.
 
-const TERRAIN_GLSL = /* glsl */`
+const TERRAIN_GLSL = /* glsl */ `
 #ifdef TERRAIN_SNOW_DETAIL
 uniform sampler2D terrainSnowNormal, terrainSnowRoughness;
 uniform float terrainSnowNormalStrength, terrainSnowScatter, terrainSnowSparkle, terrainSnowEdgeBreakup, terrainSnowTrackRelief;
@@ -321,7 +321,7 @@ vec4 terrainNormalDetail(int layer, vec3 p, vec3 dx, vec3 dy, vec3 signN, vec3 a
 }
 `;
 
-const TERRAIN_FRAGMENT = /* glsl */`
+const TERRAIN_FRAGMENT = /* glsl */ `
  if (terrainCutout.z > 0.0 && all(greaterThan(vSurfaceWorld.xz, terrainCutout.xy)) && all(lessThan(vSurfaceWorld.xz, terrainCutout.xy + terrainCutout.zw))) discard;
  vec2 terrainUV = (vSurfaceWorld.xz - terrainBounds.xy) / terrainBounds.zw;
  bool terrainInside = all(greaterThanEqual(terrainUV, vec2(0.0))) && all(lessThanEqual(terrainUV, vec2(1.0)));
@@ -575,32 +575,45 @@ const TERRAIN_FRAGMENT = /* glsl */`
 // (stage.setGround, core groundBounce). paint: world.paintAt(sample); sandColor: the sand look's colour.
 
 export function installTerrainShader(material, uniforms, {morph, skyOcclusion}) {
- const compileSurface = material.onBeforeCompile;
- material.onBeforeCompile = function (shader, renderer) {
-  compileSurface.call(this, shader, renderer);
-  Object.assign(shader.uniforms, uniforms);
-  if (morph) {
-   shader.vertexShader = `attribute float terrainCoarse;
+  const compileSurface = material.onBeforeCompile;
+  material.onBeforeCompile = function (shader, renderer) {
+    compileSurface.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    if (morph) {
+      shader.vertexShader =
+        `attribute float terrainCoarse;
 uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the nearer axis, where the easing starts and ends
-` + shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+` +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
    vec2 fromFocus = abs((modelMatrix * vec4(position, 1.0)).xz - terrainMorph.xy);
    transformed.y = mix(transformed.y, terrainCoarse, smoothstep(terrainMorph.z, terrainMorph.w, max(fromFocus.x, fromFocus.y)));
-  `);
-  }
-  if (skyOcclusion) {
-   if (!shader.fragmentShader.includes('#include <aomap_fragment>')) throw Error('Terrain sky occlusion needs the ambient occlusion stage of the material');
-   shader.fragmentShader = shader.fragmentShader.replace('#include <aomap_fragment>', `#include <aomap_fragment>
+  `,
+        );
+    }
+    if (skyOcclusion) {
+      if (!shader.fragmentShader.includes('#include <aomap_fragment>'))
+        throw Error('Terrain sky occlusion needs the ambient occlusion stage of the material');
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
    {
     vec2 skySize = vec2(textureSize(terrainSkyMap, 0));
     vec2 skyUV = clamp((vSurfaceWorld.xz - terrainSkyBounds.xy) / terrainSkyBounds.zw, 0.0, 1.0);
     float skySeen = mix(1.0, texture2D(terrainSkyMap, (skyUV * (skySize - 1.0) + .5) / skySize).r, terrainSkyOcclusion);
     reflectedLight.indirectDiffuse *= skySeen;
     reflectedLight.indirectSpecular *= skySeen;
-   }`);
-  }
-  shader.fragmentShader = patchWeatherShader(shader.fragmentShader.replace('void main() {', `${TERRAIN_GLSL}\nvoid main() {`))
-   .stage('ground', `${TERRAIN_FRAGMENT}\n${WEATHER_STAGES.ground}`)
-   .stage('snowTracks', `
+   }`,
+      );
+    }
+    shader.fragmentShader = patchWeatherShader(
+      shader.fragmentShader.replace('void main() {', `${TERRAIN_GLSL}\nvoid main() {`),
+    )
+      .stage('ground', `${TERRAIN_FRAGMENT}\n${WEATHER_STAGES.ground}`)
+      .stage(
+        'snowTracks',
+        `
     if (terrainSnowCover && !terrainProp) {
      #ifdef TERRAIN_SNOW_MAP
      snowCoverage = textureLod(terrainSnowDepth, (terrainGrid + .5) / terrainSize, 0.0).r;
@@ -623,8 +636,11 @@ uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the n
      snowCoverage *= 1.0 - mudReveal * mudRevealStrength;
      #endif
     } else ${WEATHER_STAGES.snowTracks}
-   `)
-   .stage('runoffSlope', `
+   `,
+      )
+      .stage(
+        'runoffSlope',
+        `
     float runoffFilmCoverage = 0.0;
     #ifdef TERRAIN_RUNOFF_FLOW
     float runoffDepth = 0.0;
@@ -667,22 +683,31 @@ uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the n
     #else
     ${WEATHER_STAGES.runoffSlope}
     #endif
-   `)
-   .stage('runoffCondition', `
+   `,
+      )
+      .stage(
+        'runoffCondition',
+        `
     #ifdef TERRAIN_RUNOFF_FLOW
     if (surfaceRunoff > 0.0 && runoffSlope > 0.0) {
     #else
     ${WEATHER_STAGES.runoffCondition}
     #endif
-   `)
-   .stage('runoffStreak', `
+   `,
+      )
+      .stage(
+        'runoffStreak',
+        `
     #ifdef TERRAIN_RUNOFF_FLOW
     float streak = runoffSlope * surfaceRunoff;
     #else
     ${WEATHER_STAGES.runoffStreak}
     #endif
-   `)
-   .stage('runoffDarkening', `
+   `,
+      )
+      .stage(
+        'runoffDarkening',
+        `
     #ifdef TERRAIN_RUNOFF_FLOW
     const float skinStep = .012;           // m between the samples that measure the skin's slope
     const float skinRelief = .018;         // m of ripple height in a full stream
@@ -700,22 +725,31 @@ uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the n
     }
     #endif
     ${WEATHER_STAGES.runoffDarkening}
-   `)
-   .stage('puddleCondition', `
+   `,
+      )
+      .stage(
+        'puddleCondition',
+        `
     #ifdef TERRAIN_DRAINAGE
     if (terrainPuddleFill > 0.0) {
      puddle = terrainPuddle(terrainGrid, terrainSize, vSurfaceWorld.y);
      snowCoverage *= 1.0 - puddle;
     #else
     ${WEATHER_STAGES.puddleCondition}
-   `)
-   .stage('puddleDarkening', `
+   `,
+      )
+      .stage(
+        'puddleDarkening',
+        `
     #endif
     ${WEATHER_STAGES.puddleDarkening}
-   `)
-   .stage('standingWater', 'float standingWater = max(puddle, runoffFilmCoverage * (1.0 - snowCoverage));')
-   .stage('snowColor', '')
-   .stage('snowRoughness', `
+   `,
+      )
+      .stage('standingWater', 'float standingWater = max(puddle, runoffFilmCoverage * (1.0 - snowCoverage));')
+      .stage('snowColor', '')
+      .stage(
+        'snowRoughness',
+        `
     #ifdef TERRAIN_SNOW_DETAIL
     vec2 snowUv = terrainP.xz * vec2(1.0, -1.0);
     vec2 snowDx = dFdx(snowUv), snowDy = dFdy(snowUv);
@@ -742,8 +776,11 @@ uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the n
     ${WEATHER_STAGES.snowRoughness}
     #endif
     diffuseColor.rgb = mix(diffuseColor.rgb, terrainSnowAlbedo, snowCoverage);
-   `)
-   .source.replace('#include <opaque_fragment>', `
+   `,
+      )
+      .source.replace(
+        '#include <opaque_fragment>',
+        `
     #if defined(TERRAIN_SAND) && NUM_DIR_LIGHTS > 0
     {
      // Mineral grains flash in the sun where the sand is dry and bare.
@@ -801,7 +838,8 @@ uniform vec4 terrainMorph;   // focus x, focus z; distances from it, along the n
     }
     #endif
     #include <opaque_fragment>
-   `)
-   .replace('float wet = surfaceWeather.x', 'float wet = max(surfaceWeather.x, shoreWet)');
- };
+   `,
+      )
+      .replace('float wet = surfaceWeather.x', 'float wet = max(surfaceWeather.x, shoreWet)');
+  };
 }

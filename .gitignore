@@ -6,3 +6,6 @@ private-assets/*
 
 tools/blender/.build/
 __pycache__/
+
+# Private page: kept out of the public repo (versioned on its own, see its folder).
+bench/tomb/

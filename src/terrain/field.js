@@ -2,510 +2,716 @@ import * as THREE from 'three';
 import {createTerrainRules} from './terrain-rules.js';
 import {createDataTexture} from '../core/data-texture.js';
 import {valueNoise} from '../core/value-noise.js';
-import {addStrataVolumes, CRATER_DEFAULTS, CRATER_STRATA, craterEvent, craterStrataPaint, createCraterStamp, validateCraterSettings, validateStrata} from './craters.js';
+import {
+  addStrataVolumes,
+  CRATER_DEFAULTS,
+  CRATER_STRATA,
+  craterEvent,
+  craterStrataPaint,
+  createCraterStamp,
+  validateCraterSettings,
+  validateStrata,
+} from './craters.js';
 import {TERRAIN_LAYERS, TERRAIN_PALETTE_ROLES, TERRAIN_ROLE_LAYER} from './terrain-rules.js';
 
-const MAX_RESOLUTION = 1025;   // samples per side
-const BYTE = 255;              // 8-bit weight and coverage scale
-const PALETTE_GROUP = 4;       // palette weights per slice of the palette map
-const BASE_LAYERS = 4;         // grass, rock, snow, mud: one RGBA weight texel; layer 4 (forest floor) has its own map
+const MAX_RESOLUTION = 1025; // samples per side
+const BYTE = 255; // 8-bit weight and coverage scale
+const PALETTE_GROUP = 4; // palette weights per slice of the palette map
+const BASE_LAYERS = 4; // grass, rock, snow, mud: one RGBA weight texel; layer 4 (forest floor) has its own map
 const FOREST_LAYER = 4;
-const MAX_DIG = .65;           // m below the original surface a deformation may dig
-export const SNOW_DEPTH_SCALE = Object.freeze({min: .25, max: 2, initial: 1});
+const MAX_DIG = 0.65; // m below the original surface a deformation may dig
+export const SNOW_DEPTH_SCALE = Object.freeze({min: 0.25, max: 2, initial: 1});
 // Snow layer settings. Depths are metres before the depth scale.
 export const SNOW_DEFAULTS = Object.freeze({
- driftDepth: .31,      // mean undisturbed depth on flat ground
- driftVariation: .12,  // drifts add or remove up to this much
- driftSize: 7,         // width of a drift across the wind
- driftHeading: 35,     // degrees the wind blows along: 0 = +X, 90 = +Z; drifts stretch this way
- coverFrom: .015,      // the ground shows through below this depth
- coverFull: .11,       // fully covered from this depth
- packedShare: .4,      // share of the fresh depth left under a fully packed track: lower sinks deeper (needs snowTrackRims)
- rimShare: .5,         // share of the displaced snow pushed up around a track
- rimMaxRise: .12,      // highest a rim may stand above the deepest fresh drift
+  driftDepth: 0.31, // mean undisturbed depth on flat ground
+  driftVariation: 0.12, // drifts add or remove up to this much
+  driftSize: 7, // width of a drift across the wind
+  driftHeading: 35, // degrees the wind blows along: 0 = +X, 90 = +Z; drifts stretch this way
+  coverFrom: 0.015, // the ground shows through below this depth
+  coverFull: 0.11, // fully covered from this depth
+  packedShare: 0.4, // share of the fresh depth left under a fully packed track: lower sinks deeper (needs snowTrackRims)
+  rimShare: 0.5, // share of the displaced snow pushed up around a track
+  rimMaxRise: 0.12, // highest a rim may stand above the deepest fresh drift
 });
 export const SNOW_FIELDS = Object.freeze({
- driftDepth: {label: 'Drift depth · m', min: .02, max: .8, step: .01},
- driftVariation: {label: 'Drift variation · m', min: 0, max: .4, step: .01},
- driftSize: {label: 'Drift size · m', min: 1, max: 40, step: .5},
- driftHeading: {label: 'Drift wind heading · °', min: 0, max: 360, step: 5},
- coverFrom: {label: 'Ground shows below · m', min: 0, max: .1, step: .005},
- coverFull: {label: 'Full cover from · m', min: .02, max: .4, step: .005},
- packedShare: {label: 'Packed snow left under tracks', min: .05, max: 1, step: .01},
- rimShare: {label: 'Snow pushed to track rims', min: 0, max: 1, step: .01},
- rimMaxRise: {label: 'Rim max rise · m', min: 0, max: .3, step: .01},
+  driftDepth: {label: 'Drift depth · m', min: 0.02, max: 0.8, step: 0.01},
+  driftVariation: {label: 'Drift variation · m', min: 0, max: 0.4, step: 0.01},
+  driftSize: {label: 'Drift size · m', min: 1, max: 40, step: 0.5},
+  driftHeading: {label: 'Drift wind heading · °', min: 0, max: 360, step: 5},
+  coverFrom: {label: 'Ground shows below · m', min: 0, max: 0.1, step: 0.005},
+  coverFull: {label: 'Full cover from · m', min: 0.02, max: 0.4, step: 0.005},
+  packedShare: {label: 'Packed snow left under tracks', min: 0.05, max: 1, step: 0.01},
+  rimShare: {label: 'Snow pushed to track rims', min: 0, max: 1, step: 0.01},
+  rimMaxRise: {label: 'Rim max rise · m', min: 0, max: 0.3, step: 0.01},
 });
 export function validateSnow(values) {
- for (const [key, value] of Object.entries(values)) {
-  const spec = SNOW_FIELDS[key];
-  if (!spec || !Number.isFinite(value) || value < spec.min || value > spec.max) throw Error('Invalid snow setting: ' + key);
- }
- return values;
+  for (const [key, value] of Object.entries(values)) {
+    const spec = SNOW_FIELDS[key];
+    if (!spec || !Number.isFinite(value) || value < spec.min || value > spec.max)
+      throw Error('Invalid snow setting: ' + key);
+  }
+  return values;
 }
 // Highest the snow surface may stand above the soil at depth scale 1: bounds every snow edit.
 const MAX_SNOW_RISE = SNOW_FIELDS.driftDepth.max + SNOW_FIELDS.driftVariation.max + SNOW_FIELDS.rimMaxRise.max;
 // Track rim profile in shares of the track radius: rises from start, peaks, and ends.
 // Where displaced material piles up around a track, as shares of the track radius. Snow and soil rims share it.
-const SNOW_RIM = Object.freeze({start: .7, peak: .95, end: 1.2});
-const SOIL_RIM_MAX_RISE = .1;  // m a rim of soil (mud, sand) may stand above the original ground
-const DIG_FALLOFF_START = .15; // share of the radius dug at full depth before the smooth falloff
-const FULL_NORMALS_DIVISOR = 3;   // more than 1 / this of the grid changed: recompute all normals at once
-const CRATER_SNOW_CLEAR = Object.freeze({from: .75, to: 1.05});   // shares of the radius: snow blown out inside `from`, kept past `to`
+const SNOW_RIM = Object.freeze({start: 0.7, peak: 0.95, end: 1.2});
+const SOIL_RIM_MAX_RISE = 0.1; // m a rim of soil (mud, sand) may stand above the original ground
+const DIG_FALLOFF_START = 0.15; // share of the radius dug at full depth before the smooth falloff
+const FULL_NORMALS_DIVISOR = 3; // more than 1 / this of the grid changed: recompute all normals at once
+const CRATER_SNOW_CLEAR = Object.freeze({from: 0.75, to: 1.05}); // shares of the radius: snow blown out inside `from`, kept past `to`
 // Snow cover: depth = (driftDepth + driftVariation x noise) x smoothstep(flatness). The noise is two octaves (the second
 // `octave` x finer and weighted `detail`), `stretch` x longer along the wind than across; seed is an offset from the terrain seed.
-const SNOW_DRIFT = Object.freeze({flatness: [.55, .95], stretch: 2.6, octave: 2.3, detail: .45, seed: 91});
+const SNOW_DRIFT = Object.freeze({flatness: [0.55, 0.95], stretch: 2.6, octave: 2.3, detail: 0.45, seed: 91});
 
 // Heights are row-major along +X and +Z, in metres. The mesh and shaders share this grid.
 // paletteSize (a multiple of four, with paintAt): the field also keeps paletteMap, the weight of each palette set that
 // paintAt returns in `palette`, four per slice, and climateMap, its `moisture` (see createTerrainWorld).
 // crater: overrides of CRATER_DEFAULTS (depthLimit, rimShare, rimMaxShare, ragged, rays), and `strata`: what craters cut into
 // (overrides of CRATER_STRATA; with paintAt, the paint's own strata apply).
-export function createTerrainField({origin = [0, 0], size, resolution, heights, seed = 1, rules: settings, paintAt, paletteSize = 0, snow: snowOverrides, snowTrackRims = false, crater: craterOverrides} = {}) {
- const [nx, nz] = resolution ?? [];
- if (![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) || heights?.length !== nx * nz ||
-     origin.length !== 2 || size?.length !== 2 || !origin.every(Number.isFinite) ||
-     !size.every(n => Number.isFinite(n) && n > 0) || !Number.isInteger(seed)) throw Error('Invalid terrain grid');
- const {strata: strataOverrides, ...craterValues} = craterOverrides ?? {};
- const craterSettings = validateCraterSettings({...CRATER_DEFAULTS, ...craterValues});
- const strata = validateStrata({...CRATER_STRATA, ...strataOverrides});
- const craterRimRise = craterSettings.depthLimit * craterSettings.rimMaxShare;
- const samples = Float32Array.from(heights);
- const original = samples.slice();
- if (!samples.every(Number.isFinite)) throw Error('Terrain heights must be finite');
- const rules = createTerrainRules(seed, {mudFromRunout: false, ...settings});
- const snowSettings = {...SNOW_DEFAULTS};
- const driftNoise = valueNoise(seed + SNOW_DRIFT.seed);
- // Drift settings apply the next time snow is laid (resetDeformation); cover, packing and rim settings to the next edit.
- function configureSnow(values = {}) {
-  const next = validateSnow({...snowSettings, ...values});
-  if (next.coverFull <= next.coverFrom) throw Error('Snow full cover depth must exceed the depth where the ground shows');
-  Object.assign(snowSettings, next);
- }
- configureSnow(snowOverrides);
- const [width, depth] = size, stepX = width / (nx - 1), stepZ = depth / (nz - 1);
- const geometry = new THREE.PlaneGeometry(width, depth, nx - 1, nz - 1).rotateX(-Math.PI / 2);
- geometry.translate(origin[0] + width / 2, 0, origin[1] + depth / 2);
- const positions = geometry.getAttribute('position');
- for (let i = 0; i < samples.length; i++) positions.setY(i, samples[i]);
- geometry.computeVertexNormals();
- // All edits stay inside this envelope, so local edits need no bounds scan.
- geometry.computeBoundingBox();
- geometry.boundingBox.min.y -= Math.max(MAX_DIG, craterSettings.depthLimit);
- geometry.boundingBox.max.y += Math.max(SOIL_RIM_MAX_RISE, craterRimRise) + MAX_SNOW_RISE * SNOW_DEPTH_SCALE.max;
- geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
- const heightMap = createDataTexture(samples, nx, nz, {format: THREE.RedFormat, type: THREE.FloatType});
- const weights = new Uint8Array(samples.length * 4);
- const weightMap = createDataTexture(weights, nx, nz, {filter: 'linear'});
- const forestWeights = paintAt || settings?.forestCover !== undefined ? new Uint8Array(samples.length) : null;
- const forestMap = forestWeights ? createDataTexture(forestWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
- // Sand has its own map too: it lies over the other layers. Pass rules.sandBelow to enable it.
- const sandWeights = paintAt || settings?.sandBelow !== undefined ? new Uint8Array(samples.length) : null;
- const sandMap = sandWeights ? createDataTexture(sandWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'}) : null;
- // How fractured craters in hard ground left each sample: the material draws its cracks there.
- const fracture = new Uint8Array(samples.length);
- const fractureMap = createDataTexture(fracture, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
- if (!Number.isInteger(paletteSize / PALETTE_GROUP) || paletteSize < 0 || (paletteSize && typeof paintAt !== 'function')) throw Error('A field palette needs paintAt and a size in fours');
- const paletteWeights = paletteSize ? new Uint8Array(samples.length * paletteSize) : null;
- const climate = paletteSize ? new Uint8Array(samples.length) : null;
- let paletteMap = null, climateMap = null;
- if (paletteWeights) {
-  paletteMap = new THREE.DataArrayTexture(paletteWeights, nx, nz, paletteSize / PALETTE_GROUP);
-  paletteMap.minFilter = paletteMap.magFilter = THREE.LinearFilter;
-  climateMap = createDataTexture(climate, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
- }
- const bounds = new THREE.Vector4(...origin, ...size);
- // Depth each sample was dug by craters (m) and the share of thrown soil on it: what the paint shows them cut and
- // throw out. Laid by the first crater.
- // craterShown: the dig as the paint sees it (the strata stray around a crater).
- // craterHard: the hardest ground a crater hit at each sample.
- let craterDig = null, craterShown = null, ejecta = null, craterHard = null, paintDirty = false;
- const craterListeners = new Set();
- const exposedLayers = new Array(TERRAIN_LAYERS.length), exposedRoles = new Array(TERRAIN_PALETTE_ROLES.length);
- // Paints sample (x, z) from its current shape: the rules or paintAt, then what craters exposed there.
- function paintSample(x, z) {
-   const index = z * nx + x, height = samples[index];
-   const left = samples[z * nx + Math.max(0, x - 1)], right = samples[z * nx + Math.min(nx - 1, x + 1)];
-   const north = samples[Math.max(0, z - 1) * nx + x], south = samples[Math.min(nz - 1, z + 1) * nx + x];
-   const dx = (right - left) / (stepX * (x === 0 || x === nx - 1 ? 1 : 2));
-   const dz = (south - north) / (stepZ * (z === 0 || z === nz - 1 ? 1 : 2));
-   const curvature = (left + right - 2 * height) / (stepX * stepX) + (north + south - 2 * height) / (stepZ * stepZ);
-   const sample = {x: bounds.x + x * stepX, z: bounds.y + z * stepZ, height, slope: Math.hypot(dx, dz), curvature};
-   const dig = craterShown ? Math.min(craterSettings.depthLimit, craterShown[index]) : 0, thrown = ejecta ? ejecta[index] : 0;
-   const exposed = dig > 0 || thrown > 0;
-   // paintAt paints the exposure itself (sample.crater, as createTerrainWorld's paintAt does); the rules are painted here.
-   const hardness = craterHard ? craterHard[index] : 0;
-   if (paintAt && exposed) sample.crater = {dig, ejecta: thrown, hardness};
-   const paint = paintAt?.(sample);
-   let layers = paint?.layers, sand = paint?.sand;
-   if (!paint && exposed) {
-    // On the same layer weights as untouched samples, so the exposure fades into them without a seam.
-    const base = rules.weights(sample);
-    for (let role = 0; role < exposedRoles.length; role++) exposedRoles[role] = role < base.length ? base[role] : 0;
-    const cover = craterStrataPaint(exposedRoles, dig, thrown, strata, hardness);
-    exposedLayers.fill(0);
-    for (let role = 0; role < exposedRoles.length; role++) exposedLayers[TERRAIN_ROLE_LAYER[role]] += exposedRoles[role];
-    layers = exposedLayers;
-    sand = rules.sand(sample) * (1 - cover);
-   }
-   layers ??= rules.weights(sample);
-   for (let i = 0; i < BASE_LAYERS; i++) weights[index * BASE_LAYERS + i] = Math.round(layers[i] * BYTE);
-   if (forestWeights) forestWeights[index] = Math.round((layers[FOREST_LAYER] ?? 0) * BYTE);
-   if (sandWeights) sandWeights[index] = Math.round((sand ?? rules.sand(sample)) * BYTE);
-   if (paletteWeights) {
-    if (paint?.palette?.length !== paletteSize) throw Error('paintAt must return one palette weight per palette set');
-    // Slice `group` of the palette map holds weights group x 4 .. group x 4 + 3 of every sample.
-    for (let slot = 0; slot < paletteSize; slot++) {
-     paletteWeights[(Math.floor(slot / PALETTE_GROUP) * samples.length + index) * PALETTE_GROUP + slot % PALETTE_GROUP] = Math.round(paint.palette[slot] * BYTE);
+export function createTerrainField({
+  origin = [0, 0],
+  size,
+  resolution,
+  heights,
+  seed = 1,
+  rules: settings,
+  paintAt,
+  paletteSize = 0,
+  snow: snowOverrides,
+  snowTrackRims = false,
+  crater: craterOverrides,
+} = {}) {
+  const [nx, nz] = resolution ?? [];
+  if (
+    ![nx, nz].every(n => Number.isInteger(n) && n >= 2 && n <= MAX_RESOLUTION) ||
+    heights?.length !== nx * nz ||
+    origin.length !== 2 ||
+    size?.length !== 2 ||
+    !origin.every(Number.isFinite) ||
+    !size.every(n => Number.isFinite(n) && n > 0) ||
+    !Number.isInteger(seed)
+  )
+    throw Error('Invalid terrain grid');
+  const {strata: strataOverrides, ...craterValues} = craterOverrides ?? {};
+  const craterSettings = validateCraterSettings({...CRATER_DEFAULTS, ...craterValues});
+  const strata = validateStrata({...CRATER_STRATA, ...strataOverrides});
+  const craterRimRise = craterSettings.depthLimit * craterSettings.rimMaxShare;
+  const samples = Float32Array.from(heights);
+  const original = samples.slice();
+  if (!samples.every(Number.isFinite)) throw Error('Terrain heights must be finite');
+  const rules = createTerrainRules(seed, {mudFromRunout: false, ...settings});
+  const snowSettings = {...SNOW_DEFAULTS};
+  const driftNoise = valueNoise(seed + SNOW_DRIFT.seed);
+  // Drift settings apply the next time snow is laid (resetDeformation); cover, packing and rim settings to the next edit.
+  function configureSnow(values = {}) {
+    const next = validateSnow({...snowSettings, ...values});
+    if (next.coverFull <= next.coverFrom)
+      throw Error('Snow full cover depth must exceed the depth where the ground shows');
+    Object.assign(snowSettings, next);
+  }
+  configureSnow(snowOverrides);
+  const [width, depth] = size,
+    stepX = width / (nx - 1),
+    stepZ = depth / (nz - 1);
+  const geometry = new THREE.PlaneGeometry(width, depth, nx - 1, nz - 1).rotateX(-Math.PI / 2);
+  geometry.translate(origin[0] + width / 2, 0, origin[1] + depth / 2);
+  const positions = geometry.getAttribute('position');
+  for (let i = 0; i < samples.length; i++) positions.setY(i, samples[i]);
+  geometry.computeVertexNormals();
+  // All edits stay inside this envelope, so local edits need no bounds scan.
+  geometry.computeBoundingBox();
+  geometry.boundingBox.min.y -= Math.max(MAX_DIG, craterSettings.depthLimit);
+  geometry.boundingBox.max.y += Math.max(SOIL_RIM_MAX_RISE, craterRimRise) + MAX_SNOW_RISE * SNOW_DEPTH_SCALE.max;
+  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+  const heightMap = createDataTexture(samples, nx, nz, {format: THREE.RedFormat, type: THREE.FloatType});
+  const weights = new Uint8Array(samples.length * 4);
+  const weightMap = createDataTexture(weights, nx, nz, {filter: 'linear'});
+  const forestWeights = paintAt || settings?.forestCover !== undefined ? new Uint8Array(samples.length) : null;
+  const forestMap = forestWeights
+    ? createDataTexture(forestWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'})
+    : null;
+  // Sand has its own map too: it lies over the other layers. Pass rules.sandBelow to enable it.
+  const sandWeights = paintAt || settings?.sandBelow !== undefined ? new Uint8Array(samples.length) : null;
+  const sandMap = sandWeights
+    ? createDataTexture(sandWeights, nx, nz, {format: THREE.RedFormat, filter: 'linear'})
+    : null;
+  // How fractured craters in hard ground left each sample: the material draws its cracks there.
+  const fracture = new Uint8Array(samples.length);
+  const fractureMap = createDataTexture(fracture, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
+  if (
+    !Number.isInteger(paletteSize / PALETTE_GROUP) ||
+    paletteSize < 0 ||
+    (paletteSize && typeof paintAt !== 'function')
+  )
+    throw Error('A field palette needs paintAt and a size in fours');
+  const paletteWeights = paletteSize ? new Uint8Array(samples.length * paletteSize) : null;
+  const climate = paletteSize ? new Uint8Array(samples.length) : null;
+  let paletteMap = null,
+    climateMap = null;
+  if (paletteWeights) {
+    paletteMap = new THREE.DataArrayTexture(paletteWeights, nx, nz, paletteSize / PALETTE_GROUP);
+    paletteMap.minFilter = paletteMap.magFilter = THREE.LinearFilter;
+    climateMap = createDataTexture(climate, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
+  }
+  const bounds = new THREE.Vector4(...origin, ...size);
+  // Depth each sample was dug by craters (m) and the share of thrown soil on it: what the paint shows them cut and
+  // throw out. Laid by the first crater.
+  // craterShown: the dig as the paint sees it (the strata stray around a crater).
+  // craterHard: the hardest ground a crater hit at each sample.
+  let craterDig = null,
+    craterShown = null,
+    ejecta = null,
+    craterHard = null,
+    paintDirty = false;
+  const craterListeners = new Set();
+  const exposedLayers = new Array(TERRAIN_LAYERS.length),
+    exposedRoles = new Array(TERRAIN_PALETTE_ROLES.length);
+  // Paints sample (x, z) from its current shape: the rules or paintAt, then what craters exposed there.
+  function paintSample(x, z) {
+    const index = z * nx + x,
+      height = samples[index];
+    const left = samples[z * nx + Math.max(0, x - 1)],
+      right = samples[z * nx + Math.min(nx - 1, x + 1)];
+    const north = samples[Math.max(0, z - 1) * nx + x],
+      south = samples[Math.min(nz - 1, z + 1) * nx + x];
+    const dx = (right - left) / (stepX * (x === 0 || x === nx - 1 ? 1 : 2));
+    const dz = (south - north) / (stepZ * (z === 0 || z === nz - 1 ? 1 : 2));
+    const curvature = (left + right - 2 * height) / (stepX * stepX) + (north + south - 2 * height) / (stepZ * stepZ);
+    const sample = {x: bounds.x + x * stepX, z: bounds.y + z * stepZ, height, slope: Math.hypot(dx, dz), curvature};
+    const dig = craterShown ? Math.min(craterSettings.depthLimit, craterShown[index]) : 0,
+      thrown = ejecta ? ejecta[index] : 0;
+    const exposed = dig > 0 || thrown > 0;
+    // paintAt paints the exposure itself (sample.crater, as createTerrainWorld's paintAt does); the rules are painted here.
+    const hardness = craterHard ? craterHard[index] : 0;
+    if (paintAt && exposed) sample.crater = {dig, ejecta: thrown, hardness};
+    const paint = paintAt?.(sample);
+    let layers = paint?.layers,
+      sand = paint?.sand;
+    if (!paint && exposed) {
+      // On the same layer weights as untouched samples, so the exposure fades into them without a seam.
+      const base = rules.weights(sample);
+      for (let role = 0; role < exposedRoles.length; role++) exposedRoles[role] = role < base.length ? base[role] : 0;
+      const cover = craterStrataPaint(exposedRoles, dig, thrown, strata, hardness);
+      exposedLayers.fill(0);
+      for (let role = 0; role < exposedRoles.length; role++)
+        exposedLayers[TERRAIN_ROLE_LAYER[role]] += exposedRoles[role];
+      layers = exposedLayers;
+      sand = rules.sand(sample) * (1 - cover);
     }
-    climate[index] = Math.round((paint.moisture ?? 0) * BYTE);
-   }
- }
- function uploadPaint() {
-  if (paletteMap) paletteMap.needsUpdate = climateMap.needsUpdate = true;
-  weightMap.needsUpdate = true;
-  if (forestMap) forestMap.needsUpdate = true;
-  if (sandMap) sandMap.needsUpdate = true;
-  fractureMap.needsUpdate = true;
-  paintDirty = false;
- }
- function updateRules(values = {}) {
-  if (!forestMap && values.forestCover > 0) throw Error('Enable forest cover when creating the terrain field');
-  if (!sandMap && values.sandBelow !== undefined) throw Error('Enable sand when creating the terrain field');
-  rules.configure(values);
-  for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) paintSample(x, z);
-  uploadPaint();
- }
- function heightAt(x, z) {
-  const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ;
-  if (gx < 0 || gz < 0 || gx > nx - 1 || gz > nz - 1) return undefined;
-  const ix = Math.min(Math.floor(gx), nx - 2), iz = Math.min(Math.floor(gz), nz - 2);
-  const u = gx - ix, v = gz - iz, a = samples[iz * nx + ix], b = samples[iz * nx + ix + 1];
-  const c = samples[(iz + 1) * nx + ix], d = samples[(iz + 1) * nx + ix + 1];
-  return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
- }
- // Match the shader's linear sampling of the baked layer map before texture height blending.
- function layerWeightAt(x, z, layer) {
-  const forest = layer === FOREST_LAYER;
-  if (forest && !forestWeights) return 0;
-  return forest ? weightAt(forestWeights, 1, 0, x, z) : weightAt(weights, BASE_LAYERS, layer, x, z);
- }
- // Share of sand at a point (0..1); 0 where the field has no sand.
- function sandWeightAt(x, z) {
-  return sandWeights ? weightAt(sandWeights, 1, 0, x, z) : 0;
- }
- // Linear sample of one channel of a byte weight map with `stride` channels per sample.
- function weightAt(data, stride, channel, x, z) {
-  const gx = THREE.MathUtils.clamp((x - bounds.x) / stepX, 0, nx - 1);
-  const gz = THREE.MathUtils.clamp((z - bounds.y) / stepZ, 0, nz - 1);
-  const ix = Math.min(Math.floor(gx), nx - 2), iz = Math.min(Math.floor(gz), nz - 2);
-  const i = (iz * nx + ix) * stride + channel;
-  const lerp = THREE.MathUtils.lerp;
-  const north = lerp(data[i], data[i + stride], gx - ix);
-  const south = lerp(data[i + nx * stride], data[i + (nx + 1) * stride], gx - ix);
-  return lerp(north, south, gz - iz) / BYTE;
- }
- let minX = nx, minZ = nz, maxX = -1, maxZ = -1;
- const soil = samples.slice();
- // freshSnow is the depth the layer would have untouched: tracks pack toward a share of it.
- let snow, freshSnow, snowEnabled = false;
- const packedFloor = index => snowTrackRims ? freshSnow[index] * snowSettings.packedShare : 0;
- let snowDepthScale = SNOW_DEPTH_SCALE.initial;
- const snowCover = {value: false};
- const snowMask = new Uint8Array(samples.length);
- let snowMaskDirty = false;
- const snowMap = createDataTexture(snowMask, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
- const baseNormals = geometry.getAttribute('normal').array.slice();
- const normals = geometry.getAttribute('normal');
- const face = new THREE.Vector3();
- function accumulate(a, b, c) {
-  const ax = positions.getX(a), ay = samples[a], az = positions.getZ(a);
-  const ux = positions.getX(b) - ax, uy = samples[b] - ay, uz = positions.getZ(b) - az;
-  const vx = positions.getX(c) - ax, vy = samples[c] - ay, vz = positions.getZ(c) - az;
-  const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
-  addNormal(a, fx, fy, fz); addNormal(b, fx, fy, fz); addNormal(c, fx, fy, fz);
- }
- function addNormal(index, x, y, z) {
-  const column = index % nx, row = Math.floor(index / nx);
-  if (column < minX || column > maxX || row < minZ || row > maxZ) return;
-  normals.setXYZ(index, normals.getX(index) + x, normals.getY(index) + y, normals.getZ(index) + z);
- }
- function writeHeight(index, value, onSample) {
-  samples[index] = value;
-  positions.setY(index, samples[index]);
-  const coverage = snowEnabled ? Math.round(BYTE * THREE.MathUtils.smoothstep(snow[index], snowSettings.coverFrom, snowSettings.coverFull)) : 0;
-  if (snowMask[index] !== coverage) {
-   snowMask[index] = coverage;
-   snowMaskDirty = true;
-  }
-  const x = index % nx, z = Math.floor(index / nx);
-  onSample?.(x, z, samples[index]);
-  minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-  minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
- }
- // Lowers the samples within radius to nextHeight(index, falloff, previous). Returns the displaced volume in cubic metres.
- function press(x, z, radius, onSample, nextHeight, soilRimShare = 0) {
-  const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ;
-  let volume = 0;
-  for (let j = Math.max(0, Math.ceil(gz - radius / stepZ)); j <= Math.min(nz - 1, Math.floor(gz + radius / stepZ)); j++) {
-   for (let i = Math.max(0, Math.ceil(gx - radius / stepX)); i <= Math.min(nx - 1, Math.floor(gx + radius / stepX)); i++) {
-    const distance = Math.hypot((i - gx) * stepX, (j - gz) * stepZ);
-    const index = j * nx + i, previous = samples[index];
-    const falloff = 1 - THREE.MathUtils.smoothstep(distance / radius, DIG_FALLOFF_START, 1);
-    const next = Math.fround(nextHeight(index, falloff, previous));
-    if (next >= previous) continue;
-    if (snowEnabled) snow[index] = next - soil[index];
-    else soil[index] = next;
-    writeHeight(index, next, onSample);
-    volume += (previous - samples[index]) * stepX * stepZ;
-   }
-  }
-  if (volume > 0) {
-   if (snowEnabled && snowTrackRims) raiseSnowRim(gx, gz, radius, volume / (stepX * stepZ), onSample);
-   else if (!snowEnabled && soilRimShare > 0) raiseSoilRim(gx, gz, radius, volume / (stepX * stepZ) * soilRimShare, onSample);
-  }
-  return volume;
- }
- // Digs the ground under a contact. rimShare (0..1) is the share of the displaced soil pushed up around the dig, as
- // soft ground (mud, sand) does; it applies to bare soil only: snow rims follow the snow settings.
- function deform(x, z, radius, depth, onSample, {rimShare = 0} = {}) {
-  if (![x, z, radius, depth].every(Number.isFinite) || radius <= 0 || depth <= 0) return 0;
-  if (!(rimShare >= 0 && rimShare <= 1)) throw Error('Terrain deformation needs a rim share from zero to one');
-  return press(x, z, radius, onSample, (index, falloff, previous) => {
-   const minimum = snowEnabled ? Math.min(previous, soil[index] + packedFloor(index)) : original[index] - MAX_DIG;
-   return Math.max(minimum, previous - depth * falloff);
-  }, rimShare);
- }
- // Blasts a crater at the point (createCraterStamp: the footprint of `shape`, a radius or the outline of the object
- // that made it, `depth` m deep at the centre), deeper on each blast up to depthLimit below the original surface.
- // Lying snow inside the bowl is blown out; rimShare of the dug volume is piled into the rim, the rest counts as
- // thrown out. options: {rimShare, ragged, rays, hardness, travel}, the field's crater settings by default.
- // Returns {volume, rim, ejecta} in cubic metres, or null when nothing was dug; subscribers hear a 'terrain:crater'
- // event (craterEvent) with the strata the dug volume came from.
- const craterShape = {t: 0, dig: 0, rise: 0};
- function crater(x, z, shape, depth, onSample, {rimShare = craterSettings.rimShare, ragged = craterSettings.ragged, rays = craterSettings.rays, hardness = craterSettings.hardness, travel} = {}) {
-  if (![x, z, depth].every(Number.isFinite) || depth <= 0) return null;
-  const stamp = createCraterStamp({x, z, shape, depth, rimShare, ragged, rays, hardness, travel}), {outer} = stamp;
-  const gx = (x - bounds.x) / stepX, gz = (z - bounds.y) / stepZ, cellArea = stepX * stepZ;
-  craterDig ??= new Float32Array(samples.length);
-  craterShown ??= new Float32Array(samples.length);
-  ejecta ??= new Float32Array(samples.length);
-  craterHard ??= new Float32Array(samples.length);
-  const height = heightAt(x, z) ?? null, dug = {topsoil: 0, subsoil: 0, scree: 0, rock: 0};
-  // Everything the crater touches, one cell more for the slopes its paint reads.
-  const columns = [Math.max(0, Math.floor(gx - outer / stepX) - 1), Math.min(nx - 1, Math.ceil(gx + outer / stepX) + 1)];
-  const rows = [Math.max(0, Math.floor(gz - outer / stepZ) - 1), Math.min(nz - 1, Math.ceil(gz + outer / stepZ) + 1)];
-  let volume = 0, rim = 0;
-  for (let j = rows[0]; j <= rows[1]; j++) for (let i = columns[0]; i <= columns[1]; i++) {
-   const dx = (i - gx) * stepX, dz = (j - gz) * stepZ, index = j * nx + i;
-   stamp.relief(dx, dz, craterShape);
-   let changed = false;
-   if (craterShape.dig > 0) {
-    const next = Math.fround(Math.max(original[index] - craterSettings.depthLimit, soil[index] - craterShape.dig));
-    if (next < soil[index]) {
-     const removed = soil[index] - next;
-     volume += removed * cellArea;
-     addStrataVolumes(dug, craterDig[index], craterDig[index] + removed, cellArea, strata, hardness);
-     craterDig[index] += removed;
-     craterShown[index] += removed * stamp.strataShift(dx, dz);
-     soil[index] = next;
-     changed = true;
+    layers ??= rules.weights(sample);
+    for (let i = 0; i < BASE_LAYERS; i++) weights[index * BASE_LAYERS + i] = Math.round(layers[i] * BYTE);
+    if (forestWeights) forestWeights[index] = Math.round((layers[FOREST_LAYER] ?? 0) * BYTE);
+    if (sandWeights) sandWeights[index] = Math.round((sand ?? rules.sand(sample)) * BYTE);
+    if (paletteWeights) {
+      if (paint?.palette?.length !== paletteSize) throw Error('paintAt must return one palette weight per palette set');
+      // Slice `group` of the palette map holds weights group x 4 .. group x 4 + 3 of every sample.
+      for (let slot = 0; slot < paletteSize; slot++) {
+        paletteWeights[
+          (Math.floor(slot / PALETTE_GROUP) * samples.length + index) * PALETTE_GROUP + (slot % PALETTE_GROUP)
+        ] = Math.round(paint.palette[slot] * BYTE);
+      }
+      climate[index] = Math.round((paint.moisture ?? 0) * BYTE);
     }
-   }
-   if (craterShape.rise > 0) {
-    const next = Math.fround(Math.min(original[index] + craterRimRise, soil[index] + craterShape.rise));
-    if (next > soil[index]) { rim += (next - soil[index]) * cellArea; soil[index] = next; changed = true; }
-   }
-   if (snowEnabled && snow[index] > 0 && craterShape.t < CRATER_SNOW_CLEAR.to) {
-    snow[index] *= THREE.MathUtils.smoothstep(craterShape.t, CRATER_SNOW_CLEAR.from, CRATER_SNOW_CLEAR.to);
-    freshSnow[index] = Math.min(freshSnow[index], snow[index]);
-    changed = true;
-   }
-   ejecta[index] = Math.min(1, ejecta[index] + stamp.thrown(dx, dz));
-   if (hardness > 0 && Math.hypot(dx, dz) <= outer) {
-    craterHard[index] = Math.max(craterHard[index], hardness);
-    fracture[index] = Math.max(fracture[index], Math.round(stamp.fractured(dx, dz) * BYTE));
-   }
-   if (changed) writeHeight(index, Math.fround(soil[index] + (snowEnabled ? snow[index] : 0)), onSample);
   }
-  for (let j = rows[0]; j <= rows[1]; j++) for (let i = columns[0]; i <= columns[1]; i++) paintSample(i, j);
-  paintDirty = true;
-  if (volume <= 0) return null;
-  rim = Math.min(rim, volume);
-  if (craterListeners.size) {
-   const event = craterEvent({x, z, height, shape: stamp.data.shape, depth, footprint: stamp.footprint, volume, rim, strata: dug, hardness, rect: stamp.rect});
-   for (const listener of craterListeners) listener(event);
+  function uploadPaint() {
+    if (paletteMap) paletteMap.needsUpdate = climateMap.needsUpdate = true;
+    weightMap.needsUpdate = true;
+    if (forestMap) forestMap.needsUpdate = true;
+    if (sandMap) sandMap.needsUpdate = true;
+    fractureMap.needsUpdate = true;
+    paintDirty = false;
   }
-  return {volume, rim, ejecta: volume - rim};
- }
- // Packs the snow under a contact. load (0..1) is the share of the packable depth pressed out at the centre, so the sink
- // follows the local snow depth and pressing again with the same load does not sink further.
- function compactSnow(x, z, radius, load, onSample) {
-  if (![x, z, radius, load].every(Number.isFinite) || radius <= 0 || load < 0 || load > 1) {
-   throw Error('Snow compaction needs a finite position, a positive radius and a load from zero to one');
+  function updateRules(values = {}) {
+    if (!forestMap && values.forestCover > 0) throw Error('Enable forest cover when creating the terrain field');
+    if (!sandMap && values.sandBelow !== undefined) throw Error('Enable sand when creating the terrain field');
+    rules.configure(values);
+    for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) paintSample(x, z);
+    uploadPaint();
   }
-  if (!snowEnabled || load === 0) return 0;
-  return press(x, z, radius, onSample, (index, falloff) => {
-   const packed = packedFloor(index);
-   return soil[index] + packed + (freshSnow[index] - packed) * (1 - load * falloff);
-  });
- }
- function raiseSnowRim(gx, gz, radius, removedDepth, onSample) {
-  const highest = (snowSettings.driftDepth + snowSettings.driftVariation + snowSettings.rimMaxRise) * snowDepthScale;
-  raiseRim(gx, gz, radius, removedDepth * snowSettings.rimShare, (index, rise) => {
-   const next = Math.fround(soil[index] + Math.min(highest, snow[index] + rise));
-   if (next <= samples[index]) return;
-   snow[index] = next - soil[index];
-   writeHeight(index, next, onSample);
-  });
- }
- function raiseSoilRim(gx, gz, radius, rimDepth, onSample) {
-  raiseRim(gx, gz, radius, rimDepth, (index, rise) => {
-   const next = Math.fround(Math.min(original[index] + SOIL_RIM_MAX_RISE, soil[index] + rise));
-   if (next <= samples[index]) return;
-   soil[index] = next;
-   writeHeight(index, next, onSample);
-  });
- }
- // Spreads rimDepth (summed sample depth, m) over the ring around a track: raise(index, rise) applies each share.
- function raiseRim(gx, gz, radius, rimDepth, raise) {
-  const candidates = [];
-  let totalWeight = 0;
-  const reach = radius * SNOW_RIM.end;
-  for (let z = Math.max(0, Math.ceil(gz - reach / stepZ)); z <= Math.min(nz - 1, Math.floor(gz + reach / stepZ)); z++) {
-   for (let x = Math.max(0, Math.ceil(gx - reach / stepX)); x <= Math.min(nx - 1, Math.floor(gx + reach / stepX)); x++) {
-    const distance = Math.hypot((x - gx) * stepX, (z - gz) * stepZ) / radius;
-    const weight = THREE.MathUtils.smoothstep(distance, SNOW_RIM.start, SNOW_RIM.peak)
-      * (1 - THREE.MathUtils.smoothstep(distance, SNOW_RIM.peak, SNOW_RIM.end));
-    if (weight <= 0) continue;
-    candidates.push({index: z * nx + x, weight});
-    totalWeight += weight;
-   }
+  function heightAt(x, z) {
+    const gx = (x - bounds.x) / stepX,
+      gz = (z - bounds.y) / stepZ;
+    if (gx < 0 || gz < 0 || gx > nx - 1 || gz > nz - 1) return undefined;
+    const ix = Math.min(Math.floor(gx), nx - 2),
+      iz = Math.min(Math.floor(gz), nz - 2);
+    const u = gx - ix,
+      v = gz - iz,
+      a = samples[iz * nx + ix],
+      b = samples[iz * nx + ix + 1];
+    const c = samples[(iz + 1) * nx + ix],
+      d = samples[(iz + 1) * nx + ix + 1];
+    return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
   }
-  if (!totalWeight) return;
-  for (const {index, weight} of candidates) raise(index, rimDepth * weight / totalWeight);
- }
- function flushDeformation() {
-  if (maxX < 0) {
-   if (paintDirty) uploadPaint();
-   return false;
+  // Match the shader's linear sampling of the baked layer map before texture height blending.
+  function layerWeightAt(x, z, layer) {
+    const forest = layer === FOREST_LAYER;
+    if (forest && !forestWeights) return 0;
+    return forest ? weightAt(forestWeights, 1, 0, x, z) : weightAt(weights, BASE_LAYERS, layer, x, z);
   }
-  positions.addUpdateRange(minZ * nx * 3, (maxZ - minZ + 1) * nx * 3);
-  positions.needsUpdate = true;
-  // Every changed face also affects the normals of its immediate neighbors.
-  minX = Math.max(0, minX - 1); maxX = Math.min(nx - 1, maxX + 1);
-  minZ = Math.max(0, minZ - 1); maxZ = Math.min(nz - 1, maxZ + 1);
-  if ((maxX - minX + 1) * (maxZ - minZ + 1) > samples.length / FULL_NORMALS_DIVISOR) {
-   normals.addUpdateRange(0, normals.array.length);
-   geometry.computeVertexNormals();
-  } else {
-   for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) normals.setXYZ(z * nx + x, 0, 0, 0);
-   for (let z = Math.max(0, minZ - 1); z <= Math.min(nz - 2, maxZ); z++) {
-    for (let x = Math.max(0, minX - 1); x <= Math.min(nx - 2, maxX); x++) {
-     const a = z * nx + x, b = a + nx, d = a + 1;
-     accumulate(a, b, d); accumulate(b, b + 1, d);
+  // Share of sand at a point (0..1); 0 where the field has no sand.
+  function sandWeightAt(x, z) {
+    return sandWeights ? weightAt(sandWeights, 1, 0, x, z) : 0;
+  }
+  // Linear sample of one channel of a byte weight map with `stride` channels per sample.
+  function weightAt(data, stride, channel, x, z) {
+    const gx = THREE.MathUtils.clamp((x - bounds.x) / stepX, 0, nx - 1);
+    const gz = THREE.MathUtils.clamp((z - bounds.y) / stepZ, 0, nz - 1);
+    const ix = Math.min(Math.floor(gx), nx - 2),
+      iz = Math.min(Math.floor(gz), nz - 2);
+    const i = (iz * nx + ix) * stride + channel;
+    const lerp = THREE.MathUtils.lerp;
+    const north = lerp(data[i], data[i + stride], gx - ix);
+    const south = lerp(data[i + nx * stride], data[i + (nx + 1) * stride], gx - ix);
+    return lerp(north, south, gz - iz) / BYTE;
+  }
+  let minX = nx,
+    minZ = nz,
+    maxX = -1,
+    maxZ = -1;
+  const soil = samples.slice();
+  // freshSnow is the depth the layer would have untouched: tracks pack toward a share of it.
+  let snow,
+    freshSnow,
+    snowEnabled = false;
+  const packedFloor = index => (snowTrackRims ? freshSnow[index] * snowSettings.packedShare : 0);
+  let snowDepthScale = SNOW_DEPTH_SCALE.initial;
+  const snowCover = {value: false};
+  const snowMask = new Uint8Array(samples.length);
+  let snowMaskDirty = false;
+  const snowMap = createDataTexture(snowMask, nx, nz, {format: THREE.RedFormat, filter: 'linear'});
+  const baseNormals = geometry.getAttribute('normal').array.slice();
+  const normals = geometry.getAttribute('normal');
+  const face = new THREE.Vector3();
+  function accumulate(a, b, c) {
+    const ax = positions.getX(a),
+      ay = samples[a],
+      az = positions.getZ(a);
+    const ux = positions.getX(b) - ax,
+      uy = samples[b] - ay,
+      uz = positions.getZ(b) - az;
+    const vx = positions.getX(c) - ax,
+      vy = samples[c] - ay,
+      vz = positions.getZ(c) - az;
+    const fx = uy * vz - uz * vy,
+      fy = uz * vx - ux * vz,
+      fz = ux * vy - uy * vx;
+    addNormal(a, fx, fy, fz);
+    addNormal(b, fx, fy, fz);
+    addNormal(c, fx, fy, fz);
+  }
+  function addNormal(index, x, y, z) {
+    const column = index % nx,
+      row = Math.floor(index / nx);
+    if (column < minX || column > maxX || row < minZ || row > maxZ) return;
+    normals.setXYZ(index, normals.getX(index) + x, normals.getY(index) + y, normals.getZ(index) + z);
+  }
+  function writeHeight(index, value, onSample) {
+    samples[index] = value;
+    positions.setY(index, samples[index]);
+    const coverage = snowEnabled
+      ? Math.round(BYTE * THREE.MathUtils.smoothstep(snow[index], snowSettings.coverFrom, snowSettings.coverFull))
+      : 0;
+    if (snowMask[index] !== coverage) {
+      snowMask[index] = coverage;
+      snowMaskDirty = true;
     }
-   }
-   for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) {
-    const index = z * nx + x;
-    face.fromBufferAttribute(normals, index).normalize();
-    normals.setXYZ(index, face.x, face.y, face.z);
-   }
-   normals.addUpdateRange(minZ * nx * 3, (maxZ - minZ + 1) * nx * 3);
-   normals.needsUpdate = true;
+    const x = index % nx,
+      z = Math.floor(index / nx);
+    onSample?.(x, z, samples[index]);
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minZ = Math.min(minZ, z);
+    maxZ = Math.max(maxZ, z);
   }
-  minX = nx; minZ = nz; maxX = maxZ = -1;
-  heightMap.needsUpdate = true;
-  if (snowMaskDirty) snowMap.needsUpdate = true;
-  snowMaskDirty = false;
-  if (paintDirty) uploadPaint();
-  return true;
- }
- function resetDeformation(onSample) {
-  soil.set(original);
-  snow = undefined;
-  freshSnow = undefined;
-  const restoreSnow = snowEnabled;
-  snowEnabled = false;
-  for (let index = 0; index < samples.length; index++) {
-   if (samples[index] === original[index]) continue;
-   writeHeight(index, original[index], onSample);
+  // Lowers the samples within radius to nextHeight(index, falloff, previous). Returns the displaced volume in cubic metres.
+  function press(x, z, radius, onSample, nextHeight, soilRimShare = 0) {
+    const gx = (x - bounds.x) / stepX,
+      gz = (z - bounds.y) / stepZ;
+    let volume = 0;
+    for (
+      let j = Math.max(0, Math.ceil(gz - radius / stepZ));
+      j <= Math.min(nz - 1, Math.floor(gz + radius / stepZ));
+      j++
+    ) {
+      for (
+        let i = Math.max(0, Math.ceil(gx - radius / stepX));
+        i <= Math.min(nx - 1, Math.floor(gx + radius / stepX));
+        i++
+      ) {
+        const distance = Math.hypot((i - gx) * stepX, (j - gz) * stepZ);
+        const index = j * nx + i,
+          previous = samples[index];
+        const falloff = 1 - THREE.MathUtils.smoothstep(distance / radius, DIG_FALLOFF_START, 1);
+        const next = Math.fround(nextHeight(index, falloff, previous));
+        if (next >= previous) continue;
+        if (snowEnabled) snow[index] = next - soil[index];
+        else soil[index] = next;
+        writeHeight(index, next, onSample);
+        volume += (previous - samples[index]) * stepX * stepZ;
+      }
+    }
+    if (volume > 0) {
+      if (snowEnabled && snowTrackRims) raiseSnowRim(gx, gz, radius, volume / (stepX * stepZ), onSample);
+      else if (!snowEnabled && soilRimShare > 0)
+        raiseSoilRim(gx, gz, radius, (volume / (stepX * stepZ)) * soilRimShare, onSample);
+    }
+    return volume;
   }
-  if (craterDig) {
-   craterDig = craterShown = ejecta = craterHard = null;
-   fracture.fill(0);
-   for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) paintSample(x, z);
-   paintDirty = true;
+  // Digs the ground under a contact. rimShare (0..1) is the share of the displaced soil pushed up around the dig, as
+  // soft ground (mud, sand) does; it applies to bare soil only: snow rims follow the snow settings.
+  function deform(x, z, radius, depth, onSample, {rimShare = 0} = {}) {
+    if (![x, z, radius, depth].every(Number.isFinite) || radius <= 0 || depth <= 0) return 0;
+    if (!(rimShare >= 0 && rimShare <= 1)) throw Error('Terrain deformation needs a rim share from zero to one');
+    return press(
+      x,
+      z,
+      radius,
+      onSample,
+      (index, falloff, previous) => {
+        const minimum = snowEnabled ? Math.min(previous, soil[index] + packedFloor(index)) : original[index] - MAX_DIG;
+        return Math.max(minimum, previous - depth * falloff);
+      },
+      rimShare,
+    );
   }
-  if (restoreSnow) return setSnowCover(true, onSample);
-  return flushDeformation();
- }
- function setSnowDepthScale(scale, onSample) {
-  if (!Number.isFinite(scale) || scale < SNOW_DEPTH_SCALE.min || scale > SNOW_DEPTH_SCALE.max) {
-   throw Error('Snow depth scale is outside the supported range');
+  // Blasts a crater at the point (createCraterStamp: the footprint of `shape`, a radius or the outline of the object
+  // that made it, `depth` m deep at the centre), deeper on each blast up to depthLimit below the original surface.
+  // Lying snow inside the bowl is blown out; rimShare of the dug volume is piled into the rim, the rest counts as
+  // thrown out. options: {rimShare, ragged, rays, hardness, travel}, the field's crater settings by default.
+  // Returns {volume, rim, ejecta} in cubic metres, or null when nothing was dug; subscribers hear a 'terrain:crater'
+  // event (craterEvent) with the strata the dug volume came from.
+  const craterShape = {t: 0, dig: 0, rise: 0};
+  function crater(
+    x,
+    z,
+    shape,
+    depth,
+    onSample,
+    {
+      rimShare = craterSettings.rimShare,
+      ragged = craterSettings.ragged,
+      rays = craterSettings.rays,
+      hardness = craterSettings.hardness,
+      travel,
+    } = {},
+  ) {
+    if (![x, z, depth].every(Number.isFinite) || depth <= 0) return null;
+    const stamp = createCraterStamp({x, z, shape, depth, rimShare, ragged, rays, hardness, travel}),
+      {outer} = stamp;
+    const gx = (x - bounds.x) / stepX,
+      gz = (z - bounds.y) / stepZ,
+      cellArea = stepX * stepZ;
+    craterDig ??= new Float32Array(samples.length);
+    craterShown ??= new Float32Array(samples.length);
+    ejecta ??= new Float32Array(samples.length);
+    craterHard ??= new Float32Array(samples.length);
+    const height = heightAt(x, z) ?? null,
+      dug = {topsoil: 0, subsoil: 0, scree: 0, rock: 0};
+    // Everything the crater touches, one cell more for the slopes its paint reads.
+    const columns = [
+      Math.max(0, Math.floor(gx - outer / stepX) - 1),
+      Math.min(nx - 1, Math.ceil(gx + outer / stepX) + 1),
+    ];
+    const rows = [Math.max(0, Math.floor(gz - outer / stepZ) - 1), Math.min(nz - 1, Math.ceil(gz + outer / stepZ) + 1)];
+    let volume = 0,
+      rim = 0;
+    for (let j = rows[0]; j <= rows[1]; j++)
+      for (let i = columns[0]; i <= columns[1]; i++) {
+        const dx = (i - gx) * stepX,
+          dz = (j - gz) * stepZ,
+          index = j * nx + i;
+        stamp.relief(dx, dz, craterShape);
+        let changed = false;
+        if (craterShape.dig > 0) {
+          const next = Math.fround(
+            Math.max(original[index] - craterSettings.depthLimit, soil[index] - craterShape.dig),
+          );
+          if (next < soil[index]) {
+            const removed = soil[index] - next;
+            volume += removed * cellArea;
+            addStrataVolumes(dug, craterDig[index], craterDig[index] + removed, cellArea, strata, hardness);
+            craterDig[index] += removed;
+            craterShown[index] += removed * stamp.strataShift(dx, dz);
+            soil[index] = next;
+            changed = true;
+          }
+        }
+        if (craterShape.rise > 0) {
+          const next = Math.fround(Math.min(original[index] + craterRimRise, soil[index] + craterShape.rise));
+          if (next > soil[index]) {
+            rim += (next - soil[index]) * cellArea;
+            soil[index] = next;
+            changed = true;
+          }
+        }
+        if (snowEnabled && snow[index] > 0 && craterShape.t < CRATER_SNOW_CLEAR.to) {
+          snow[index] *= THREE.MathUtils.smoothstep(craterShape.t, CRATER_SNOW_CLEAR.from, CRATER_SNOW_CLEAR.to);
+          freshSnow[index] = Math.min(freshSnow[index], snow[index]);
+          changed = true;
+        }
+        ejecta[index] = Math.min(1, ejecta[index] + stamp.thrown(dx, dz));
+        if (hardness > 0 && Math.hypot(dx, dz) <= outer) {
+          craterHard[index] = Math.max(craterHard[index], hardness);
+          fracture[index] = Math.max(fracture[index], Math.round(stamp.fractured(dx, dz) * BYTE));
+        }
+        if (changed) writeHeight(index, Math.fround(soil[index] + (snowEnabled ? snow[index] : 0)), onSample);
+      }
+    for (let j = rows[0]; j <= rows[1]; j++) for (let i = columns[0]; i <= columns[1]; i++) paintSample(i, j);
+    paintDirty = true;
+    if (volume <= 0) return null;
+    rim = Math.min(rim, volume);
+    if (craterListeners.size) {
+      const event = craterEvent({
+        x,
+        z,
+        height,
+        shape: stamp.data.shape,
+        depth,
+        footprint: stamp.footprint,
+        volume,
+        rim,
+        strata: dug,
+        hardness,
+        rect: stamp.rect,
+      });
+      for (const listener of craterListeners) listener(event);
+    }
+    return {volume, rim, ejecta: volume - rim};
   }
-  if (scale === snowDepthScale) return false;
-  const ratio = scale / snowDepthScale;
-  snowDepthScale = scale;
-  if (!snow) return false;
-  for (let index = 0; index < snow.length; index++) {
-   snow[index] *= ratio;
-   freshSnow[index] *= ratio;
-   if (snowEnabled) writeHeight(index, soil[index] + snow[index], onSample);
+  // Packs the snow under a contact. load (0..1) is the share of the packable depth pressed out at the centre, so the sink
+  // follows the local snow depth and pressing again with the same load does not sink further.
+  function compactSnow(x, z, radius, load, onSample) {
+    if (![x, z, radius, load].every(Number.isFinite) || radius <= 0 || load < 0 || load > 1) {
+      throw Error('Snow compaction needs a finite position, a positive radius and a load from zero to one');
+    }
+    if (!snowEnabled || load === 0) return 0;
+    return press(x, z, radius, onSample, (index, falloff) => {
+      const packed = packedFloor(index);
+      return soil[index] + packed + (freshSnow[index] - packed) * (1 - load * falloff);
+    });
   }
-  return flushDeformation();
- }
- function meltSnow(depth, onSample) {
-  if (!Number.isFinite(depth) || depth < 0) throw Error('Snow melt depth must be finite and non-negative');
-  if (!snowEnabled || depth === 0) return null;
-  let removed = 0, remaining = 0;
-  for (let index = 0; index < snow.length; index++) {
-   const previous = snow[index];
-   if (previous <= 0) continue;
-   snow[index] = Math.max(0, previous - depth);
-   removed += previous - snow[index];
-   remaining += snow[index];
-   freshSnow[index] = Math.max(0, freshSnow[index] - depth);
-   writeHeight(index, soil[index] + snow[index], onSample);
+  function raiseSnowRim(gx, gz, radius, removedDepth, onSample) {
+    const highest = (snowSettings.driftDepth + snowSettings.driftVariation + snowSettings.rimMaxRise) * snowDepthScale;
+    raiseRim(gx, gz, radius, removedDepth * snowSettings.rimShare, (index, rise) => {
+      const next = Math.fround(soil[index] + Math.min(highest, snow[index] + rise));
+      if (next <= samples[index]) return;
+      snow[index] = next - soil[index];
+      writeHeight(index, next, onSample);
+    });
   }
-  if (remaining === 0) {
-   snowEnabled = false;
-   snowCover.value = false;
-   snow = undefined;
-   freshSnow = undefined;
+  function raiseSoilRim(gx, gz, radius, rimDepth, onSample) {
+    raiseRim(gx, gz, radius, rimDepth, (index, rise) => {
+      const next = Math.fround(Math.min(original[index] + SOIL_RIM_MAX_RISE, soil[index] + rise));
+      if (next <= samples[index]) return;
+      soil[index] = next;
+      writeHeight(index, next, onSample);
+    });
   }
-  return {removed, remaining};
- }
- function setSnowCover(enabled, onSample) {
-  if (enabled === snowEnabled) return false;
-  if (enabled && !snow) {
-   snow = new Float32Array(samples.length);
-   const heading = THREE.MathUtils.degToRad(snowSettings.driftHeading), windX = Math.cos(heading), windZ = Math.sin(heading);
-   for (let index = 0; index < snow.length; index++) {
-    const x = index % nx, z = Math.floor(index / nx);
-    const worldX = bounds.x + x * stepX, worldZ = bounds.y + z * stepZ;
-    const along = (worldX * windX + worldZ * windZ) / (snowSettings.driftSize * SNOW_DRIFT.stretch);
-    const across = (worldZ * windX - worldX * windZ) / snowSettings.driftSize;
-    const wave = (driftNoise(along, across) + SNOW_DRIFT.detail * driftNoise(along * SNOW_DRIFT.octave, across * SNOW_DRIFT.octave)) / (1 + SNOW_DRIFT.detail);
-    const drift = Math.max(0, snowSettings.driftDepth + snowSettings.driftVariation * wave);
-    snow[index] = drift * snowDepthScale * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], ...SNOW_DRIFT.flatness);
-   }
-   freshSnow = snow.slice();
+  // Spreads rimDepth (summed sample depth, m) over the ring around a track: raise(index, rise) applies each share.
+  function raiseRim(gx, gz, radius, rimDepth, raise) {
+    const candidates = [];
+    let totalWeight = 0;
+    const reach = radius * SNOW_RIM.end;
+    for (
+      let z = Math.max(0, Math.ceil(gz - reach / stepZ));
+      z <= Math.min(nz - 1, Math.floor(gz + reach / stepZ));
+      z++
+    ) {
+      for (
+        let x = Math.max(0, Math.ceil(gx - reach / stepX));
+        x <= Math.min(nx - 1, Math.floor(gx + reach / stepX));
+        x++
+      ) {
+        const distance = Math.hypot((x - gx) * stepX, (z - gz) * stepZ) / radius;
+        const weight =
+          THREE.MathUtils.smoothstep(distance, SNOW_RIM.start, SNOW_RIM.peak) *
+          (1 - THREE.MathUtils.smoothstep(distance, SNOW_RIM.peak, SNOW_RIM.end));
+        if (weight <= 0) continue;
+        candidates.push({index: z * nx + x, weight});
+        totalWeight += weight;
+      }
+    }
+    if (!totalWeight) return;
+    for (const {index, weight} of candidates) raise(index, (rimDepth * weight) / totalWeight);
   }
-  snowEnabled = enabled;
-  snowCover.value = enabled;
-  for (let index = 0; index < samples.length; index++) {
-   const next = Math.fround(soil[index] + (enabled ? snow[index] : 0));
-   if (next !== samples[index]) writeHeight(index, next, onSample);
+  function flushDeformation() {
+    if (maxX < 0) {
+      if (paintDirty) uploadPaint();
+      return false;
+    }
+    positions.addUpdateRange(minZ * nx * 3, (maxZ - minZ + 1) * nx * 3);
+    positions.needsUpdate = true;
+    // Every changed face also affects the normals of its immediate neighbors.
+    minX = Math.max(0, minX - 1);
+    maxX = Math.min(nx - 1, maxX + 1);
+    minZ = Math.max(0, minZ - 1);
+    maxZ = Math.min(nz - 1, maxZ + 1);
+    if ((maxX - minX + 1) * (maxZ - minZ + 1) > samples.length / FULL_NORMALS_DIVISOR) {
+      normals.addUpdateRange(0, normals.array.length);
+      geometry.computeVertexNormals();
+    } else {
+      for (let z = minZ; z <= maxZ; z++) for (let x = minX; x <= maxX; x++) normals.setXYZ(z * nx + x, 0, 0, 0);
+      for (let z = Math.max(0, minZ - 1); z <= Math.min(nz - 2, maxZ); z++) {
+        for (let x = Math.max(0, minX - 1); x <= Math.min(nx - 2, maxX); x++) {
+          const a = z * nx + x,
+            b = a + nx,
+            d = a + 1;
+          accumulate(a, b, d);
+          accumulate(b, b + 1, d);
+        }
+      }
+      for (let z = minZ; z <= maxZ; z++)
+        for (let x = minX; x <= maxX; x++) {
+          const index = z * nx + x;
+          face.fromBufferAttribute(normals, index).normalize();
+          normals.setXYZ(index, face.x, face.y, face.z);
+        }
+      normals.addUpdateRange(minZ * nx * 3, (maxZ - minZ + 1) * nx * 3);
+      normals.needsUpdate = true;
+    }
+    minX = nx;
+    minZ = nz;
+    maxX = maxZ = -1;
+    heightMap.needsUpdate = true;
+    if (snowMaskDirty) snowMap.needsUpdate = true;
+    snowMaskDirty = false;
+    if (paintDirty) uploadPaint();
+    return true;
   }
-  return flushDeformation();
- }
- updateRules();
- return {geometry, bounds, heightMap, weightMap, forestMap, sandMap, fractureMap, paletteMap, climateMap, snowMap, snowCover, snowSettings, configureSnow, heightAt, layerWeightAt, sandWeightAt, updateRules, deform, crater, craterSettings, compactSnow,
-  // Hears a 'terrain:crater' event (craterEvent) for every crater blasted; returns unsubscribe.
-  subscribe(listener) {
-   if (typeof listener !== 'function') throw new TypeError('A crater listener must be a function');
-   craterListeners.add(listener);
-   return () => craterListeners.delete(listener);
-  }, flushDeformation, resetDeformation, setSnowCover, setSnowDepthScale, meltSnow,
-  dispose() { geometry.dispose(); heightMap.dispose(); weightMap.dispose(); forestMap?.dispose(); sandMap?.dispose(); fractureMap.dispose(); paletteMap?.dispose(); climateMap?.dispose(); snowMap.dispose(); }};
+  function resetDeformation(onSample) {
+    soil.set(original);
+    snow = undefined;
+    freshSnow = undefined;
+    const restoreSnow = snowEnabled;
+    snowEnabled = false;
+    for (let index = 0; index < samples.length; index++) {
+      if (samples[index] === original[index]) continue;
+      writeHeight(index, original[index], onSample);
+    }
+    if (craterDig) {
+      craterDig = craterShown = ejecta = craterHard = null;
+      fracture.fill(0);
+      for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) paintSample(x, z);
+      paintDirty = true;
+    }
+    if (restoreSnow) return setSnowCover(true, onSample);
+    return flushDeformation();
+  }
+  function setSnowDepthScale(scale, onSample) {
+    if (!Number.isFinite(scale) || scale < SNOW_DEPTH_SCALE.min || scale > SNOW_DEPTH_SCALE.max) {
+      throw Error('Snow depth scale is outside the supported range');
+    }
+    if (scale === snowDepthScale) return false;
+    const ratio = scale / snowDepthScale;
+    snowDepthScale = scale;
+    if (!snow) return false;
+    for (let index = 0; index < snow.length; index++) {
+      snow[index] *= ratio;
+      freshSnow[index] *= ratio;
+      if (snowEnabled) writeHeight(index, soil[index] + snow[index], onSample);
+    }
+    return flushDeformation();
+  }
+  function meltSnow(depth, onSample) {
+    if (!Number.isFinite(depth) || depth < 0) throw Error('Snow melt depth must be finite and non-negative');
+    if (!snowEnabled || depth === 0) return null;
+    let removed = 0,
+      remaining = 0;
+    for (let index = 0; index < snow.length; index++) {
+      const previous = snow[index];
+      if (previous <= 0) continue;
+      snow[index] = Math.max(0, previous - depth);
+      removed += previous - snow[index];
+      remaining += snow[index];
+      freshSnow[index] = Math.max(0, freshSnow[index] - depth);
+      writeHeight(index, soil[index] + snow[index], onSample);
+    }
+    if (remaining === 0) {
+      snowEnabled = false;
+      snowCover.value = false;
+      snow = undefined;
+      freshSnow = undefined;
+    }
+    return {removed, remaining};
+  }
+  function setSnowCover(enabled, onSample) {
+    if (enabled === snowEnabled) return false;
+    if (enabled && !snow) {
+      snow = new Float32Array(samples.length);
+      const heading = THREE.MathUtils.degToRad(snowSettings.driftHeading),
+        windX = Math.cos(heading),
+        windZ = Math.sin(heading);
+      for (let index = 0; index < snow.length; index++) {
+        const x = index % nx,
+          z = Math.floor(index / nx);
+        const worldX = bounds.x + x * stepX,
+          worldZ = bounds.y + z * stepZ;
+        const along = (worldX * windX + worldZ * windZ) / (snowSettings.driftSize * SNOW_DRIFT.stretch);
+        const across = (worldZ * windX - worldX * windZ) / snowSettings.driftSize;
+        const wave =
+          (driftNoise(along, across) +
+            SNOW_DRIFT.detail * driftNoise(along * SNOW_DRIFT.octave, across * SNOW_DRIFT.octave)) /
+          (1 + SNOW_DRIFT.detail);
+        const drift = Math.max(0, snowSettings.driftDepth + snowSettings.driftVariation * wave);
+        snow[index] =
+          drift * snowDepthScale * THREE.MathUtils.smoothstep(baseNormals[index * 3 + 1], ...SNOW_DRIFT.flatness);
+      }
+      freshSnow = snow.slice();
+    }
+    snowEnabled = enabled;
+    snowCover.value = enabled;
+    for (let index = 0; index < samples.length; index++) {
+      const next = Math.fround(soil[index] + (enabled ? snow[index] : 0));
+      if (next !== samples[index]) writeHeight(index, next, onSample);
+    }
+    return flushDeformation();
+  }
+  updateRules();
+  return {
+    geometry,
+    bounds,
+    heightMap,
+    weightMap,
+    forestMap,
+    sandMap,
+    fractureMap,
+    paletteMap,
+    climateMap,
+    snowMap,
+    snowCover,
+    snowSettings,
+    configureSnow,
+    heightAt,
+    layerWeightAt,
+    sandWeightAt,
+    updateRules,
+    deform,
+    crater,
+    craterSettings,
+    compactSnow,
+    // Hears a 'terrain:crater' event (craterEvent) for every crater blasted; returns unsubscribe.
+    subscribe(listener) {
+      if (typeof listener !== 'function') throw new TypeError('A crater listener must be a function');
+      craterListeners.add(listener);
+      return () => craterListeners.delete(listener);
+    },
+    flushDeformation,
+    resetDeformation,
+    setSnowCover,
+    setSnowDepthScale,
+    meltSnow,
+    dispose() {
+      geometry.dispose();
+      heightMap.dispose();
+      weightMap.dispose();
+      forestMap?.dispose();
+      sandMap?.dispose();
+      fractureMap.dispose();
+      paletteMap?.dispose();
+      climateMap?.dispose();
+      snowMap.dispose();
+    },
+  };
 }
