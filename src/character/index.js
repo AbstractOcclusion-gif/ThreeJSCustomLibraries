@@ -7,7 +7,18 @@
 // to splash; waterLevelAt(x, z), when the host has water, makes it wade slower. Without them it just walks.
 // For a host that plays landings: `landed` is the speed it came down at on the step it lands, `airTime` how long it has
 // been off the ground, and commit(seconds, speed) takes the controls away for a recovery or a roll.
+// Around the controller, each on its own file so a host takes only what it plays:
+//   crouch.js                 the capsule kept low: crouch and slide
+//   actions/action-set.js     the contract and order of what can carry her; actions/ledge.js, ladder.js, push.js, and
+//                             rope.js (built on the cable tool)
+//   stairs.js                 how deep the stairs under her are
+//   ik/                       two-bone solver, foot placement, grounder, hand placement, head look (three.js bones)
+//   clips/                    Mixamo clip preparation, stops and turns, mirrored take-offs, retargeting
 import {assertFrameTime} from '../core/validate.js';
+
+export {createCrouch, CROUCH_DEFAULTS} from './crouch.js';
+export {createActionSet} from './actions/action-set.js';
+export {shortestTurn} from './angles.js';
 
 export const CHARACTER_DEFAULTS = Object.freeze({
   radius: .3,           // m, capsule radius
@@ -43,6 +54,8 @@ export const CHARACTER_DEFAULTS = Object.freeze({
 const PADDING = .02;
 // m. How far ahead Jolt looks for contacts, so the capsule slows before a wall instead of tunnelling at speed.
 const PREDICTIVE_CONTACT = .1;
+// m. How far a taller capsule may already reach into something when it stands up: more than that, there is no room.
+const STAND_PENETRATION = .03;
 // m/s. Slower than this over the ground it counts as standing still, for turnFirst.
 const STANDING_SPEED = .3;
 // m/s. Rising faster than this relative to the ground means the character has left it (a jump, a launch).
@@ -65,14 +78,18 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
   const system = jolt.GetPhysicsSystem(), allocator = jolt.GetTempAllocator();
   const vector = new J.Vec3(0, 0, 0), gravity = new J.Vec3(0, 0, 0), place = new J.RVec3(0, 0, 0), upright = new J.Quat(0, 0, 0, 1);
 
-  // Capsule lifted by half its height, so the character's position is its feet.
-  vector.Set(0, o.height / 2, 0);
-  const shapeSettings = new J.RotatedTranslatedShapeSettings(vector, upright, new J.CapsuleShapeSettings(o.height / 2 - o.radius, o.radius));
-  const built = shapeSettings.Create();
-  if (built.HasError()) throw Error('Invalid character capsule');
-  const shape = built.Get();
-  shape.AddRef();
-  J.destroy(shapeSettings);
+  // A capsule `tall` m high, lifted by half its height, so the character's position is its feet.
+  function capsule(tall) {
+    vector.Set(0, tall / 2, 0);
+    const shapeSettings = new J.RotatedTranslatedShapeSettings(vector, upright, new J.CapsuleShapeSettings(tall / 2 - o.radius, o.radius));
+    const built = shapeSettings.Create();
+    if (built.HasError()) throw Error('Invalid character capsule');
+    const made = built.Get();
+    made.AddRef();
+    J.destroy(shapeSettings);
+    return made;
+  }
+  let shape = capsule(o.height);
 
   const settings = new J.CharacterVirtualSettings();
   settings.mMass = o.mass;
@@ -114,6 +131,7 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
     position: {x: position[0], y: position[1], z: position[2]},   // feet, world space
     velocity: {x: 0, y: 0, z: 0},
     grounded: false,
+    height: o.height,   // m, feet to the top of its capsule now: see setHeight
     heading,         // rad about Y the character faces (0 = +Z, positive toward +X); turns toward the move direction
     jumped: false,   // true for the step a jump started
     rooted: false,   // true while it turns on the spot before setting off (see turnFirst)
@@ -222,6 +240,19 @@ export function createCharacterController({J, jolt, layer, position = [0, 0, 0],
       // Remembered while falling: the speed it lands at.
       fallSpeed = state.grounded ? 0 : Math.max(0, -state.velocity.y);
       return state;
+    },
+    // Makes its capsule `height` m tall, its feet where they are: lower for a crouch, back up to stand. Standing up
+    // needs the room: where something is in the way it stays as it is, and this returns false.
+    setHeight(height) {
+      if (disposed) throw Error('Character controller was disposed');
+      if (!(Number.isFinite(height) && height > o.radius * 2)) throw Error('Character height must exceed twice its radius');
+      if (height === state.height) return true;
+      const made = capsule(height);
+      if (!character.SetShape(made, STAND_PENETRATION, broadFilter, layerFilter, bodyFilter, shapeFilter, allocator)) { made.Release(); return false; }
+      shape.Release();
+      shape = made;
+      state.height = height;
+      return true;
     },
     // Sets it moving at a velocity (m/s), as when something that carried it lets it go. In the air it keeps that over
     // the ground as far as airControl leaves it.

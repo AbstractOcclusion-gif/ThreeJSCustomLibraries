@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {createFootPlacement} from './foot-placement.js';
+import {createFootPlacement} from '../../src/character/ik/foot-placement.js';
 
 const BODY = {
  hips: 'hips', spine: 'spine.001', spine1: 'spine.002', spine2: 'spine.003',

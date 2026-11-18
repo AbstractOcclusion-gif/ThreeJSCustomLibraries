@@ -162,3 +162,24 @@ test('launched in the air with no air control, it keeps the speed it was given o
   assert.throws(() => controller.launch(NaN, 0, 0));
   dispose();
 });
+
+test('it lowers its capsule to pass under what it cannot stand under, and only stands up where there is room', () => {
+  const scene = world();
+  // A slab 1.2 m over the floor, from z = 2 to z = 6.
+  scene.host.addBox({halfExtents: [3, .2, 2], position: [0, 1.4, 4]});
+  scene.run(.5);
+  scene.run(4, {moveZ: 1});
+  assert.ok(scene.controller.position.z < 2, 'standing, the slab stops it: z = ' + scene.controller.position.z);
+  assert.equal(scene.controller.setHeight(1), true, 'it can always lower itself');
+  assert.equal(scene.controller.height, 1);
+  scene.run(1.2, {moveZ: 1});
+  assert.ok(scene.controller.position.z > 2.5 && scene.controller.position.z < 5.5, 'crouched, it goes under: z = ' + scene.controller.position.z);
+  assert.equal(scene.controller.setHeight(CHARACTER_DEFAULTS.height), false, 'under the slab there is no room to stand');
+  assert.equal(scene.controller.height, 1, 'so it stays low');
+  scene.run(4, {moveZ: 1});
+  assert.ok(scene.controller.position.z > 6.5, 'it comes out the far side');
+  assert.equal(scene.controller.setHeight(CHARACTER_DEFAULTS.height), true, 'and stands up again in the open');
+  assert.ok(Math.abs(scene.controller.position.y) < .05, 'its feet stayed on the floor');
+  assert.throws(() => scene.controller.setHeight(.4), /height/);
+  scene.dispose();
+});

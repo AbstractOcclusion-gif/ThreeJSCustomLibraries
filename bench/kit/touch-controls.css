@@ -5,7 +5,7 @@
 .touch-stick { position: absolute; left: max(20px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); width: 136px; height: 136px; border-radius: 50%; background: #ffffff1f; border: 2px solid #ffffff59; }
 .touch-knob { position: absolute; left: 50%; top: 50%; width: 60px; height: 60px; margin: -30px 0 0 -30px; border-radius: 50%; background: #ffffffb3; }
 .touch-buttons { position: absolute; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 12px; }
-.touch-row { position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); display: flex; gap: 8px; }
+.touch-row { position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 70vw; }
 .touch-button { border: 2px solid #ffffff59; background: #ffffff1f; color: white; font: 600 15px system-ui; border-radius: 50%; }
 .touch-buttons .touch-button { width: 84px; height: 84px; }
 .touch-row .touch-button { width: 44px; height: 44px; }

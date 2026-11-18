@@ -20,6 +20,7 @@ const LIBRARY_ALLOWED = {
   fire: ['particles/puffs.js'],                    // smoke and embers of the fire visual
   weather: ['particles/water/precipitation.js', 'particles/wind.js'],   // rain and snow; wind streaks and debris
   water: ['particles/water/spray-pump.js'],        // the boat spray pump
+  character: ['cable/index.js'],                   // the rope action hangs her from a cable
 };
 // Module pages (bench/<page>/): the modules each one shows. Every page may also use core, the stage and the UI tool the
 // bench chrome (bench/ui-demo.js) mounts on every page. Built on by design: boundaries->trees, fire->particle flames,
@@ -37,7 +38,7 @@ const PAGES = {
   character: ['character', 'camera'], vehicle: ['vehicle', 'camera'],
 };
 const EVERY_PAGE = ['core', 'stage', 'ui'];
-const MIXED_PAGES = ['demo-ocean', 'demo-all', 'demo-world', 'demo-craters', 'outdoor', 'demo-drive', 'tomb'];
+const MIXED_PAGES = ['demo-ocean', 'demo-all', 'demo-world', 'demo-craters', 'outdoor', 'demo-drive', 'demo-traversal', 'tomb'];
 
 const posix = file => file.split(path.sep).join('/');
 function jsFiles(dir) {
