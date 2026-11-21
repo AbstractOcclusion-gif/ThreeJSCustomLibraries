@@ -14,6 +14,9 @@ export const CABLE_PRESETS = Object.freeze({
     roughness: 0.45,
   }),
   support: Object.freeze({massPerMetre: 3, radius: 0.045, damping: 0.08, color: 0x8e9ca8}),
+  // A thin pull cord (blinds, a light switch): light, well damped, a few millimetres across. Use with a short minSpan
+  // and a fixed step of 1/240 s: links this thin hold together under a sideways tug only at that step.
+  cord: Object.freeze({massPerMetre: 0.08, radius: 0.004, damping: 0.5, color: 0xcfc4ad}),
 });
 export const CABLE_BUDGET = Object.freeze({
   segments: 24,
@@ -32,7 +35,7 @@ const WIND_WAKE_DELTA = 0.5; // m/s of wind change that wakes a sleeping cable
 const MIN_SEGMENTS = 4,
   SOLVER_STEP_LIMITS = [128, 32]; // [iterations, sub-steps] upper bounds
 const MIN_SPAN = 2,
-  SLACK = [1.01, 1.3]; // m; cable length as [min, max] x span
+  SLACK = [1.01, 1.3]; // m: the default shortest span (minSpan); cable length as [min, max] x span
 const SAG_FIT_ITERATIONS = 45; // bisection passes fitting the hanging polygon to the cable length
 // Link collision box: half length = max(minHalf, size / 2 - gap) so neighbouring boxes never overlap at the joints.
 const LINK_BOX = Object.freeze({minHalf: 0.01, gap: 0.006});
@@ -56,9 +59,12 @@ export function createCable({
   moveFixedBody,
   solverSteps = [32, 8],
   retentionDistance = 120,
+  minSpan = MIN_SPAN,
 } = {}) {
   const profile = CABLE_PRESETS[preset];
   if (!Number.isFinite(retentionDistance) || retentionDistance < 1) throw Error('Invalid cable retention distance');
+  // The shortest span a cable may have: every link must stay longer than the shortest link a reel allows.
+  if (!(Number.isFinite(minSpan) && minSpan >= MIN_LINK * MIN_SEGMENTS)) throw Error(`Cable minSpan must be at least ${MIN_LINK * MIN_SEGMENTS} m`);
   if (
     !world?.addBody ||
     !profile ||
@@ -86,8 +92,8 @@ export function createCable({
   const start = position(endpoints[0]),
     end = position(endpoints[1]),
     span = start.distanceTo(end);
-  if (!(span >= MIN_SPAN && Number.isFinite(length) && length >= span * SLACK[0] && length <= span * SLACK[1]))
-    throw Error('Cable length must be 1–30% longer than a span of at least 2 m');
+  if (!(span >= minSpan && Number.isFinite(length) && length >= span * SLACK[0] && length <= span * SLACK[1]))
+    throw Error(`Cable length must be 1–30% longer than a span of at least ${minSpan} m`);
   // Fit the actual polygon length, rather than treating sag as extra stretch.
   const direction = end.vsub(start).scale(1 / span),
     sagAxis = new C.Vec3(0, -1, 0);
