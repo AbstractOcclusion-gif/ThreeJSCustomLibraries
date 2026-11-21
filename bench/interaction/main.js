@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {createInteraction} from '../../src/interaction/index.js';
 import {createThreeInteractionPicker} from '../../src/interaction/three.js';
+import {createJoint} from '../../src/interaction/joints.js';
 import {createConditionRule, createPuzzle, createSequenceRule} from '../../src/puzzle/index.js';
 import {benchRenderer, bindResize, onLeave, startFrameLoop} from '../kit/page.js';
 import {DEMO} from './presets.js';
@@ -44,8 +45,10 @@ function gate(x) {
   return box({size, color, position: [x, size[1] / 2, z]});
 }
 
-const sequenceGate = gate(DEMO.gate.sequenceX);
-const weightGate = gate(DEMO.gate.weightX);
+// Each gate is a slide joint: it rises by `lift` along its own y axis when open.
+const gateJoint = mesh => createJoint({object: mesh, kind: 'slide', axis: 'y', open: DEMO.gate.lift, speed: DEMO.gate.speed});
+const sequenceGate = gateJoint(gate(DEMO.gate.sequenceX));
+const weightGate = gateJoint(gate(DEMO.gate.weightX));
 let gateOpen = false;
 const levers = DEMO.levers.map(({id, label, color, position}) => {
   const lever = box({...DEMO.lever, color, position});
@@ -159,9 +162,9 @@ document.getElementById('reset').onclick = () => {
   for (const weight of weights) weight.reset();
 };
 
-function moveGate(mesh, open, dt) {
-  const {size, lift, speed} = DEMO.gate;
-  mesh.position.y = THREE.MathUtils.damp(mesh.position.y, size[1] / 2 + (open ? lift : 0), speed, dt);
+function moveGate(joint, open, dt) {
+  if (open !== joint.isOpen) joint[open ? 'open' : 'close']();
+  joint.update(dt);
 }
 
 const unbindResize = bindResize(renderer, camera);
