@@ -2,10 +2,12 @@
 import * as THREE from 'three';
 import '../ui-demo.js';
 
+export const BENCH_PIXEL_RATIO = 1.25;   // device pixel ratio cap of the bench renderers
+
 export function benchRenderer() {
   // high-performance: on a machine with two GPUs, ask for the discrete one.
   const renderer = new THREE.WebGLRenderer({antialias: true, powerPreference: 'high-performance'});
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25)); renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, BENCH_PIXEL_RATIO)); renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   document.body.prepend(renderer.domElement);
   const error = document.getElementById('error');
