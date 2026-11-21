@@ -1,68 +1,19 @@
 import * as T from 'three';
 import {createPuffMaterial} from './puff-material.js';
+import {createSwirlField} from './swirl.js';
+import {
+  SHEETS,
+  DEFAULTS,
+  WIND_RAMP,
+  LIMITS,
+  PRESETS,
+  BUILTIN_SHEETS,
+  emitSettings,
+  planBurst,
+  assertSheetGrid,
+} from './puff-config.js';
 // Billboard puffs (dust, soft dust, smoke): a fixed sprite pool with per-sprite gravity, growth and fade.
-// Sprite sheets are white channel masks tinted per particle. With `assets` (a base URL) the named files below are
-// loaded from it; without it every preset uses the bundled soft mask. `sheets: {name: {url, cols, rows}}` adds or overrides.
-const SHEETS = {
-  dust: {file: 'fx-dust.png', cols: 2, rows: 2},
-  'dust-soft': {file: 'fx/hcfx-dust-soft.png', cols: 1, rows: 1},
-  smoke: {file: 'fx/hcfx-smoke.png', cols: 2, rows: 2},
-};
-// windResponse: share of the environment wind speed a puff drifts at (scaled per emission by opts.wind).
-const DEFAULTS = {pool: 192, windResponse: 0.3};
-const WIND_RAMP = 0.5; // seconds before a new puff is carried at full drift, so it does not pop off its emitter
-const LIMITS = Object.freeze({pool: 2048, sheetFrames: 256});
-// What emit() uses when a call leaves an option out. The 'dust' mask falls and is fainter; the others hang in the air.
-const EMIT_DEFAULTS = Object.freeze({gravity: 0, dustGravity: 1, grow: 0.8, opacity: 0.8, dustOpacity: 0.45});
-const RING_FRAMES = 4; // the ring puffs cycle through the first frames of their sheet
-// Presets: `ring` throws `count` puffs outward (outward: m/s per metre of size; up: m/s; jitter: random angle, radians;
-// scale: share of size; life: seconds), then `cloud` leaves one soft puff. A pair is a [min, max] range. Options left out
-// fall back to EMIT_DEFAULTS.
-const MORTAR_RING = Object.freeze({
-  count: 5,
-  jitter: 0.4,
-  outward: 0.65,
-  up: 0.55,
-  scale: [0.65, 1],
-  life: 1,
-  gravity: 0.35,
-  grow: 1,
-  opacity: 0.25,
-});
-const MORTAR_CLOUD = Object.freeze({up: 0.12, scale: 1.15, life: 2.6, gravity: 0, grow: 1.1, opacity: 0.16});
-const PRESETS = Object.freeze({
-  mortar: {color: 0xc7bba2, ring: MORTAR_RING, cloud: MORTAR_CLOUD},
-  mortarLanding: {
-    color: 0xc7bba2,
-    ring: {...MORTAR_RING, count: 2, up: 0.25, life: 0.65, opacity: 0.18},
-    cloud: {...MORTAR_CLOUD, life: 1.1, opacity: 0.12},
-  },
-  dust: {
-    color: 0xbfb6a8,
-    ring: {count: 6, jitter: 0, outward: 0.8, up: 1.2, scale: [0.7, 1.3], life: 0.9},
-    cloud: {up: 0.6, scale: 1.6, life: 1.2, gravity: -0.2, grow: 1.2, opacity: 0.5},
-  },
-  smoke: {
-    color: 0xd8d2c8,
-    ring: {
-      mask: 'smoke',
-      count: 4,
-      jitter: 1,
-      outward: 0.4,
-      up: [0.6, 1.4],
-      scale: [0.7, 1.1],
-      life: [1.4, 2],
-      gravity: -0.4,
-      grow: 0.8,
-      opacity: 0.35,
-    },
-  },
-});
-const pick = value => (Array.isArray(value) ? value[0] + Math.random() * (value[1] - value[0]) : value);
-const BUILTIN_MASK = new URL('../../assets/particles/soft-mask.svg', import.meta.url).href;
-const BUILTIN_SHEETS = Object.fromEntries(
-  Object.keys(SHEETS).map(name => [name, {url: BUILTIN_MASK, cols: 1, rows: 1}]),
-);
+// Defaults, presets and sheets live in puff-config.js, shared with the WebGPU entry (webgpu/puffs.js).
 export async function createPuffs(scene, options = {}) {
   const {
     pool,
@@ -79,15 +30,7 @@ export async function createPuffs(scene, options = {}) {
   const loaded = await Promise.allSettled(
     Object.entries(sheets).map(
       async ([name, {url, file, cols = 1, rows = 1, animate = false, heat = false, billow = false}]) => {
-        if (
-          !Number.isInteger(cols) ||
-          cols < 1 ||
-          !Number.isInteger(rows) ||
-          rows < 1 ||
-          cols * rows > LIMITS.sheetFrames
-        ) {
-          throw new Error(`Invalid sprite sheet grid: ${name}`);
-        }
+        assertSheetGrid(name, cols, rows);
         const sheet = await loadTexture(url ?? assets + file);
         sheet.colorSpace = T.SRGBColorSpace;
         owned.push(sheet);
@@ -128,7 +71,12 @@ export async function createPuffs(scene, options = {}) {
   // Optional core/environment.js contract, held by reference: wind drifts the puffs, light tints the lit ones. null = neither.
   let disposed = false,
     environment = options.environment ?? null;
+  // The swirling air (swirl.js) the puffs emitted with a `swirl` speed are carried by; options.swirl: its settings.
+  const swirl = createSwirlField(options.swirl),
+    flow = new T.Vector3();
+  let clock = 0; // s the pool has run: the swirl's time
   // opts: gravity (m/s^2 down, negative rises), grow (scale gain over life), opacity (peak), wind (drift scale, default 1),
+  // swirl (m/s the pool's swirling air carries it at, on top of its own velocity; default 0: none),
   // lit (follows environment.light; default: everything except glowing puffs - heat sheets and additive blending).
   function emit(name, position, velocity, size, life, color, index = 0, opts = {}) {
     if (disposed || !frames[name] || (options.isRelevant && !options.isRelevant(position))) return false;
@@ -138,12 +86,13 @@ export async function createPuffs(scene, options = {}) {
     p.age = 0;
     p.life = life;
     p.size = size;
-    p.gravity = opts.gravity ?? (name === 'dust' ? EMIT_DEFAULTS.dustGravity : EMIT_DEFAULTS.gravity);
-    p.grow = opts.grow ?? EMIT_DEFAULTS.grow;
-    p.peak = opts.opacity ?? (name === 'dust' ? EMIT_DEFAULTS.dustOpacity : EMIT_DEFAULTS.opacity);
+    const settings = emitSettings(name, opts);
+    p.gravity = settings.gravity;
+    p.grow = settings.grow;
+    p.peak = settings.peak;
     p.v.set(velocity[0], velocity[1], velocity[2]);
-    p.aspect = opts.aspect ?? 1;
-    p.fadeIn = opts.fadeIn ?? 0;
+    p.aspect = settings.aspect;
+    p.fadeIn = settings.fadeIn;
     const animation = animated[name];
     p.tiles.set(animation?.cols ?? 1, animation?.rows ?? 1);
     p.frame.value = 0;
@@ -154,7 +103,8 @@ export async function createPuffs(scene, options = {}) {
     p.material.opacity = p.fadeIn > 0 ? 0 : p.peak;
     p.material.rotation = opts.rotation ?? Math.random() * Math.PI * 2;
     p.material.blending = opts.blending ?? T.NormalBlending;
-    p.wind = opts.wind ?? 1;
+    p.wind = settings.wind;
+    p.swirl = opts.swirl ?? 0;
     p.lit = opts.lit ?? !(animation?.heat || p.material.blending === T.AdditiveBlending);
     p.base.setHex(color);
     p.material.color.copy(p.base);
@@ -163,27 +113,10 @@ export async function createPuffs(scene, options = {}) {
     p.sprite.visible = true;
     return true;
   }
-  function burst(position, size, color, {ring, cloud}) {
-    for (let i = 0; i < ring.count; i++) {
-      const angle = (i / ring.count) * Math.PI * 2 + Math.random() * ring.jitter,
-        outward = size * ring.outward;
-      emit(
-        ring.mask ?? 'dust',
-        position,
-        [Math.cos(angle) * outward, pick(ring.up), Math.sin(angle) * outward],
-        size * pick(ring.scale),
-        pick(ring.life),
-        color,
-        i % RING_FRAMES,
-        {gravity: ring.gravity, grow: ring.grow, opacity: ring.opacity},
-      );
-    }
-    if (cloud)
-      emit('dust-soft', position, [0, cloud.up, 0], size * cloud.scale, cloud.life, color, 0, {
-        gravity: cloud.gravity,
-        grow: cloud.grow,
-        opacity: cloud.opacity,
-      });
+  function burst(position, size, color, preset) {
+    planBurst(size, preset, (mask, velocity, puffSize, life, frame, opts) =>
+      emit(mask, position, velocity, puffSize, life, color, frame, opts),
+    );
   }
   const api = {
     emit,
@@ -202,9 +135,24 @@ export async function createPuffs(scene, options = {}) {
     smoke(position, size, color = PRESETS.smoke.color) {
       burst(position, size, color, PRESETS.smoke);
     },
+    // A local stir of the air: every living puff within `radius` (m) of `center` takes `velocity` (m/s, [x, y, z]) on
+    // top of its own, in full at the centre and fading to nothing at the edge. A hand through smoke, a door's draught.
+    disturb(center, radius, velocity) {
+      if (disposed) return;
+      if (!Number.isFinite(radius) || radius <= 0) throw new RangeError('Puff disturbance radius must be positive');
+      for (const p of puffs) {
+        if (!p.active) continue;
+        const share = 1 - p.sprite.position.distanceTo(center) / radius;
+        if (share <= 0) continue;
+        p.v.x += velocity[0] * share;
+        p.v.y += velocity[1] * share;
+        p.v.z += velocity[2] * share;
+      }
+    },
     update(dt) {
       if (disposed) return;
       const drift = environment ? windResponse : 0;
+      clock += dt;
       for (const p of puffs) {
         if (!p.active) continue;
         p.age += dt;
@@ -220,6 +168,12 @@ export async function createPuffs(scene, options = {}) {
           const carried = drift * p.wind * Math.min(1, p.age / WIND_RAMP) * dt;
           p.sprite.position.x += environment.wind.x * carried;
           p.sprite.position.z += environment.wind.z * carried;
+        }
+        if (p.swirl > 0) {
+          // Eased in over the swirl's ramp: a new puff still follows the thread it left in.
+          const felt = Math.min(1, p.age / swirl.ramp);
+          swirl.sample(flow, p.sprite.position.x, p.sprite.position.y, p.sprite.position.z, clock);
+          p.sprite.position.addScaledVector(flow, p.swirl * felt * felt * dt);
         }
         if (environment && p.lit) p.material.color.copy(p.base).multiply(environment.light);
         const fadeIn = p.fadeIn > 0 ? Math.min(1, p.age / p.fadeIn) : 1;
