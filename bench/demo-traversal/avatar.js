@@ -429,6 +429,15 @@ export async function loadTraversalAvatar(height, groundAt, probe, {
   // The clip she is in, by name, for a host that shows it.
   // What the grounder is doing to her feet and pelvis, for a host that tunes it.
   get grounding() { return grounder.state; },
+  sampleFeet(points) {
+   const contacts = grounder.state.feet;
+   const joints = ['l_foot', 'r_foot'];
+   for (const [side, point] of points.entries()) {
+    bones.get(joints[side]).getWorldPosition(point);
+    point.y -= soleHeight;
+    point.planted = contacts[side].planted;
+   }
+  },
   // How far her head is turned (rad), and how far each hand has gone out to a wall (0..1), for a host that shows it.
   get looking() { return {yaw: headLook.yaw, pitch: headLook.pitch, touch: touch.map(hand => hand.weight)}; },
   get playing() { return current === walk ? 'stride' : current.getClip().name; },

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <link rel="icon" href="data:,">
+ <title>Thaw Meadow · three-kit</title>
+ <style>
+  body aside { bottom: auto; width: 316px; padding: 14px 16px; }
+  @media(max-width:700px) { body aside { bottom: 10px; width: auto; } }
+  #meadow-settings > summary {
+   display: block; position: fixed; top: 70px; left: 28px; z-index: 4; cursor: pointer;
+   background: #203335e8; border: 1px solid #ffffff40; border-radius: 20px; padding: 8px 12px; font-size: 12px;
+  }
+  #meadow-weather > details, #meadow-tuning { margin-top: 12px; }
+  #meadow-weather > details > summary { cursor: pointer; font-weight: 600; }
+  #meadow-tuning > .lil-gui.root { width: 100%; }
+  .touch-help { display: none; }
+  body.touch canvas { touch-action: none; }
+  body.touch #meadow-settings > summary { top: 56px; left: 16px; }
+  body.touch aside { top: 100px; right: auto; bottom: auto; left: 16px; width: min(340px, calc(100vw - 32px)); max-height: calc(100dvh - 116px); }
+  body.touch #meadow-settings[open] ~ .touch-controls { visibility: hidden; }
+  body.touch .keyboard-help { display: none; }
+  body.touch .touch-help { display: block; }
+ </style>
+</head>
+<body>
+ <header><h1>Thaw Meadow</h1><a href="../" target="_top">Bench</a></header>
+ <details id="meadow-settings" open>
+ <summary>Meadow settings</summary>
+ <aside>
+  <div id="meadow-weather"></div>
+  <div id="meadow-tuning"></div>
+  <p class="intro">Follow the grass down to the sandy shore, then cross the muddy inlet to reach the snow shelf.</p>
+  <label>Camera <select id="view"><option value="follow">Follow</option><option value="orbit">Orbit</option></select></label>
+  <label>Character <select id="avatar"><option value="bot">Bot</option><option value="lara" hidden>Lara</option></select></label>
+  <p id="avatar-status" role="status"></p>
+  <label>Conditions <select id="conditions"><option value="clear">Clear</option><option value="rain">Rain</option><option value="snow">Snowfall</option></select></label>
+  <label>Quality <select id="quality"><option value="low">Low</option><option value="balanced" selected>Balanced</option><option value="high">High</option></select></label>
+  <p class="footnote keyboard-help">Click the view to look around. WASD or arrows to walk, Shift to run, Space to jump. Esc releases the mouse.</p>
+  <p class="footnote touch-help">Use the stick to walk and push it farther to run. Drag the view to look around.</p>
+  <button type="button" id="reset">Reset walk and tracks</button>
+  <p id="status" role="status">Loading the meadow…</p>
+  <div id="error" role="alert" hidden></div>
+ </aside>
+ </details>
+ <script type="module" src="./main.js"></script>
+</body>
+</html>

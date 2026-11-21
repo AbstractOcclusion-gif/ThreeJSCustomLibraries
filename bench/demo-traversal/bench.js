@@ -15,6 +15,7 @@ import {createCharacterController} from '../../src/character/index.js';
 import {addJoltBlocks} from '../kit/jolt-blocks.js';
 import {WORLD_COST} from '../kit/world-settings.js';
 import {createTouchControls} from '../kit/touch-controls.js';
+import {recoverTraversalLanding, TRAVERSAL_GRAVITY as GRAVITY, TRAVERSAL_PLAYER as PLAYER} from '../kit/traversal-movement.js';
 import {pickQuality} from './quality.js';
 import {createCourseLight} from './light.js';
 import {createLookInput} from './look-input.js';
@@ -31,9 +32,6 @@ const TOWER = {steps: 13, rise: .24, run: .4, halfWidth: 1.2, x: 1.8, z: 12.4};
 // Where the number keys put her: x, y, z and the way she faces (rad). R, or a fall, brings her back to the last one.
 // 1 is the entrance; the others are the areas of the gymnasium beside it (gymnasium.js).
 const STATIONS = {Digit1: [0, 0, 0, 0], ...GYM_STATIONS, Digit7: COURTYARD_STATION};
-// Landings by the speed she comes down at (m/s): firm from a real drop, hard from a height. A hard landing is rolled out
-// when the move asked points within `forward` (a cosine) of the way she faces; otherwise she takes it standing.
-const LANDING = {firm: 6.2, hard: 8, forward: .5};
 // On stairs with treads shallower than `under` (m) she walks at `pace` times her walk speed: short steps taken at full
 // speed would be hurried.
 const STAIR_PACE = {under: .7, pace: .75};
@@ -61,11 +59,6 @@ const COURSE = {size: 64, thickness: 1, color: 0x8b7457, blocks: [
  ...gymnasiumBlocks(),
 ]};
 const SHORT_JUMP_MARK = 7.45;
-// Capsule (m), speeds (m/s) and feel. Jumps are committed: no steering in the air, a standing jump launches at jumpLaunch.
-// She stops harder than she starts (braking), slows into sharp turns and pivots (turnCoupling), and a hard landing costs speed.
-// From a standstill she turns on the spot first when the move asked is more than turnFirst (rad) off the way she faces.
-const PLAYER = {radius: .3, height: 1.75, walkSpeed: 1.3, runSpeed: 4.4, airControl: 0, jumpSpeed: 5.5, jumpCut: .55, jumpLaunch: 2.4,
- braking: 16, turnSpeed: 12, turnCoupling: .7, turnFirst: .6, standTurnSpeed: 5.5, landingLoss: .7, landingSoft: 4, landingHard: 9};
 // Ground under a foot: looked for from `above` to `below` the point asked (m); flatter than `slope` (the normal's Y) or it does not count.
 const FOOT = {above: .45, below: .5, slope: .65};
 const VIEW = {yaw: 0, pitch: .38, distance: 4.2, height: 1.05, fov: 60, sensitivity: .0025};
@@ -85,9 +78,8 @@ const TOUCH_BUTTONS = [
 ];
 const PROXY_COLOR = 0xf2a755;   // the capsule drawn while the model loads, or when it cannot
 const MS = 1000;
-const GRAVITY = 12.8;   // m/s2, the same for the Jolt world, the ropes and the winch
 
-export async function startTraversalBench({loadAvatar, label, createDressing}) {
+export async function startTraversalBench({loadAvatar, label, createDressing, waterSplashes = false}) {
  const renderer = benchRenderer(), scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(VIEW.fov, 1, .1, 200);
  const unbindResize = bindResize(renderer, camera);
  const half = COURSE.size / 2;
@@ -105,7 +97,7 @@ export async function startTraversalBench({loadAvatar, label, createDressing}) {
  const site = createDressing?.({renderer, scene, environment: stage.environment});
  const blocks = addJoltBlocks({host, scene, blocks: COURSE.blocks, color: COURSE.color, style: site?.style});
  const controller = createCharacterController({J, jolt: host.jolt, layer: host.layers.moving, waterLevelAt: cisternLevelAt, ...PLAYER});
- const cistern = createCistern({renderer, scene, camera, sunDirection: stage.environment.sun.direction});
+ const cistern = createCistern({renderer, scene, camera, sunDirection: stage.environment.sun.direction, waterSplashes});
  // The line that says what E does: the courtyard props write what they offer into propHint, and each frame shows
  // that, or what she holds or could turn (see the frame loop).
  const propPrompt = document.querySelector('#interaction'), propHint = {textContent: ''};
@@ -199,6 +191,7 @@ export async function startTraversalBench({loadAvatar, label, createDressing}) {
   crouch.reset();
   capstan.reset();
   props.reset();
+  cistern.clearSplashes();
   tilt.identity();
   follow.reset();
   follow.look(shortestTurn(station[3] - follow.yaw), 0);
@@ -237,13 +230,7 @@ export async function startTraversalBench({loadAvatar, label, createDressing}) {
    }
   }
   // The controller is not stepped while she hangs or climbs, so what it last told is only read when she is free.
-  const impact = carrier().state === 'free' ? controller.landed : 0;
-  if (impact >= LANDING.firm) {
-   const forward = moveX * Math.sin(controller.heading) + moveZ * Math.cos(controller.heading) > LANDING.forward;
-   landing = impact < LANDING.hard ? 'firm' : forward ? 'roll' : 'hard';
-   const recovery = character?.recovery[landing];
-   if (recovery) controller.commit(recovery.seconds, recovery.speed);
-  }
+  if (carrier().state === 'free') landing = recoverTraversalLanding(controller, wish, character?.recovery) ?? landing;
   if (climb) keys.delete('Space');
   climb = drop = false;
   jumped ||= controller.jumped;
@@ -295,6 +282,7 @@ export async function startTraversalBench({loadAvatar, label, createDressing}) {
   tread = controller.grounded && carrier().state === 'free' ? stairsUnder(position, controller.heading) : 0;
   look.copy(camera.position).addScaledVector(camera.getWorldDirection(viewWay), LOOK_AHEAD);
   character?.update(dt, controller, jumped, PLAYER, carrier(), {landing, wish, tread, look, bumped, crouched: crouch.low, sliding: crouch.sliding});
+  cistern.trackFeet(carrier().state === 'free' ? character : null, groundAt);
   jumped = bumped = false;
   landing = null;
   touch.show('drop', ledge.state === 'hang');
@@ -317,6 +305,7 @@ export async function startTraversalBench({loadAvatar, label, createDressing}) {
   light.shadows(camera);
   cistern.draw(dt);
   light.present(camera, dt);
+  cistern.drawSplashes();
  });
  const demo = {controller, host, ledge, rope, ladder, push, capstan, winch, props, reset, follow, get character() { return character; }, touch, stations: STATIONS, quality, light, actions, crouch};
  onLeave(() => {
