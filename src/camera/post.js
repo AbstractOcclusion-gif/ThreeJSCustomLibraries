@@ -5,14 +5,15 @@ import {TexturePass} from 'three/addons/postprocessing/TexturePass.js';
 import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
 import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {GTAOPass} from 'three/addons/postprocessing/GTAOPass.js';
-// The stock normal override includes transparent meshes. Exclude effects/sky
+// The stock normal override includes transparent meshes and sprites. Exclude effects/sky
 // during that render only, and restore visibility even if rendering throws.
 class OpaqueGTAOPass extends GTAOPass {
   _renderOverride(renderer, material, target, color, alpha) {
     const hidden = [],
       previous = this.scene.overrideMaterial;
     this.scene.traverse(o => {
-      if (!o.isMesh || !o.visible) return;
+      // Sprites (particle puffs) are always see-through: they never take part in the AO.
+      if ((!o.isMesh && !o.isSprite) || !o.visible) return;
       const materials = Array.isArray(o.material) ? o.material : [o.material];
       if (materials.every(m => m.transparent || m.depthWrite === false)) {
         hidden.push(o);
