@@ -131,7 +131,7 @@ function stepBoat(dt) {
  if (boatSettings.follow && !view.waterline) { camera.position.add(boatDelta); controls.target.add(boatDelta); }
 }
 const float = createOceanFloat(scene, ocean, spray.emitSplash);
-const rippleGesture = bindOceanRipples({canvas: renderer.domElement, controls, camera, view, wake: ocean.wake,
+const rippleGesture = bindOceanRipples({canvas: renderer.domElement, controls, camera, isWaterline: () => view.waterline, wake: ocean.wake,
   isWet: (x, z) => (coast.collisionHeightAt(x, z) ?? -1) < 0});
 
 const gui = createBenchPanel('Ocean coast demo');

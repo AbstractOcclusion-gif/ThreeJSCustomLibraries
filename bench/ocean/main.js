@@ -28,7 +28,7 @@ const waterScene = new THREE.Scene();
 waterScene.add(ocean.mesh);
 const probes = new SurfaceProbes(ocean.fft, 3, {wake: ocean.wake}), probeStep = 2;
 const waterline = createWaterlineComposite(renderer, {caustics: ocean.caustics, sky: sky.uniforms});
-const rippleGesture = bindOceanRipples({canvas: renderer.domElement, controls, camera, view, wake: ocean.wake});
+const rippleGesture = bindOceanRipples({canvas: renderer.domElement, controls, camera, isWaterline: () => view.waterline, wake: ocean.wake});
 
 const gui = createBenchPanel('Ocean');
 const stageUI = stageControls(gui, stage, {onChange: () => sky.setEnvironment(stage.environment)});

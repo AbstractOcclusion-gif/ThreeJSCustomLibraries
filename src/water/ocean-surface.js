@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import {proceduralSky} from './sky-binding.js';
 import {createLaceTexture} from './foam-texture.js';
-import {OceanFft} from './ocean/fft.js';
+import {FFT_SAMPLE_GLSL, OceanFft} from './ocean/fft.js';
 import {OceanClipmap} from './ocean/clipmap.js';
 import {SHORE_DEFAULTS} from './ocean/bed.js';
 import {applySurf, setSurfTime, SURF_DEFAULTS, SURF_WARP_REACH_SPACINGS} from './ocean/surf-waves.js';
 import {JERLOV} from './jerlov.js';
-import {createOceanCaustics} from './ocean/caustics.js';
-import {SimWindow} from './ocean/sim-window.js';
+import {createOceanCaustics, OCEAN_CAUSTIC_GLSL} from './ocean/caustics.js';
+import {SIM_SAMPLE_GLSL, SimWindow} from './ocean/sim-window.js';
 import {ObstacleFootprint} from './ocean/obstacle.js';
 import {createPlanarCapture} from './planar-capture.js';
 import {createWaveBank} from './waves.js';

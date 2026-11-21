@@ -1,5 +1,9 @@
 export {createWaveBank, waveCount, WIND_WAVE_DEFAULTS} from './waves.js';
 export {createRipples} from './ripples.js';
+export {createRippleProbes} from './ripple-probes.js';
+export {createVessel, vesselAbsorption, VESSEL_DEFAULTS, VESSEL_LIMITS, VESSEL_MAX_CONTENTS} from './vessel.js';
+export {createGlassLook, GLASS_DEFAULTS, GLASS_LIMITS} from './glass.js';
+export {createLightCaustics, LIGHT_CAUSTIC_DEFAULTS, LIGHT_CAUSTIC_LIMITS} from './light-caustics.js';
 export {createFoamLayer} from './foam-layer.js';
 export {createFlowBake} from './flow-bake.js';
 export {createChannel, DEFAULT_SECTIONS} from './channel.js';

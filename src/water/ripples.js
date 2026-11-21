@@ -12,8 +12,10 @@ const ACTIVE_SECONDS = 6; // the field runs this long after the last splash, the
 // Use substeps on finer grids to maintain propagation speed. splash can take a radius in metres.
 // velocityRetention is the fraction of velocity kept from damping per reference 60 Hz step.
 // mask(isWet) takes a callback (x, z) -> boolean that decides which cells carry water (channel section, minus obstacles…).
+// closed: the water of a closed container (a glass, a bottle) keeps its volume: a splash that pushes the surface down
+// here raises it elsewhere, and the level comes back by itself (open water, the default, lets a dip fade out slowly).
 export function createRipples({origin = [-36, -32], size = [192, 160], cell = 0.4, substeps = 1,
-  velocityRetention = WAVE.damping} = {}) {
+  velocityRetention = WAVE.damping, closed = false} = {}) {
   if (!Number.isInteger(substeps) || substeps < 1) throw new RangeError('Ripple substeps must be a positive integer');
   if (!(velocityRetention > 0 && velocityRetention <= 1)) throw new RangeError('Ripple velocity retention must be in (0, 1]');
   const step = REFERENCE_STEP / substeps;
@@ -27,7 +29,16 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = 0.
   const texture = createDataTexture(heights, columns, rows, {format: RedFormat, type: FloatType, upload: false});
   const bounds = new Vector4(xMin, zMin, columns * cell, rows * cell);
   let active = 0,
-    accumulator = 0;
+    accumulator = 0,
+    wetCells = 0;
+
+  // Closed container: the mean height of the wet cells is taken back out, so the volume stays what it was at rest.
+  function keepVolume() {
+    let sum = 0;
+    for (let i = 0; i < heights.length; i++) if (wet[i]) sum += heights[i];
+    const mean = sum / wetCells;
+    for (let i = 0; i < heights.length; i++) if (wet[i]) heights[i] -= mean;
+  }
 
   function mask(isWet) {
     for (let x = 1; x < columns - 1; x++) {
@@ -39,6 +50,7 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = 0.
         if (!wet[i]) heights[i] = velocity[i] = 0;
       }
     }
+    wetCells = wet.reduce((count, cellIsWet) => count + cellIsWet, 0);
     texture.needsUpdate = true;
   }
 
@@ -88,6 +100,7 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = 0.
         next[i] = (h + velocity[i]) * decay;
       }
       for (let i = 0; i < heights.length; i++) heights[i] = wet[i] ? next[i] : 0;
+      if (closed && wetCells > 0) keepVolume();
     }
     if (active <= 0) {
       clear();
@@ -96,12 +109,21 @@ export function createRipples({origin = [-36, -32], size = [192, 160], cell = 0.
     texture.needsUpdate = true;
   }
 
+  // The height of the field at (x, z) in its own frame, read between the cells (0 off the field).
+  function heightAt(x, z) {
+    const fx = (x - xMin) / cell - 0.5, fz = (z - zMin) / cell - 0.5;
+    if (fx < 0 || fz < 0 || fx > columns - 1 || fz > rows - 1) return 0;
+    const i = Math.min(Math.floor(fx), columns - 2), j = Math.min(Math.floor(fz), rows - 2), tx = fx - i, tz = fz - j, at = j * columns + i;
+    return (heights[at] * (1 - tx) + heights[at + 1] * tx) * (1 - tz) + (heights[at + columns] * (1 - tx) + heights[at + columns + 1] * tx) * tz;
+  }
+
   return {
     texture,
     bounds,
     cell,
     mask,
     splash,
+    heightAt,
     update,
     clear,
     get active() {

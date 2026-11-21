@@ -5,10 +5,10 @@ import {bindRippleGesture} from '../ripple-gesture.js';
 const RIPPLE = Object.freeze({radius: 3.2, strength: .65, spacing: 1.5});
 const SEA_PLANE = new Plane(new Vector3(0, 1, 0), 0);
 
-export function bindOceanRipples({canvas, controls, camera, view, wake, isWet = () => true}) {
+export function bindOceanRipples({canvas, controls, camera, isWaterline, wake, isWet = () => true}) {
   const ray = new Raycaster(), impact = new Vector3();
   return bindRippleGesture(canvas, controls, event => {
-    if (view.waterline) return;
+    if (isWaterline()) return;
     aimRay(ray, event, canvas, camera);
     if (!ray.ray.intersectPlane(SEA_PLANE, impact)) return;
     const {center, halfSize} = wake;
