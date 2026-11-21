@@ -49,6 +49,15 @@ bus. `sound.bus(id).setMix({gain, mute, solo}, fadeSeconds)` changes the mix.
 `destination` let a host reuse its audio graph. Dispose the sound engine when
 leaving the scene. The host owns the lifecycle of an injected context.
 
+## Music: streaming
+
+`sound.load` decodes a whole file into memory, which suits clips and loops. For a
+long track use `sound.stream(url, {bus: 'music', gain, loop: true, fadeSeconds})`:
+an audio element plays it as it downloads and feeds the bus, so the mix and
+effects still apply. It returns a voice (`setGain`, `stop(fadeSeconds)`, `ended`)
+with `started`, the promise of the element's `play()`. Call it after `unlock()`,
+from a user gesture.
+
 ## Spatial audio
 
 ```js

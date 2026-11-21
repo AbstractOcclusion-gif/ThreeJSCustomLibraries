@@ -19,6 +19,7 @@ export function createSound({context, destination, buses = SOUND_BUSES, sounds =
   const definitions = new Map(Object.entries(sounds));
   const buffers = new Map();
   const voices = new Set();
+  const streams = new Set();
   let disposed = false;
 
   function active() {
@@ -203,8 +204,56 @@ export function createSound({context, destination, buses = SOUND_BUSES, sounds =
     return voice.api;
   }
 
+  // A long track (music) played as it downloads, instead of decoded whole into memory as load() does: three minutes of
+  // stereo is some 80 MB once decoded. An audio element feeds the bus through the graph, so the mix, effects and meters
+  // apply to it as to any voice. element: an HTMLAudioElement to use (made from url when left out).
+  // Returns a voice ({ended, setGain, stop}) and `started`, the promise of the element's play().
+  function stream(url, {bus = 'music', gain = settings.gain, loop = true, fadeSeconds = 0, element} = {}) {
+    active();
+    const target = mixer.get(bus);
+    if (!target) throw new Error('Unknown sound bus: ' + bus);
+    const media = element ?? new Audio();
+    media.crossOrigin = 'anonymous';
+    media.preload = 'auto';
+    media.loop = loop;
+    if (url) media.src = url;
+    const source = context.createMediaElementSource(media);
+    const fader = context.createGain();
+    fader.gain.value = fadeSeconds > 0 ? 0 : gain;
+    source.connect(fader).connect(target.input);
+    const voice = {stopping: false};
+    voice.dispose = () => {
+      streams.delete(voice);
+      media.onended = null;
+      media.pause();
+      source.disconnect();
+      fader.disconnect();
+    };
+    voice.api = {
+      element: media,
+      get ended() { return !streams.has(voice); },
+      setGain(value, seconds = settings.fadeSeconds) {
+        if (streams.has(voice) && !voice.stopping) ramp(context, fader.gain, value, seconds);
+      },
+      stop(seconds = 0) {
+        if (voice.stopping || !streams.has(voice)) return;
+        voice.stopping = true;
+        if (seconds > 0) {
+          ramp(context, fader.gain, 0, seconds);
+          setTimeout(voice.dispose, seconds * 1000);
+        } else voice.dispose();
+      },
+    };
+    streams.add(voice);
+    media.onended = () => { if (!media.loop) voice.dispose(); };
+    if (fadeSeconds > 0) ramp(context, fader.gain, gain, fadeSeconds);
+    voice.api.started = media.play();
+    voice.api.started?.catch?.(() => {});   // a refused start (no user gesture yet) is the host's to retry
+    return voice.api;
+  }
+
   return {
-    context, load, play, addBus,
+    context, load, play, stream, addBus,
     async unlock() { active(); await context.resume(); },
     define(id, options) { active(); definitions.set(id, options); },
     bus(id) {
@@ -243,6 +292,7 @@ export function createSound({context, destination, buses = SOUND_BUSES, sounds =
         voice.api.stop();
         voice.dispose();
       }
+      for (const voice of [...streams]) voice.dispose();
       for (const bus of mixer.values()) bus.dispose();
       mixer.clear();
       buffers.clear();
