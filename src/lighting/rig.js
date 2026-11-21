@@ -4,6 +4,8 @@
 // The hook holds a fixed number of lights; with more in the rig, the ones that count most at the focus are kept.
 // With `shadows`, the lights added with {shadow: true} cast the kit's own shadows (light-shadows.js) on both paths.
 // That is the rig's own flag: Three's castShadow is left alone, and such a light should not cast Three's shadow too.
+// With {air}, a light lights only a share of the lit air (volumetric.js): 0 (or false) for a fill or bounce light that
+// should brighten surfaces without a glow of its own in the air. Every light lights all of it by default.
 import * as THREE from 'three';
 import {addLightSlot} from '../core/light-slots.js';
 import {createLightShadows} from './light-shadows.js';
@@ -28,6 +30,7 @@ uniform vec3 uRigPosition[LIGHT_RIG_CAPACITY];    // world position
 uniform vec3 uRigColor[LIGHT_RIG_CAPACITY];       // colour x intensity
 uniform vec3 uRigDirection[LIGHT_RIG_CAPACITY];   // from the target of a spot light toward the light
 uniform vec4 uRigShape[LIGHT_RIG_CAPACITY];       // cutoff distance (0 = none), decay, cos(cone), cos(inner cone)
+uniform float uRigAir[LIGHT_RIG_CAPACITY];        // share of the light in the lit air (volumetric.js): 0 = none, 1 = all
 // The light of rig light i at a place, before any shadow: colour x distance falloff x cone. direction: toward the light.
 vec3 lightRigAt(int i, vec3 worldPosition, out vec3 direction) {
   vec3 toLight = uRigPosition[i] - worldPosition;
@@ -55,7 +58,7 @@ vec3 lightLocal(vec3 n, vec3 worldPosition, float wrap) {
 }`;
 
 // shadows: {renderer, ...LIGHT_SHADOW_DEFAULTS} turns the light shadows on.
-// Returns {lights: {glsl, uniforms}, capacity, count, shadows, add(light, {shadow}) -> remove, remove(light), has(light), setShadow(light, on),
+// Returns {lights: {glsl, uniforms}, capacity, count, shadows, add(light, {shadow, air}) -> remove, remove(light), has(light), setShadow(light, on), setAir(light, share), airOf(light),
 // update(focus?) -> lights given to the hook, renderShadows(scene) -> lights drawn, applyTo(material) -> detach, dispose()}.
 export function createLightRig({shadows: shadowOptions, ...overrides} = {}) {
   const settings = {...LIGHT_RIG_DEFAULTS, ...overrides};
@@ -66,9 +69,11 @@ export function createLightRig({shadows: shadowOptions, ...overrides} = {}) {
   const uniforms = {
     uRigCount: {value: 0}, uRigPosition: {value: vectors()}, uRigColor: {value: vectors()}, uRigDirection: {value: vectors()},
     uRigShape: {value: Array.from({length: capacity}, () => new THREE.Vector4())},
+    uRigAir: {value: new Array(capacity).fill(1)},
     ...(shadows && {uRigCaster: {value: new Array(capacity).fill(-1)}, ...shadows.uniforms}),
   };
   const shadowed = new Set();   // the lights that cast
+  const airs = new Map();       // share of the lit air of the lights that do not light all of it
   const casting = [];         // the chosen lights that cast, strongest first
   const lights = [];          // every light of the rig
   const weights = [];         // how much each one counts this frame, by its index in `lights`
@@ -86,6 +91,7 @@ export function createLightRig({shadows: shadowOptions, ...overrides} = {}) {
     if (spot) uniforms.uRigDirection.value[index].copy(uniforms.uRigPosition.value[index]).sub(light.target.getWorldPosition(target)).normalize();
     uniforms.uRigShape.value[index].set(light.distance, light.decay,
       spot ? Math.cos(light.angle) : NO_CONE[0], spot ? Math.cos(light.angle * (1 - light.penumbra)) : NO_CONE[1]);
+    uniforms.uRigAir.value[index] = airs.get(light) ?? 1;
   }
   const rig = {
     settings, capacity, shadows, lights: {glsl: lightRigGLSL(capacity, shadows?.glsl), uniforms},
@@ -93,15 +99,16 @@ export function createLightRig({shadows: shadowOptions, ...overrides} = {}) {
     get count() { return lights.length; },
     has: light => lights.includes(light),
     // A Three PointLight or SpotLight, wherever it is in the scene. shadow: the light casts (a rig with shadows).
-    // Returns the function that takes it out again.
-    add(light, {shadow = false} = {}) {
+    // air: its share of the lit air, 0 to 1 (false = 0, true = 1). Returns the function that takes it out again.
+    add(light, {shadow = false, air = 1} = {}) {
       if (!light?.isPointLight && !light?.isSpotLight) throw new TypeError('The light rig takes a Three PointLight or SpotLight');
       if (lights.includes(light)) throw Error('This light is already in the rig');
       lights.push(light);
       if (shadow) rig.setShadow(light, true);
+      rig.setAir(light, air);
       return () => rig.remove(light);
     },
-    remove(light) { const index = lights.indexOf(light); if (index >= 0) lights.splice(index, 1); shadowed.delete(light); },
+    remove(light) { const index = lights.indexOf(light); if (index >= 0) lights.splice(index, 1); shadowed.delete(light); airs.delete(light); },
     // Makes a light of the rig cast, or not.
     setShadow(light, on) {
       if (!shadows) throw Error('This light rig has no shadows');
@@ -110,6 +117,22 @@ export function createLightRig({shadows: shadowOptions, ...overrides} = {}) {
       return rig;
     },
     castsShadow: light => shadowed.has(light),
+    // Narrows a casting spot light's shadow to a sphere ({center, radius}; null: its whole cone), light-shadows.js focus.
+    focusShadow(light, sphere) {
+      if (!shadows) throw Error('This light rig has no shadows');
+      if (!lights.includes(light)) throw Error('This light is not in the rig');
+      shadows.focus(light, sphere);
+      return rig;
+    },
+    // How much of the lit air a light of the rig lights: 0 to 1 (false = 0, true = 1).
+    setAir(light, share) {
+      if (!lights.includes(light)) throw Error('This light is not in the rig');
+      const value = share === true ? 1 : share === false ? 0 : share;
+      if (!Number.isFinite(value) || value < 0 || value > 1) throw new RangeError('Light air share must be between 0 and 1');
+      if (value === 1) airs.delete(light); else airs.set(light, value);
+      return rig;
+    },
+    airOf: light => (lights.includes(light) ? airs.get(light) ?? 1 : undefined),
     // Once per frame, after the lights moved. focus: a world position (THREE.Vector3, e.g. the camera's) around which
     // the lights are chosen when the rig holds more than the hook reads. Lights that are hidden or dark are left out.
     update(focus) {
@@ -149,7 +172,7 @@ export function createLightRig({shadows: shadowOptions, ...overrides} = {}) {
         if (directLight.visible) directLight.color *= lightShadowNear(${light}.position, viewMatrix, vLightWorld, inverseTransformDirection(geometryNormal, viewMatrix));`;
       return addLightSlot(material, {key: SLOT, uniforms: shadows.uniforms, worldPosition: true, declarations: shadows.glsl, point: cut('pointLight'), spot: cut('spotLight')});
     },
-    dispose() { lights.length = weights.length = chosen.length = casting.length = 0; shadowed.clear(); uniforms.uRigCount.value = 0; shadows?.dispose(); },
+    dispose() { lights.length = weights.length = chosen.length = casting.length = 0; shadowed.clear(); airs.clear(); uniforms.uRigCount.value = 0; shadows?.dispose(); },
   };
   return rig;
 }

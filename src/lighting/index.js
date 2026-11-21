@@ -4,3 +4,4 @@ export {createSunShadows, sunShadowGLSL, SUN_SHADOW_DEFAULTS, SUN_SHADOW_LIMITS}
 export {cascadeSplits, createCascadeFitter} from './cascades.js';
 export {createLightShadows, lightShadowGLSL, LIGHT_SHADOW_DEFAULTS, LIGHT_SHADOW_LIMITS} from './light-shadows.js';
 export {createVolumetricLight, VOLUMETRIC_DEFAULTS, VOLUMETRIC_LIMITS} from './volumetric.js';
+export {createReflectionProbe, REFLECTION_PROBE_DEFAULTS, REFLECTION_PROBE_LIMITS} from './reflection-probe.js';

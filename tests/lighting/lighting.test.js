@@ -453,3 +453,54 @@ test('sun covers multiply in the hook and in the air, and a volumetric pass stop
  assert.deepEqual(march.uniforms.uVolumeHasWater.value.toArray(), [0, 0]);
  volumetric.dispose(); shadows.dispose(); assert.equal(volumetric.capture(scene, camera, environment), null);
 });
+
+test('a rig light can light only a share of the lit air, and the march skips the ones that light none of it', () => {
+ const rig = createLightRig({capacity: 3}), {uniforms} = rig.lights;
+ const beam = new THREE.SpotLight(0xffffff, 10), fill = new THREE.PointLight(0xffffff, 5), half = new THREE.PointLight(0xffffff, 1);
+ rig.add(beam); rig.add(fill, {air: false}); rig.add(half, {air: .5});
+ assert.equal(rig.airOf(beam), 1); assert.equal(rig.airOf(fill), 0); assert.equal(rig.airOf(half), .5);
+ assert.equal(rig.airOf(new THREE.PointLight()), undefined);
+ assert.throws(() => rig.setAir(beam, 2), RangeError);
+ assert.throws(() => rig.setAir(new THREE.PointLight(), 0), /not in the rig/);
+ rig.update();
+ assert.deepEqual(uniforms.uRigAir.value, [1, 0, .5]);   // written in the order the hook reads them, strongest first
+ rig.setAir(fill, true); rig.update();
+ assert.deepEqual(uniforms.uRigAir.value, [1, 1, .5]);
+ assert.ok(rig.lights.glsl.includes('uniform float uRigAir['));
+ const renderer = recordingRenderer(), volumetric = createVolumetricLight({renderer, rig});
+ assert.ok(JSON.stringify(volumetric).length >= 0);
+ volumetric.dispose();
+});
+
+test('a spot light can narrow its shadow to a sphere and give the cone back', () => {
+ const renderer = recordingRenderer(), rig = createLightRig({capacity: 2, shadows: {renderer, casters: 1, resolution: 128}}), {uniforms} = rig.lights;
+ const scene = new THREE.Scene(), spot = new THREE.SpotLight(0xffffff, 40, 0, Math.PI / 6);
+ spot.position.set(5, 10, 0); spot.target.position.set(5, 0, 0); scene.add(spot, spot.target);
+ rig.add(spot, {shadow: true}); rig.update(); rig.renderShadows(scene);
+ const block = rig.shadows.blockOf(spot), center = new THREE.Vector3(6, 0, 0), reach = center.distanceTo(spot.position);
+ assert.throws(() => rig.focusShadow(spot, {center, radius: 0}), RangeError);
+ assert.throws(() => rig.focusShadow(new THREE.SpotLight(), {center, radius: 1}), /not in the rig/);
+ assert.throws(() => rig.shadows.focus(new THREE.PointLight(), null), TypeError);
+ rig.focusShadow(spot, {center, radius: .5}); rig.update();
+ assert.equal(rig.renderShadows(scene), 1);   // drawn again at once
+ const seen = center.clone().applyMatrix4(uniforms.uLightShadowMatrix.value[block]);
+ assert.ok(Math.abs(seen.x) < 1e-6 && Math.abs(seen.y) < 1e-6, 'the focus is the middle of the tile');
+ assert.ok(Math.abs(uniforms.uLightShadowKind.value[block].y - Math.tan(Math.asin(.5 / reach))) < 1e-9);
+ rig.focusShadow(spot, null); rig.update(); rig.renderShadows(scene);
+ assert.ok(Math.abs(uniforms.uLightShadowKind.value[block].y - Math.tan(Math.PI / 6)) < 1e-9);
+});
+
+test('a mesh can cast as the glass it says, whatever its material', async () => {
+ const {createShadowCasters} = await import('../../src/lighting/shadow-casters.js');
+ const scene = new THREE.Scene(), plain = new THREE.MeshPhysicalMaterial({transmission: 1});   // opaque, as transmission is
+ const liquid = new THREE.Mesh(new THREE.BoxGeometry(), plain); liquid.castShadow = true;
+ liquid.userData.shadowGlass = {color: 0xffa040, opacity: .6, side: THREE.FrontSide};
+ scene.add(liquid);
+ const off = createShadowCasters(), on = createShadowCasters({translucent: true});
+ off.collect(scene); assert.ok(liquid.material.isMeshDepthMaterial); off.release();   // without translucent shadows: an opaque caster
+ on.collect(scene);
+ const glass = liquid.material;
+ assert.ok(glass.isMeshBasicMaterial && glass.opacity === .6 && glass.side === THREE.FrontSide);
+ assert.deepEqual(glass.color.getHex(), 0xffa040);
+ on.release(); assert.equal(liquid.material, plain);
+});

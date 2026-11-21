@@ -28,15 +28,20 @@ export const VOLUMETRIC_DEFAULTS = Object.freeze({
   lights: 1,           // strength of the rig's lights in the air
   ambient: 1,          // strength of the sky in the air
   color: 0xffffff,     // tint of the air
+  temporal: 0,         // share of the previous frames kept (0 = off): the dither moves each frame and averages out
 });
 export const VOLUMETRIC_LIMITS = Object.freeze({
-  density: [0, 1], heightBase: [-10000, 10000], heightFalloff: [0, 10000], anisotropy: [-.95, .95], distance: [1, 10000], steps: [1, 64], lightSteps: [1, 16], lightDensity: [0, 1], lightDensityFalloff: [.5, 3], scale: [.1, 1],
+  density: [0, 1], heightBase: [-10000, 10000], heightFalloff: [0, 10000], anisotropy: [-.95, .95], distance: [1, 10000], steps: [1, 64], lightSteps: [1, 32], lightDensity: [0, 1], lightDensityFalloff: [.5, 3], scale: [.1, 1], temporal: [0, .95],
   sun: [0, 16], lights: [0, 16], ambient: [0, 16],
 });
 const MAX_STEPS = VOLUMETRIC_LIMITS.steps[1], MAX_LIGHT_STEPS = VOLUMETRIC_LIMITS.lightSteps[1];
 const WHOLE = ['steps', 'lightSteps'];
 const STEP_POWER = 2;                   // samples sit at distance x (share of the ray) ^ this: closer together near the camera
 const ISOTROPIC = 1 / (4 * Math.PI);    // phase of light that comes from everywhere (the sky)
+// With `temporal` the dither moves every frame, as Luminex's raymarch does with interleaved gradient noise: the pixel is
+// offset by DITHER_STEP x (frame % DITHER_FRAMES), and the history clamp is widened as its reprojection widens it.
+const DITHER_STEP = 5.588238, DITHER_FRAMES = 64;
+const CLAMP_EXPANSION = .5, CLAMP_MARGIN = .001;   // share of the neighbourhood's range, and a floor, added around it
 const QUAD_VERTEX = /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 const VIEW_GLSL = /* glsl */`
 uniform highp sampler2D tDepth;
@@ -62,6 +67,7 @@ uniform vec2 uVolumeLightAir; // air the rig's lights bring with them: density (
 uniform vec4 uVolumeWater;    // plane of the water: normal and offset, under it below zero
 uniform highp sampler2D tVolumeWater;   // a: distance from the camera to the water along the view ray, 0 = none
 uniform vec2 uVolumeHasWater; // 1: there is a plane; 1: there is a distance texture
+uniform float uVolumeShift;   // pixels the dither is moved by this frame (0 without the temporal setting)
 ${sunGLSL}
 ${rigGLSL}
 // Henyey-Greenstein: the share of the light the air sends on at an angle from where it was going.
@@ -112,6 +118,8 @@ vec3 volumeRigLights(vec3 origin, vec3 ray, float begin, float end, float jitter
   int steps = int(uVolumeMarch.w);
   for (int i = 0; i < LIGHT_RIG_CAPACITY; i++) {
     if (i >= uRigCount) break;
+    float air = uRigAir[i];   // the light's share of the lit air (rig {air}): 0 leaves the air dark
+    if (air <= 0.0) continue;
     float start = begin, stop = end, cutoff = uRigShape[i].x;
     if (cutoff > 0.0) {
       vec3 toCentre = uRigPosition[i] - origin;
@@ -150,7 +158,7 @@ vec3 volumeRigLights(vec3 origin, vec3 ray, float begin, float end, float jitter
         within = clamp(1.0 - edge * edge * edge * edge, 0.0, 1.0);
       }
       density += uVolumeLightAir.x * pow(within, uVolumeLightAir.y);
-      sum += light * (volumePhase(dot(ray, toward), uVolumeMedium.w) * density * stepLength * dimmed);
+      sum += light * (volumePhase(dot(ray, toward), uVolumeMedium.w) * density * stepLength * dimmed * air);
     }
   }
   return sum;
@@ -173,7 +181,7 @@ void main() {
       if (water > 0.0) end = min(end, water);
     }
   }
-  float jitter = volumeNoise(gl_FragCoord.xy);
+  float jitter = volumeNoise(gl_FragCoord.xy + uVolumeShift);
   vec3 sunInAir = uVolumeSun * (uVolumeSunStrength * volumePhase(dot(ray, uVolumeSunDirection), uVolumeMedium.w));
   vec3 scattered = vec3(0.0);
   float transmittance = 1.0, previous = 0.0;
@@ -230,6 +238,33 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// With `temporal`: blends this frame's march with the previous ones, at the march's own size. The previous result is
+// found where this pixel's point was seen last frame (reprojected, so the camera may move), and held inside the range
+// of this frame's 3 x 3 neighbourhood, so what moved or appeared does not leave a ghost.
+const RESOLVE_FRAGMENT = /* glsl */`
+#define VOLUME_CLAMP_EXPANSION ${CLAMP_EXPANSION.toFixed(3)}
+#define VOLUME_CLAMP_MARGIN ${CLAMP_MARGIN.toFixed(4)}
+varying vec2 vUv;
+${VIEW_GLSL}
+uniform mat4 uCameraWorld, uPreviousViewProjection;
+uniform sampler2D tVolumeCurrent, tVolumeHistory;
+uniform vec2 uVolumeSize;
+uniform float uVolumeTemporal;   // share of the history kept
+void main() {
+  vec4 current = texture2D(tVolumeCurrent, vUv), low = current, high = current;
+  vec2 texel = 1.0 / uVolumeSize;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec4 near = texture2D(tVolumeCurrent, vUv + vec2(float(x), float(y)) * texel);
+    low = min(low, near); high = max(high, near);
+  }
+  vec4 view = uInverseProjection * vec4(vUv * 2.0 - 1.0, texture2D(tDepth, vUv).r * 2.0 - 1.0, 1.0);
+  vec4 previous = uPreviousViewProjection * (uCameraWorld * vec4(view.xyz / view.w, 1.0));
+  vec2 previousUv = previous.xy / previous.w * 0.5 + 0.5;
+  if (previous.w <= 0.0 || any(lessThan(previousUv, vec2(0.0))) || any(greaterThan(previousUv, vec2(1.0)))) { gl_FragColor = current; return; }
+  vec4 margin = (high - low) * VOLUME_CLAMP_EXPANSION + VOLUME_CLAMP_MARGIN;
+  gl_FragColor = mix(current, clamp(texture2D(tVolumeHistory, previousUv), low - margin, high + margin), uVolumeTemporal);
+}`;
+
 function validate(settings) {
   for (const [name, [min, max]] of Object.entries(VOLUMETRIC_LIMITS)) {
     const value = settings[name];
@@ -253,12 +288,14 @@ export function createVolumetricLight({renderer, sun, rig, ...overrides} = {}) {
   const sceneTarget = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthTexture: depth});
   const volumeTarget = new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false});
   let outputTarget = null;   // the scene with its lit air, for capture(): made on first use
+  // `temporal`: two targets in turn, this frame's blend and the last one; made on first use.
+  const history = {targets: null, latest: 0, valid: false, frame: 0, viewProjection: new THREE.Matrix4()};
   const view = {tDepth: {value: depth}, uInverseProjection: {value: new THREE.Matrix4()}};
   const marchUniforms = {
     ...view, uCameraWorld: {value: new THREE.Matrix4()},
     uVolumeSun: {value: null}, uVolumeSunDirection: {value: null}, uVolumeSunStrength: {value: settings.sun}, uVolumeAmbient: {value: new THREE.Color()},
     uVolumeColor: {value: new THREE.Color()}, uVolumeMedium: {value: new THREE.Vector4()}, uVolumeMarch: {value: new THREE.Vector4()}, uVolumeLightAir: {value: new THREE.Vector2()},
-    uVolumeWater: {value: new THREE.Vector4()}, tVolumeWater: {value: null}, uVolumeHasWater: {value: new THREE.Vector2()},
+    uVolumeWater: {value: new THREE.Vector4()}, tVolumeWater: {value: null}, uVolumeHasWater: {value: new THREE.Vector2()}, uVolumeShift: {value: 0},
     ...rig?.lights.uniforms,
   };
   for (const cover of covers) Object.assign(marchUniforms, cover.uniforms);
@@ -266,6 +303,9 @@ export function createVolumetricLight({renderer, sun, rig, ...overrides} = {}) {
   const compositeUniforms = {...view, tScene: {value: sceneTarget.texture}, tVolume: {value: volumeTarget.texture}, uVolumeSize: {value: new THREE.Vector2(1, 1)}};
   const march = new THREE.ShaderMaterial({uniforms: marchUniforms, vertexShader: QUAD_VERTEX, fragmentShader: marchFragment(covers.map(cover => cover.glsl).join('\n'), sunRead, rig?.lights.glsl ?? ''), depthTest: false, depthWrite: false, toneMapped: false});
   const composite = new THREE.ShaderMaterial({uniforms: compositeUniforms, vertexShader: QUAD_VERTEX, fragmentShader: COMPOSITE_FRAGMENT, depthTest: false, depthWrite: false});
+  const resolveUniforms = {...view, uCameraWorld: marchUniforms.uCameraWorld, uPreviousViewProjection: {value: history.viewProjection},
+    tVolumeCurrent: {value: volumeTarget.texture}, tVolumeHistory: {value: null}, uVolumeSize: compositeUniforms.uVolumeSize, uVolumeTemporal: {value: 0}};
+  const resolve = new THREE.ShaderMaterial({uniforms: resolveUniforms, vertexShader: QUAD_VERTEX, fragmentShader: RESOLVE_FRAGMENT, depthTest: false, depthWrite: false, toneMapped: false});
   const geometry = new THREE.PlaneGeometry(2, 2), quad = new THREE.Mesh(geometry, march), quadScene = new THREE.Scene(), quadCamera = new THREE.Camera();
   quad.frustumCulled = false; quadScene.add(quad);
   const scope = createRenderScope(renderer), size = new THREE.Vector2();
@@ -299,7 +339,8 @@ export function createVolumetricLight({renderer, sun, rig, ...overrides} = {}) {
     },
     dispose() {
       if (disposed) return; disposed = true;
-      sceneTarget.dispose(); volumeTarget.dispose(); outputTarget?.dispose(); depth.dispose(); march.dispose(); composite.dispose(); geometry.dispose();
+      sceneTarget.dispose(); volumeTarget.dispose(); outputTarget?.dispose(); depth.dispose(); march.dispose(); composite.dispose(); resolve.dispose(); geometry.dispose();
+      for (const target of history.targets ?? []) target.dispose();
     },
   };
   const captured = {color: null, depth: null, airLit: true, waterPlane: undefined, waterDistance: undefined};
@@ -309,9 +350,16 @@ export function createVolumetricLight({renderer, sun, rig, ...overrides} = {}) {
     if (!environment?.sun?.direction?.isVector3) throw new TypeError('Volumetric light needs an environment');
     renderer.getDrawingBufferSize(size);
     if (size.x === 0 || size.y === 0) return;
-    const {density, heightBase, heightFalloff, anisotropy, distance, steps, lightSteps, lightDensity, lightDensityFalloff, scale, sun, lights, ambient, color} = settings;
+    const {density, heightBase, heightFalloff, anisotropy, distance, steps, lightSteps, lightDensity, lightDensityFalloff, scale, sun, lights, ambient, color, temporal} = settings;
     const width = Math.max(1, Math.round(size.x * scale)), height = Math.max(1, Math.round(size.y * scale));
+    if (volumeTarget.width !== width || volumeTarget.height !== height) history.valid = false;
     volumeTarget.setSize(width, height); compositeUniforms.uVolumeSize.value.set(width, height);
+    if (temporal > 0) {
+      history.targets ??= [0, 1].map(() => new THREE.WebGLRenderTarget(1, 1, {type: THREE.HalfFloatType, depthBuffer: false}));
+      for (const target of history.targets) target.setSize(width, height);
+    } else history.valid = false;
+    history.frame++;
+    marchUniforms.uVolumeShift.value = temporal > 0 ? DITHER_STEP * (history.frame % DITHER_FRAMES) : 0;
     camera.updateMatrixWorld();
     view.uInverseProjection.value.copy(camera.projectionMatrixInverse); marchUniforms.uCameraWorld.value.copy(camera.matrixWorld);
     view.tDepth.value = input?.depth ?? depth; compositeUniforms.tScene.value = input?.color ?? sceneTarget.texture;
@@ -329,8 +377,18 @@ export function createVolumetricLight({renderer, sun, rig, ...overrides} = {}) {
     scope(() => {
       if (!input?.color) { sceneTarget.setSize(size.x, size.y); renderer.setRenderTarget(sceneTarget); renderer.render(scene, camera); }
       quad.material = march; renderer.setRenderTarget(volumeTarget); renderer.render(quadScene, quadCamera);
+      compositeUniforms.tVolume.value = volumeTarget.texture;
+      if (temporal > 0) {
+        const write = 1 - history.latest;
+        resolveUniforms.tVolumeHistory.value = history.targets[history.latest].texture;
+        resolveUniforms.uVolumeTemporal.value = history.valid ? temporal : 0;
+        quad.material = resolve; renderer.setRenderTarget(history.targets[write]); renderer.render(quadScene, quadCamera);
+        history.latest = write; history.valid = true;
+        compositeUniforms.tVolume.value = history.targets[write].texture;
+      }
       quad.material = composite; renderer.setRenderTarget(destination); renderer.render(quadScene, quadCamera);
     });
+    history.viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   }
   return volumetric;
 }

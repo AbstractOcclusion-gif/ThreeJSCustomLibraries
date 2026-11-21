@@ -90,18 +90,23 @@ vec3 lightShadowRead(int caster, vec3 worldPosition, vec3 n, int kernel) {
   // Half a texel inside the tile, so a blurred read never crosses into the next one.
   vec2 inset = 0.5 * uLightShadowTexel.xy, low = tile + inset, high = tile + block.zw - inset;
   vec2 uv = tile + inTile * block.zw;
+  // A material that defines LIGHT_SHADOW_CLEAR (material.defines) takes no tint: a thing standing inside a glass, which
+  // the atlas's one layer of glass cannot tell from the things behind it. The tint is read at the same taps as the
+  // depth, so the edge of a glass's shadow is as soft as the edge of an opaque one.
   float lit = 0.0;
+  vec3 through = vec3(0.0);
   for (int y = -kernel; y <= kernel; y++) for (int x = -kernel; x <= kernel; x++) {
     vec2 tap = clamp(uv + vec2(float(x), float(y)) * uLightShadowLook.z * uLightShadowTexel.xy, low, high);
     lit += step(depth, textureLod(uLightShadowAtlas, tap, 0.0).r);
+    #if defined(LIGHT_SHADOW_GLASS) && !defined(LIGHT_SHADOW_CLEAR)
+    vec4 glass = textureLod(uLightShadowGlass, tap, 0.0);
+    through += away - LIGHT_SHADOW_GLASS_BIAS > glass.a ? glass.rgb : vec3(1.0);
+    #else
+    through += vec3(1.0);
+    #endif
   }
-  vec3 through = vec3(1.0);
-  #ifdef LIGHT_SHADOW_GLASS
-  vec4 glass = textureLod(uLightShadowGlass, clamp(uv, low, high), 0.0);
-  if (away - LIGHT_SHADOW_GLASS_BIAS > glass.a) through = glass.rgb;
-  #endif
-  float side = float(2 * kernel + 1);
-  return mix(vec3(1.0), through * (lit / (side * side)), uLightShadowLook.x);
+  float side = float(2 * kernel + 1), taps = side * side;
+  return mix(vec3(1.0), through / taps * (lit / taps), uLightShadowLook.x);
 }
 vec3 lightShadowOf(int caster, vec3 worldPosition, vec3 n) { return lightShadowRead(caster, worldPosition, n, 1); }
 vec3 lightShadowNear(vec3 lightViewPosition, mat4 view, vec3 worldPosition, vec3 n) {
@@ -122,7 +127,7 @@ function validate(settings) {
 
 // renderer: the THREE.WebGLRenderer the shadows are drawn with. casters, resolution and translucent are fixed at creation, the
 // other settings are live. Returns {settings, glsl, uniforms, atlas, set(name, value), assign(lights) -> block of each,
-// blockOf(light), render(scene) -> lights drawn, dispose()}.
+// blockOf(light), focus(light, {center, radius} | null), render(scene) -> lights drawn, dispose()}.
 export function createLightShadows({renderer, ...overrides} = {}) {
   if (typeof renderer?.render !== 'function') throw new TypeError('Light shadows need a renderer');
   if (renderer.capabilities?.reversedDepthBuffer) throw Error('Light shadows do not read a reversed depth buffer');
@@ -147,6 +152,7 @@ export function createLightShadows({renderer, ...overrides} = {}) {
   const origins = each((_, block) => ({x: (block % columns) * blockWidth, y: Math.floor(block / columns) * blockHeight}));
   origins.forEach(({x, y}, block) => uniforms.uLightShadowBlock.value[block].set(x / width, y / height, resolution / width, resolution / height));
   const holders = each(() => null);     // the light of each block
+  const focused = new Map();            // spot light -> {center, radius}: its tile narrowed to that sphere
   const fresh = each(() => false);      // true: the block has a new light, not drawn yet
   const camera = new THREE.PerspectiveCamera(); camera.layers.set(SHADOW_LAYER);
   const scope = createRenderScope(renderer), shadowCasters = createShadowCasters({translucent});
@@ -164,6 +170,11 @@ export function createLightShadows({renderer, ...overrides} = {}) {
     if (light.isSpotLight) {
       camera.fov = Math.min(THREE.MathUtils.radToDeg(light.angle) * 2, MAX_SPOT_ANGLE);
       light.target.getWorldPosition(aim);
+      const spot = focused.get(light);
+      if (spot) {   // the whole tile on the sphere around the focus: sharper there, nothing drawn outside it
+        const reach = spot.center.distanceTo(position);
+        if (reach > spot.radius) { aim.copy(spot.center); camera.fov = Math.min(camera.fov, THREE.MathUtils.radToDeg(2 * Math.asin(spot.radius / reach))); }
+      }
       camera.up.copy(Math.abs(toward.copy(aim).sub(position).normalize().y) > UP_LIMIT ? SIDE : UP);
       camera.lookAt(aim); camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
       uniforms.uLightShadowMatrix.value[block].multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -187,6 +198,16 @@ export function createLightShadows({renderer, ...overrides} = {}) {
       if (name === 'casters' || name === 'resolution' || name === 'translucent') throw Error(`Light shadow ${name} is fixed at creation`);
       if (!(name in LIGHT_SHADOW_DEFAULTS)) throw Error(`Unknown light shadow setting ${name}`);
       validate({...settings, [name]: value}); settings[name] = value;
+      return shadows;
+    },
+    // Narrows the tile of a spot light to a sphere ({center: Vector3, radius: m}), e.g. what a close-up shows: its
+    // shadow there gets the whole tile; outside it the light casts none until focus(light, null) gives the cone back.
+    focus(light, sphere) {
+      if (!light?.isSpotLight) throw new TypeError('Only a spot light can focus its shadow');
+      if (sphere && (!sphere.center?.isVector3 || !(sphere.radius > 0))) throw new RangeError('A shadow focus is {center: Vector3, radius > 0}');
+      if (sphere) focused.set(light, {center: sphere.center.clone(), radius: sphere.radius}); else focused.delete(light);
+      const block = holders.indexOf(light);
+      if (block >= 0) fresh[block] = true;   // drawn again at once
       return shadows;
     },
     // The block a light holds, or -1.

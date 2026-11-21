@@ -4,6 +4,10 @@
 // depth material does: the mesh's own (cutout, wind) when it has one, else a plain one with its side and its cutout.
 // With `translucent`, transparent meshes cast too, as coloured glass: a second draw of the tile, behind the opaque
 // depth, multiplies what each lets through into the colour of the atlas and keeps the depth of the nearest one.
+// A mesh can say what its shadow lets through instead (Luminex's transparent override): mesh.userData.shadowGlass =
+// {color, opacity, side?} casts it as that glass, whatever its material, even an opaque one (a liquid drawn with
+// transmission). color: the tint of the light let through at full opacity; side: the faces that count (FrontSide = one
+// layer for a closed volume; the material's side by default).
 import * as THREE from 'three';
 
 export const SHADOW_LAYER = 31; // layer the opaque casters are put on while a pass draws
@@ -76,13 +80,15 @@ export function createShadowCasters({translucent = false} = {}) {
       );
     return material;
   }
-  // Follows its source each pass: a pane may change colour or fade.
-  function glassMaterialOf(source) {
-    let material = glassMaterials.get(source);
-    if (!material) glassMaterials.set(source, (material = createGlassMaterial(glassFar)));
-    if (source.color) material.color.copy(source.color);
-    material.opacity = source.opacity;
-    material.side = source.side;
+  // Follows its source each pass: a pane may change colour or fade. override: a mesh's userData.shadowGlass.
+  function glassMaterialOf(source, override) {
+    const key = override ?? source;
+    let material = glassMaterials.get(key);
+    if (!material) glassMaterials.set(key, (material = createGlassMaterial(glassFar)));
+    const color = override ? override.color : source.color;
+    if (color !== undefined) material.color.set(color);
+    material.opacity = override ? override.opacity : source.opacity;
+    material.side = override?.side ?? source.side;
     material.alphaTest = source.alphaTest;
     if (material.map !== (source.map ?? null)) {
       material.map = source.map ?? null;
@@ -100,7 +106,12 @@ export function createShadowCasters({translucent = false} = {}) {
   }
   function collect(object) {
     if (!object.isMesh || !object.castShadow) return;
-    const material = object.material;
+    const material = object.material, override = translucent ? object.userData.shadowGlass : undefined;
+    if (override && !Array.isArray(material) && material.visible) {
+      dress(object, glassMaterialOf(material, override), GLASS_LAYER);
+      glass++;
+      return;
+    }
     if (Array.isArray(material) ? material.some(casts) : casts(material))
       dress(object, depthMaterialOf(object), SHADOW_LAYER);
     else if (translucent && !Array.isArray(material) && material.transparent && material.visible) {
