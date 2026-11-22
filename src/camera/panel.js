@@ -111,6 +111,49 @@ export function createCameraPanel({
     () => director.cinematic,
     v => director.setCinematic(v),
   );
+  appendPostControls(content, post);
+  const status = document.createElement('p');
+  status.setAttribute('role', 'status');
+  content.append(status);
+  parent.append(root);
+  const bars = document.createElement('div');
+  bars.className = 'camera-letterbox';
+  bars.setAttribute('aria-hidden', 'true');
+  parent.append(bars);
+  return {
+    root,
+    update() {
+      bars.hidden = !director.cinematic;
+      controls.hidden = !replay.active;
+      replayButton.disabled = replay.frames < 2 || replay.active;
+      for (const o of select.options) o.disabled = o.value === 'recorded' && !replay.active;
+      select.value = director.selected;
+      angle.value = replay.selectedCamera;
+      if (document.activeElement !== seek) {
+        seek.max = replay.duration;
+        seek.value = replay.position;
+      }
+      status.textContent = replay.active
+        ? `REPLAY ${replay.position.toFixed(1)} / ${replay.duration.toFixed(1)}s`
+        : `${replay.cameraIds.length} camera${replay.cameraIds.length === 1 ? '' : 's'} · ${replay.duration.toFixed(1)}s recorded · ${(replay.bytes / 1048576).toFixed(1)} MB${director.bulletActive ? ' · BULLET TIME' : ''}`;
+    },
+    dispose() {
+      root.remove();
+      bars.remove();
+    },
+  };
+}
+
+function appendPostControls(content, post) {
+  const check = (text, get, set) => {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = get();
+    input.onchange = () => set(input.checked);
+    label.append(input, document.createTextNode(' ' + text));
+    content.append(label);
+  };
   check(
     'Post effects',
     () => post.settings.enabled,
@@ -157,34 +200,18 @@ export function createCameraPanel({
   const fxNote = document.createElement('p');
   fxNote.textContent = 'Enable Post effects for tone mapping and AO. AO adds GPU cost; start with a small radius.';
   content.append(fxNote);
-  const status = document.createElement('p');
-  status.setAttribute('role', 'status');
-  content.append(status);
+
+}
+
+export function createCameraPostPanel({post, parent = document.body}) {
+  const root = document.createElement('details');
+  root.className = 'camera-panel';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Post effects';
+  const content = document.createElement('div');
+  content.className = 'camera-content';
+  root.append(summary, content);
+  appendPostControls(content, post);
   parent.append(root);
-  const bars = document.createElement('div');
-  bars.className = 'camera-letterbox';
-  bars.setAttribute('aria-hidden', 'true');
-  parent.append(bars);
-  return {
-    root,
-    update() {
-      bars.hidden = !director.cinematic;
-      controls.hidden = !replay.active;
-      replayButton.disabled = replay.frames < 2 || replay.active;
-      for (const o of select.options) o.disabled = o.value === 'recorded' && !replay.active;
-      select.value = director.selected;
-      angle.value = replay.selectedCamera;
-      if (document.activeElement !== seek) {
-        seek.max = replay.duration;
-        seek.value = replay.position;
-      }
-      status.textContent = replay.active
-        ? `REPLAY ${replay.position.toFixed(1)} / ${replay.duration.toFixed(1)}s`
-        : `${replay.cameraIds.length} camera${replay.cameraIds.length === 1 ? '' : 's'} · ${replay.duration.toFixed(1)}s recorded · ${(replay.bytes / 1048576).toFixed(1)} MB${director.bulletActive ? ' · BULLET TIME' : ''}`;
-    },
-    dispose() {
-      root.remove();
-      bars.remove();
-    },
-  };
+  return {root, dispose() { root.remove(); }};
 }

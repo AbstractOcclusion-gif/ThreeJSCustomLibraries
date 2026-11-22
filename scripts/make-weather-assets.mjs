@@ -2,19 +2,11 @@
 // cirrus, moon, stars and a galaxy panorama. Deterministic. Run: node scripts/make-weather-assets.mjs
 import {writeFileSync, mkdirSync} from 'node:fs';
 import {deflateSync} from 'node:zlib';
+import {fbmP, hash3} from '../src/core/noise-3d.js';
 const OUT = new URL('../assets/weather/', import.meta.url); mkdirSync(OUT, {recursive: true});
 
 // ---------- hashing / noise (tileable: coordinates wrap at `period`) ----------
-const hash3 = (x, y, z, s) => { let h = (x * 374761393 + y * 668265263 + z * 2147483647 + s * 1013904223) >>> 0; h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
-const smooth = t => t * t * t * (t * (t * 6 - 15) + 10);
 const wrap = (i, p) => ((i % p) + p) % p;
-function perlin3(x, y, z, period, seed) {
-  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), fx = x - xi, fy = y - yi, fz = z - zi;
-  const grad = (ix, iy, iz, dx, dy, dz) => { const h = hash3(wrap(ix, period), wrap(iy, period), wrap(iz, period), seed), a = h * 6.2831853, b = hash3(wrap(ix, period) + 7, wrap(iy, period), wrap(iz, period), seed) * 2 - 1, r = Math.sqrt(1 - b * b); return dx * Math.cos(a) * r + dy * Math.sin(a) * r + dz * b; };
-  const u = smooth(fx), v = smooth(fy), w = smooth(fz), L = (a, b, t) => a + (b - a) * t;
-  return L(L(L(grad(xi, yi, zi, fx, fy, fz), grad(xi + 1, yi, zi, fx - 1, fy, fz), u), L(grad(xi, yi + 1, zi, fx, fy - 1, fz), grad(xi + 1, yi + 1, zi, fx - 1, fy - 1, fz), u), v),
-    L(L(grad(xi, yi, zi + 1, fx, fy, fz - 1), grad(xi + 1, yi, zi + 1, fx - 1, fy, fz - 1), u), L(grad(xi, yi + 1, zi + 1, fx, fy - 1, fz - 1), grad(xi + 1, yi + 1, zi + 1, fx - 1, fy - 1, fz - 1), u), v), w);
-}
 function worley3(x, y, z, period, seed) {   // inverted: 1 at cell centres
   const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z); let best = 9;
   for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
@@ -24,7 +16,6 @@ function worley3(x, y, z, period, seed) {   // inverted: 1 at cell centres
   }
   return 1 - Math.min(1, Math.sqrt(best));
 }
-const fbmP = (x, y, z, period, seed, oct) => { let s = 0, a = 1, n = 0, p = period; for (let o = 0; o < oct; o++) { s += perlin3(x * p / period, y * p / period, z * p / period, p, seed + o) * a; n += a; a *= .5; p *= 2; } return s / n * .5 + .5; };
 const remap = (v, a, b, c, d) => c + (v - a) * (d - c) / (b - a);
 const clamp01 = v => Math.max(0, Math.min(1, v));
 

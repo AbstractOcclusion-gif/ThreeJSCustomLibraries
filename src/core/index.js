@@ -23,6 +23,7 @@ export {createVegetationAtlas, FREE_ATLAS_RECTS} from './vegetation-atlas.js';
 export {SKY_GLSL, skyDefines, createSkyUniforms, createSkyDome, sunFromHdr} from './sky.js';
 export {hash2, seededRandom} from './hash.js';
 export {valueNoise, fbm} from './value-noise.js';
+export {createNoiseVolume} from './volume-noise.js';
 export {createRenderScope} from './render-state.js';
 export {createDataTexture, configureTexture} from './data-texture.js';
 export {presetFile, assertPreset, downloadJson, readJsonFile} from './presets.js';

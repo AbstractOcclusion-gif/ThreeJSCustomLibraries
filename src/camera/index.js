@@ -5,4 +5,4 @@ export {
 export {createReplay, REPLAY_DEFAULTS} from './replay.js';
 export {createCameraPost} from './post.js';
 export {createCameraCollision, CAMERA_COLLISION_DEFAULTS} from './collision.js';
-export {createCameraPanel} from './panel.js';
+export {createCameraPanel, createCameraPostPanel} from './panel.js';

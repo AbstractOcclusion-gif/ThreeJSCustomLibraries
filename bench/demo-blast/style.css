@@ -1,0 +1,20 @@
+@media (min-width: 701px) {
+  .blast-demo aside {
+    bottom: auto;
+    width: 240px;
+  }
+}
+
+@media (max-width: 700px) {
+  .blast-demo aside {
+    right: auto;
+    width: min(48vw, 235px);
+  }
+
+  .blast-demo .lil-gui.autoPlace {
+    top: auto;
+    right: 10px;
+    bottom: 10px;
+    width: min(45vw, 245px);
+  }
+}

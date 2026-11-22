@@ -376,7 +376,7 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    try { drawCloudShadow(renderer, camera); } finally { renderer.autoClear = autoClear; }
   },
   render(renderer, scene, camera, color, strength, haze, rays, glare, fogColor, sunColor, sunStrength, banks, shape, offset, time, wakeHead, wakeTail, bow, input) {
-   if (!input) {
+   if (!input?.color) {
     renderer.getDrawingBufferSize(size);
     if (size.x === 0 || size.y === 0) return;
     target.setSize(size.x, size.y);
@@ -413,22 +413,23 @@ export function createSunScattering(cloudUniforms, sunDirection) {
    uniforms.bankTime.value = time;
    uniforms.wakeHead.value.copy(wakeHead);
    uniforms.wakeTail.value.copy(wakeTail);
+   const previousTarget = renderer.getRenderTarget();
    const scissorTest = renderer.getScissorTest();
    const autoClear = renderer.autoClear;
    try {
     renderer.setScissorTest(false);
     renderer.autoClear = true;
     if (strength > 0 || sunStrength > 0) drawCloudShadow(renderer, camera);
-    if (!input) {
+    if (!input?.color) {
      renderer.setRenderTarget(target);
      renderer.render(scene, camera);
     }
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(input?.output ?? null);
     renderer.render(composite, screenCamera);
    } finally {
     renderer.setScissorTest(scissorTest);
     renderer.autoClear = autoClear;
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(previousTarget);
    }
   },
   dispose() {

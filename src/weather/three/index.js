@@ -427,7 +427,8 @@ export function createThreeWeather({
     },
     // Optional final draw for a perspective camera. A host can supply its own captured layers; with input.airLit the
     // air of that capture is already lit (a volumetric pass): the sun's shafts are left to it, the fog bank and the
-    // rainbow are still drawn.
+    // rainbow are still drawn. input.output optionally receives the HDR weather
+    // composite, for a host's final post chain (without input.color the scene is captured here).
     render(input) {
       if (disposed) return;
       const shafts =
@@ -441,7 +442,7 @@ export function createThreeWeather({
       const bankDensity = look.heightFog ? look.bankDensity * Math.min(BANK.max, BANK.base + system.weather.bank) : 0;
       const bow = rainbowAmount();
       if (
-        !input &&
+        (!input || (input.output && !input.color)) &&
         ((shafts === 0 && bankDensity === 0 && bow === 0) ||
           !camera.isPerspectiveCamera ||
           renderer.getRenderTarget() !== null ||
@@ -449,7 +450,13 @@ export function createThreeWeather({
           renderer.capabilities.reversedDepthBuffer ||
           renderer.xr.isPresenting)
       ) {
-        renderer.render(scene, camera);
+        const previousTarget = renderer.getRenderTarget();
+        try {
+          if (input?.output) renderer.setRenderTarget(input.output);
+          renderer.render(scene, camera);
+        } finally {
+          if (input?.output) renderer.setRenderTarget(previousTarget);
+        }
         return;
       }
       scattering ??= createSunScattering(dynamic.cloudUniforms, sunDir);
