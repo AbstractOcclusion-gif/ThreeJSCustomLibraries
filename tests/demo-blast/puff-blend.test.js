@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PerspectiveCamera,ShaderLib,Sprite,Texture} from 'three';
+import {PerspectiveCamera,ShaderLib,Sprite,Texture,Vector3} from 'three';
+import {createCloudSettings} from '../../bench/demo-blast/cloud-settings.js';
+import {createPlumeFlow} from '../../bench/demo-blast/plume-flow.js';
+import {FIRE_LOOK} from '../../bench/demo-blast/fire-look.js';
+import {plumeOffset} from '../../bench/demo-blast/plume-motion.js';
 import {createPuffMaterial} from '../../src/particles/puff-material.js';
 import {installBlastPuffBlend} from '../../bench/demo-blast/puff-blend.js';
 import {puffRollPhase,puffRollRate} from '../../bench/demo-blast/plume-motion.js';
@@ -84,4 +88,25 @@ test('rolling starts strong, eases to gentle motion, and never reverses phase',(
     assert.ok(Math.abs((next-phase)/.1/.65-puffRollRate(age-.05))<.001);
     phase=next;
   }
+});
+
+test('configured late head density rotates visibly downward around every outer flank',()=>{
+  const {roll}=createCloudSettings(),flow=createPlumeFlow(new Vector3(),1,{...FIRE_LOOK});
+  const texture=new Texture(),{material}=createPuffMaterial(texture,false,{});
+  try {
+    const look=installBlastPuffBlend(new Sprite(material),undefined,undefined,roll);
+    const shader={uniforms:{},fragmentShader:ShaderLib.sprite.fragmentShader};
+    material.onBeforeCompile(shader);look.setTag({kind:'head'});look.setClock(120,0);
+    const phaseBefore=shader.uniforms.cloudRollPhase.value;look.setClock(120.1,0);
+    const angle=(shader.uniforms.cloudRollPhase.value-phaseBefore)*shader.uniforms.headRollGain.value;
+    assert.ok(angle>0,'late phase uses the same positive convention as the skirt');
+    const offset=plumeOffset(50,0,flow.head.height);
+    for(let i=0;i<8;i++) {
+      const theta=i*Math.PI/4,radial=new Vector3(Math.cos(theta),0,Math.sin(theta));
+      const axis=flow.rollAxis(new Vector3(),offset[0]+radial.x*30,50,offset[1]+radial.z*30);
+      // Density uses an inverse lookup: the visible feature rotates by -angle.
+      const feature=radial.clone().applyAxisAngle(axis,-angle);
+      assert.ok(feature.y<0,'outer-flank features move downward at every azimuth');
+    }
+  } finally {flow.dispose();material.dispose();texture.dispose();}
 });

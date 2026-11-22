@@ -2,10 +2,90 @@
 
 ## Approved harmony and authoring UI
 
+### Smaller early skirt, staged fades and longer-lived ground dust
+
+Shared skirt defaults are now .2 / .6 head radii at its upper/lower tiers,
+.65 / 1.25 head radii below the head centre, with puff size .7x. Its emission
+starts at reference second 1.5, independent of bulk rise. The existing formation
+pass opens it by second 8; its own .8-second birth fade and incandescence replace
+the head-detail/centre-heat reveal gates. This makes the skirt present during
+early formation rather than waiting for the head to rise and cool.
+
+Shared visibility uses one reference-clock sequence: column holds to second 60,
+fades over 60–100, then skirt fades over 100–140. The existing cloud visibility
+preset remains last; custom cloud times are bounded to preserve this ordering.
+Skirt/head parcel identity now owns those fades, while gas and ground projection
+use the head's lower envelope for fade ownership. Ground dust independently holds
+until second 60 and settles/fades over 60–120, instead of 24–55. Ground feeding
+still shuts down on its original schedule; no extra smoke or buoyant force is
+injected to keep the ground sprites alive.
+
+Head shape support mixes .35 of the existing spherical parcel circulation into
+shared head advection, easing in over reference seconds 12–24. Gas transport,
+heat, bulk ascent and ignition motion are unchanged. This is explicit authored
+shape support, adjustable down to 0 for pure gas tracers. At High, rise .9 and
+drag 1.85, local head-parcel height/width measured .63 without support and .80
+with it at reference seconds 36/60. These bounds do not establish a spherical
+per-pixel silhouette. Browser checks at 20 kt, High and x10 showed the early
+cap/skirt/column/ground composition and the surviving cloud after skirt/column
+disappeared. Complete matched-age x1/x10 and orbit approval remain playtests.
+
+There are now 74 authoring controls, including early reveal, head shape support,
+skirt puff size and the **Column → skirt → cloud** staging/ground timing folder.
+Legacy mode retains its old fade ownership and ground-settling schedule.
+
+### Conical skirt profile
+
+Shared mode now uses its existing four emission bursts as tiers of a truncated
+cone, following the user's drawn reference: narrow at the cloud join, broader
+at the lower rim. Upper/lower ring radii default to .25 / .75 of head radius;
+their vertical drops are .65 / 1.45 head radii below the head centre. This reduces
+the lower ring target from the former .92 head radii. Puffy boundaries remain
+soft: no solid cone, new shader or shared-particle change is introduced.
+
+`skirtConeTarget` supplies the same profile to emission and subsequent guidance.
+Each tier retains its layer identity as the cloud rises and expands. Fragment
+sampling now selects the outer tiers, rather than the old .88 radius threshold.
+Head/gas dynamics, puff sizes, phase, lighting and ground effects are unchanged
+by this shape adjustment. Legacy mode retains its original collar layout.
+
+Four controls under **Skirt emission** adjust cone upper/lower radius and drop;
+there are now 65 authoring controls. Local pre-cone source, including the previous
+lag/roll adjustments, is preserved at
+`baselines/demo-blast/2026-11-22-before-conical-skirt/` (39 SHA-256 verified files).
+Twelve focused checks pass, including ordered cone tiers, the reduced lower-rim
+target, late gas/puff frequency agreement, reset and fragment sampling. The
+rendered smoke silhouette still needs a playtest at the normal demo URL.
+
+### Downward head roll
+
+The scene's head roll gain is now +1.6 instead of -1.6, matching the skirt's
+positive inverse-lookup convention. The angular speed magnitude, integrated
+phase, late slowdown and gas motion are unchanged. A late-phase regression check
+uses the installed material's phase/gain and the flow's axis at eight azimuths
+to verify downward visible displacement of outer-flank density features. This
+checks the direction convention, not a rendered late-cloud playtest.
+
+### Reduced skirt lag
+
+Shared-mode **Skirt rise following ×** now defaults to 1 instead of the former
+hard-coded .65. It changes only the final multiplier of existing capped vertical
+collar guidance. The lower target, radial guidance, emission layout, gas/head
+advection and all materials/rolling are unchanged. Legacy motion still uses .65;
+set the new control to .65 in Shared mode to compare the pushed `7eb4915` timing.
+This makes 61 cloud authoring controls.
+
+A High-fluid source simulation at reference second 16 measured head-to-skirt
+centre separation 32.73 -> 27.32 at rise .65, and 66.03 -> 48.35 at rise 1.3.
+The head heights/radii were identical across each pair. By reference second 24,
+the distances were 43.55 -> 36.67 and 40.36 -> 35.27 respectively. These are local
+parcel measurements, not rendered connector lengths. High buoyancy can still
+show a substantial gap; screenshot matching and visual approval remain a playtest.
+
 The approved shared-flow head, restored skirt and 1.5x billows are now the default
 on the normal demo/catalogue entry. `?motion=accepted` retains legacy motion.
 The existing Fireball panel remains; **Cloud authoring · restarts blast** adds
-60 controls for billow envelopes, shared size, skirt emission, puff blending and
+65 controls for billow envelopes, shared size, skirt shape/emission/following, puff blending and
 growth, roll easing/gains, counts, ground dust/ring, feeding/settling, late ascent
 and atmospheric visibility. Finish an edit to restart consistently. The reset
 button restores the approved cloud defaults, including paired ranges. Quality

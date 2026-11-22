@@ -11,7 +11,7 @@ import {createBlastScale} from '../../bench/demo-blast/blast-scale.js';
 test('shared head uses gas velocity while skirt retains its established collar guidance',()=>{
   const results=[];
   for(const overrides of [{},{riseSpeed:1.3},{drag:3},{headFriction:1.5},{viscosity:0}]) {
-    const settings={...FIRE_LOOK,...overrides,cloudMotion:'shared'};
+    const settings={...FIRE_LOOK,...overrides,cloudMotion:'shared',sharedMotion:{headRoundness:.35}};
     const flow=createPlumeFlow(new Vector3(),1,settings,BLAST_QUALITY.low.fluid);
     try {
       flow.ignite();
@@ -27,7 +27,7 @@ test('shared head uses gas velocity while skirt retains its established collar g
         const skirt=flow.sample(new Vector3(),...point,tag).clone();
         settings.cloudMotion='accepted';
         const acceptedSkirt=flow.sample(new Vector3(),...point,tag);
-        assert.ok(skirt.distanceTo(acceptedSkirt)<1e-12,'reuse the accepted collar rather than inventing a new path');
+        assert.ok(Math.abs(skirt.y*.65-acceptedSkirt.y)<1e-12,'same capped collar guidance without the extra ascent slowdown');
         settings.cloudMotion='shared';
         assert.ok(gas.toArray().every(Number.isFinite));samples.push(...gas.toArray());
       }
@@ -36,6 +36,24 @@ test('shared head uses gas velocity while skirt retains its established collar g
   }
   for(let i=1;i<results.length;i++)assert.ok(results[i].some((v,j)=>Math.abs(v-results[0][j])>1e-5),
     'each live physics modifier changes the common velocity');
+});
+
+test('head shape support reuses circulation without changing the solved gas field',()=>{
+  const settings={...FIRE_LOOK,cloudMotion:'shared',sharedMotion:{headRoundness:0}};
+  const flow=createPlumeFlow(new Vector3(),1,settings,BLAST_QUALITY.low.fluid);
+  try {
+    flow.ignite();for(let i=0;i<30*60;i++)flow.update(1/60);
+    const offset=plumeOffset(flow.head.height,30,flow.head.height);
+    const point=[offset[0]+1,flow.head.height,offset[1]];
+    const gas=flow.sample(new Vector3(),...point);
+    assert.ok(flow.sample(new Vector3(),...point,{kind:'head'}).distanceTo(gas)<1e-12);
+    const data=flow.texture.image.data.slice(),clock=flow.diagnostics.time;
+    settings.sharedMotion.headRoundness=.35;
+    assert.ok(flow.sample(new Vector3(),...point,{kind:'head'}).distanceTo(gas)>.01);
+    assert.deepEqual(flow.texture.image.data,data,'shape support does not rewrite smoke or heat');
+    assert.equal(flow.diagnostics.time,clock);
+    assert.ok(flow.sample(new Vector3(),...point).distanceTo(gas)<1e-12,'untagged gas advection is unchanged');
+  } finally {flow.dispose();}
 });
 
 test('accepted motion remains the default and can be recovered after shared sampling',()=>{
@@ -70,12 +88,19 @@ test('shared-flow clouds reach bulk handoff and reset for both yields and rise s
         assert.ok(Number.isFinite(late.height)&&Number.isFinite(late.velocity));
         const u=cloud.shadowField.uniforms,h=u.headHeight.value,r=u.headRadius.value;
         const collar=scene.children.filter(o=>o.isSprite&&o.visible&&o.userData.cloudFlowTag?.kind==='skirt');
-        const radii=collar.map(o=>{
+        const radiusAt=o=>{
           const y=o.position.y/scale.length,offset=plumeOffset(y,37,h);
           return Math.hypot(o.position.x/scale.length-offset[0],o.position.z/scale.length-offset[1]);
-        });
-        assert.ok(radii.reduce((a,b)=>a+b,0)/radii.length>r*.6,'collar stays outside the interior gas stream');
+        };
+        const upper=collar.filter(o=>o.userData.cloudFlowTag.layer===0);
+        const lower=collar.filter(o=>o.userData.cloudFlowTag.layer===1);
+        assert.ok(upper.length&&lower.length,'both ends of the cone survive');
+        const mean=(list,value)=>list.reduce((sum,o)=>sum+value(o),0)/list.length;
+        assert.ok(mean(lower,radiusAt)>mean(upper,radiusAt),'skirt flares toward its lower rim');
+        assert.ok(mean(upper,o=>o.position.y)>mean(lower,o=>o.position.y),'upper rim stays above the lower rim');
+        assert.ok(mean(lower,radiusAt)<r*.92,'new lower ring stays inside the former outer ring target');
         assert.ok(collar.every(o=>o.position.y/scale.length<h),'skirt remains below the head centre');
+        assert.ok(cloud.sampleSkirtEdge(new Vector3()),'fragments can still find the new outer skirt tiers');
         const camera=new PerspectiveCamera();camera.position.set(150,60,220).multiplyScalar(scale.length);
         cloud.sort(camera);
         for(const kind of ['head','skirt']) {

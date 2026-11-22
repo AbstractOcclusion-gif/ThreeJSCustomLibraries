@@ -1,6 +1,6 @@
 import {DataTexture, FloatType, LinearFilter, RGBAFormat, Vector3} from 'three';
 import {createFixedStep} from '../../src/core/fixed-step.js';
-import {plumeOffset, skirtHeightShare, puffRollRate} from './plume-motion.js';
+import {plumeOffset, skirtHeightShare, skirtConeTarget, puffRollRate} from './plume-motion.js';
 
 const DT = 1 / 40;
 const GRAVITY = 9.81, AMBIENT = 293;
@@ -214,14 +214,19 @@ export function createPlumeFlow(origin, size, settings, quality = {columns: 40, 
       // A collar follows the measured lower flank of the head. This is visual
       // entrainment guidance for the skirt parcels, separate from the solved flow.
       const heightShare=skirtHeightShare(r/Math.max(13,head.radius));
+      const cone=shared&&skirt&&tag?.layer!==undefined&&settings.skirtMotion
+        ?skirtConeTarget(head,tag.layer,settings.skirtMotion):null;
       const follow=1.1+.7*Math.max(0,Math.min(1,1-r/Math.max(13,head.radius)));
       const riseLimit=3+3*(heightShare-.6)/.34;
-      let vertical=skirt?Math.max(-1,Math.min(riseLimit,(head.height*heightShare-height)*follow)):vy*.8*carried;
-      let outward=skirt?(head.radius*(tag?.radiusShare??.78)-r)*.5:ur*.8*carried;
-      // Vertical skirt friction: retain the ring's radial reach and puff shape,
-      // but let its lower mantle trail beneath the ascending head.
-      if(skirt) vertical*=.65;
-      if(!shared&&tag?.kind==='head') {
+      let vertical=skirt?Math.max(-1,Math.min(riseLimit,((cone?.height??head.height*heightShare)-height)*follow)):vy*.8*carried;
+      let outward=skirt?((cone?.radius??head.radius*(tag?.radiusShare??.78))-r)*.5:ur*.8*carried;
+      // The lower target and existing speed cap already supply skirt lag.
+      // Avoid an extra 35% ascent loss during Shared mode's fast formation.
+      if(skirt) vertical*=shared?(settings.skirtMotion?.follow??1):.65;
+      const supportAge=Math.max(0,Math.min(1,(worldTime-12)/12));
+      const support=shared?Math.max(0,Math.min(1,settings.sharedMotion?.headRoundness??0))*supportAge*supportAge*(3-2*supportAge):1;
+      if(support>0&&tag?.kind==='head') {
+        const solvedOutward=outward,solvedVertical=vertical;
         // Divergence-free spherical circulation: centre up, top out, edge down.
         // This guides the detail parcels; the grid still owns the gas dynamics.
         const radius=Math.max(13,head.radius), z=height-head.height;
@@ -231,6 +236,7 @@ export function createPlumeFlow(origin, size, settings, quality = {columns: 40, 
         const confinement=Math.max(0,distance-1)*1.2;
         outward=1.5*strength*rr*zz*envelope-r*confinement;
         vertical=(tag.stationary?0:headRise)+1.5*strength*(1-2*rr*rr-zz*zz)*envelope-z*confinement;
+        if(shared){outward=solvedOutward+(outward-solvedOutward)*support;vertical=solvedVertical+(vertical-solvedVertical)*support;}
       }
       const radial=r>0?outward/r:0;
       // Transport through the same moving coordinate frame used by the volume.

@@ -6,8 +6,8 @@ import {PREFAB_SHEETS} from '../../src/particles/prefabs.js';
 import {createFireball} from './fireball.js';
 import {BURNING, FIRE_LOOK, INNER_LIGHT, FIERY_PHASE, ignitionScale, visibleHeat, columnFormation} from './fire-look.js';
 import {createPlumeFlow} from './plume-flow.js';
-import {FRONT} from './timing.js';
-import {plumeOffset, skirtHeightShare} from './plume-motion.js';
+import {FRONT,cloudFadeState} from './timing.js';
+import {plumeOffset, skirtHeightShare, skirtConeTarget} from './plume-motion.js';
 import {CLOUD_TINT, DUST_TINT} from './palette.js';
 import {BLAST_QUALITY} from './quality.js';
 import {createLateCloud, mapLatePoint} from './late-cloud.js';
@@ -24,6 +24,8 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
     skirt:SKIRT,shared:SHARED_CLOUD,feed:GROUND_FEED,groundRing:GROUND_APRON,ringFormation:RING_FORMATION}=settings;
   const DISSIPATION={get baseEnd(){return BASE_DUST.life[1]+3.5;},columnSeconds:10,cloudSeconds:18};
   fireLook.rollMotion=settings.roll;
+  fireLook.skirtMotion=settings.skirt;
+  fireLook.sharedMotion=settings.shared;
   const count = n => Math.max(1, Math.round(n * quality.puffScale));
   let counts;
   const origin = new Vector3();
@@ -92,8 +94,10 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
           sprite.userData.blastPuffBlend.setDetailScale(width.y/(size*detailWidth)*lateGrowth);
         const headShare=MathUtils.smoothstep(y,flow.head.height*.4,flow.head.height*.65);
         const groundFade=1-MathUtils.smoothstep(time,DISSIPATION.baseEnd,DISSIPATION.baseEnd+10);
-        const stemFade=state.columnOpacity*(1-MathUtils.smoothstep(time,GROUND_FEED.end,GROUND_FEED.columnEnd));
-        const fade=ground?1:y<12?groundFade:MathUtils.lerp(stemFade,state.cloudOpacity,headShare);
+        const staged=fireLook.cloudMotion==='shared';
+        const stemFade=state.columnOpacity*(staged?1:1-MathUtils.smoothstep(time,GROUND_FEED.end,GROUND_FEED.columnEnd));
+        const fade=staged&&tag.kind==='skirt'?state.skirtOpacity:staged&&tag.kind==='head'?state.cloudOpacity
+          :ground?1:y<12?groundFade:MathUtils.lerp(stemFade,state.cloudOpacity,headShare);
         const water=1-Math.exp(-state.liquidExtinction*width.y*state.expansion*.25);
         // Optical depth the gas keeps through the expanded cloud; parcels follow it.
         const depth=state.density*state.expansion;
@@ -108,9 +112,11 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
       const aboveGround=(sprite.position.y-origin.y)/size;
       sprite.scale.y=Math.min(sprite.scale.y,2*Math.max(1,BASE_DUST.maxTop-aboveGround)*size);
     }
-    // Settle the ground layer over the same interval as column shutdown.
+    // Shared ground dust has its own hold/settle interval; legacy follows feed.
     // These are render transforms, restored before the next simulation update.
-    const settling=MathUtils.smoothstep(time,GROUND_FEED.end,GROUND_FEED.columnEnd);
+    const settling=fireLook.cloudMotion==='shared'
+      ?MathUtils.smoothstep(time,settings.lifecycle.groundHold,settings.lifecycle.groundHold+settings.lifecycle.groundFade)
+      :MathUtils.smoothstep(time,GROUND_FEED.end,GROUND_FEED.columnEnd);
     for(const sprite of parcels) if(sprite.visible && sprite.userData.cloudFlowTag?.kind==='ground') {
       const apron=!sprite.userData.cloudFlowTag.base;
       if(!apron&&settling<=0)continue;
@@ -140,12 +146,12 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
         if(tag?.kind!=='head'&&tag?.kind!=='skirt')continue;
         ignitionParcels.push({sprite,position:sprite.position.clone(),width:sprite.scale.clone(),opacity:sprite.material.opacity});
         if(tag.kind==='skirt') {
-          const feed=MathUtils.smoothstep(time,5,12);
+          const feed=fireLook.cloudMotion==='shared'?MathUtils.smoothstep(time,SKIRT.startAge,SKIRT.revealEnd):MathUtils.smoothstep(time,5,12);
           const offset=plumeOffset((sprite.position.y-origin.y)/size,time,flow.head.height);
           sprite.position.x=origin.x+offset[0]*size+(sprite.position.x-origin.x-offset[0]*size)*(.25+.75*feed);
           sprite.position.z=origin.z+offset[1]*size+(sprite.position.z-origin.z-offset[1]*size)*(.25+.75*feed);
           sprite.position.y=MathUtils.lerp(origin.y+formation.tip*size,sprite.position.y,feed);
-          sprite.material.opacity*=MathUtils.smoothstep(time,3,6);
+          if(fireLook.cloudMotion!=='shared')sprite.material.opacity*=MathUtils.smoothstep(time,3,6);
         } else {
           const y=(sprite.position.y-origin.y)/size;
           sprite.material.opacity*=MathUtils.lerp(MathUtils.smoothstep(y,formation.join-2,formation.join+2),1,formation.connected);
@@ -188,7 +194,9 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
     const cloudShare=MathUtils.smoothstep((position.y-origin.y)/size,4,12);
     const detail=MathUtils.smoothstep(time,PARCEL_BLEND.detailStart,PARCEL_BLEND.detailEnd);
     const cooled=1-MathUtils.smoothstep(skirt?solvedHeat:heat,BURNING.from,BURNING.to);
-    const target=ground?cooled:MathUtils.lerp(cooled,cooled*detail,cloudShare);
+    // The skirt owns its incandescence and soft birth fade; a centre-heat sample
+    // or the head's 3–12 second detail gate must not hide the entire early skirt.
+    const target=skirt&&fireLook.cloudMotion==='shared'?1:ground?cooled:MathUtils.lerp(cooled,cooled*detail,cloudShare);
     const previous = sprite.userData.heatFade ?? target;
     const seconds = target < previous ? PARCEL_BLEND.heatingSeconds : PARCEL_BLEND.coolingSeconds;
     // A centre sample crossing a grid cell must not switch an entire puff's
@@ -217,9 +225,10 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
       return puffs.emit(mask,position,velocity,width,life,tint,index,{...look,growthEase:look.growthEase??0});
     }
     if(fireLook.cloudMotion==='shared'&&['head','skirt'].includes(look?.flowTag?.kind)) {
-      // The head follows gas; the skirt retains its existing collar guidance.
+      // Shared head advection has optional shape support; skirt uses its cone.
       // Neither needs an extra launch kick or separate environment wind.
-      width*=billowScale();velocity=[0,0,0];look={...look,wind:0,swirl:0};
+      width*=billowScale()*(look.flowTag.kind==='skirt'?SKIRT.puffScale:1);
+      velocity=[0,0,0];look={...look,wind:0,swirl:0};
     }
     // Existing linear grow is a gain relative to birth size. Rescale both ends
     // so a small newborn still reaches the previously authored mature size.
@@ -336,10 +345,13 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
       handoffTime=time;
     }
     if (late && late.state.cloudOpacity>0) late.update(dt*scale.seconds,environment?.wind);
+    const staged=fireLook.cloudMotion==='shared'
+      ?cloudFadeState(time,settings.lifecycle,settings.visibility,scale?.seconds??1):null;
+    if(late&&staged)Object.assign(late.state,{columnOpacity:staged.column,skirtOpacity:staged.skirt,cloudOpacity:staged.cloud});
     if (late?.state.cloudOpacity<=0 && snapshots.length) {puffs.clear();snapshots=[];}
-    const columnOpacity = (1-MathUtils.smoothstep(time,GROUND_FEED.end,GROUND_FEED.columnEnd)) *
+    const columnOpacity = staged?staged.column:(1-MathUtils.smoothstep(time,GROUND_FEED.end,GROUND_FEED.columnEnd)) *
       (late ? late.state.columnOpacity : scale ? 1 : 1-MathUtils.smoothstep(time,DISSIPATION.baseEnd,columnEnd));
-    const cloudOpacity = late ? late.state.cloudOpacity : scale ? 1 : 1-MathUtils.smoothstep(time,columnEnd,cloudEnd);
+    const cloudOpacity = staged?staged.cloud:late ? late.state.cloudOpacity : scale ? 1 : 1-MathUtils.smoothstep(time,columnEnd,cloudEnd);
     flow.setGroundFeed(1-MathUtils.smoothstep(time,GROUND_FEED.taper,GROUND_FEED.end));
     // Continue solving and aging in the local cloud frame after bulk ascent begins.
     // Bound steps even during time-lapse; never discard the fluid clock's backlog.
@@ -376,10 +388,13 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
     fireball.update(dt, animationTime, origin, size, {columnOpacity,cloudOpacity,
       late:late?.state,shapeAge:animationTime,billowWidth:detailWidth});
     while (next < timeline.length && timeline[next].at <= time) emit(timeline[next++], time);
-    if (flow.head.height >= SKIRT.startHeight && skirtBursts < SKIRT.bursts && time >= nextSkirt) {
-      const radiusShare = .8 + skirtBursts * .04;
-      const height = flow.head.height * skirtHeightShare(radiusShare);
-      const radius = Math.max(4, flow.head.radius * .22);
+    const skirtReady=fireLook.cloudMotion==='shared'?time>=SKIRT.startAge:flow.head.height>=SKIRT.startHeight;
+    if (skirtReady && skirtBursts < SKIRT.bursts && time >= nextSkirt) {
+      const layer=skirtBursts/Math.max(1,SKIRT.bursts-1);
+      const cone=fireLook.cloudMotion==='shared'?skirtConeTarget(flow.head,layer,SKIRT):null;
+      const radiusShare = cone?cone.radius/Math.max(13,flow.head.radius):.8+skirtBursts*.04;
+      const height = cone?.height??flow.head.height*skirtHeightShare(radiusShare);
+      const radius = cone?.radius??Math.max(4,flow.head.radius*.22);
       const offset = plumeOffset(height, time, flow.head.height);
       for (let i = 0; i < counts.skirt; i++) {
         const angle = (i + skirtBursts * .37) * TURN / counts.skirt;
@@ -394,7 +409,7 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
           CLOUD_BILLOWS.width * size, 40, CLOUD_TINT[i % 3 ? 0 : 1], 0,
           {volume: true, volumeSeed: i * .137 + skirtBursts * .23, rotation: 0,
             grow: CLOUD_BILLOWS.grow, opacity: .7 - .08 * innerBlend, hold: PARCEL_BLEND.hold, fadeIn: .8, flow: 1, roll: true,
-            flowTag: {kind: 'skirt', radiusShare}, drag: .8, wind: .01});
+            flowTag: {kind: 'skirt', radiusShare,...(cone?{layer}:{})}, drag: .8, wind: .01});
       }
       skirtBursts++;
       nextSkirt = time + SKIRT.interval;
@@ -422,7 +437,11 @@ export async function createMushroomCloud(scene, {environment, size = 1, seed = 
   return {
     start, update, clear, settings,
     sampleSkirtEdge(out,index=0) {
-      const candidates=parcels.filter(sprite=>sprite.visible&&sprite.material.opacity>.05&&sprite.userData.cloudFlowTag?.kind==='skirt'&&sprite.userData.cloudFlowTag.radiusShare>=.88);
+      const candidates=parcels.filter(sprite=>{
+        const tag=sprite.userData.cloudFlowTag;
+        return sprite.visible&&sprite.material.opacity>.05&&tag?.kind==='skirt'
+          &&(tag.layer!==undefined?tag.layer>=2/3:tag.radiusShare>=.88);
+      });
       if(!candidates.length)return false;
       const sprite=candidates[(index*3)%candidates.length];
       out.copy(sprite.position);out.y-=sprite.scale.y*.35;

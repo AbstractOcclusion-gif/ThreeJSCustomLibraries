@@ -15,13 +15,13 @@ function panel() {
   return {gui,controls};
 }
 
-test('all 60 authoring controls preserve approved defaults within their ranges for both yields',()=>{
+test('all 74 authoring controls preserve approved defaults within their ranges for both yields',()=>{
   for(const yieldKt of [1,20]) {
     const scale=createBlastScale(yieldKt),settings=createCloudSettings(scale),before=structuredClone(settings);
     const {gui,controls}=panel();
     mountCloudControls(gui,{settings,scale,restart:()=>assert.fail('mount must not restart')});
     const numeric=controls.filter(c=>c.min!==undefined);
-    assert.equal(numeric.length,60);
+    assert.equal(numeric.length,74);
     for(const c of numeric)assert.ok(c.object[c.key]>=c.min&&c.object[c.key]<=c.max,c.label);
     assert.deepEqual(settings,before);
   }

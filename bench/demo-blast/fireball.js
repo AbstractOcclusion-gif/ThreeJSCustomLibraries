@@ -34,7 +34,7 @@ export function createFireball(scene, look, noiseVolume, flow, environment, step
     sceneTint:{value:new Color(1,1,1)},
     airTint:{value:new Color()},airDensity:{value:0},
     headHeight:{value:14},
-    columnOpacity:{value:1},cloudOpacity:{value:1},
+    columnOpacity:{value:1},cloudOpacity:{value:1},headFadeEnvelope:{value:0},
     shell:{value:new Vector2()},shellSteps:{value:1},
     opacity:{value:look.density},fireLight:{value:0},headRadius:{value:flow.head.radius},
     fireColor:{value:new Color(INNER_LIGHT.color)},projection:{value:new Matrix4()},
@@ -71,7 +71,7 @@ export function createFireball(scene, look, noiseVolume, flow, environment, step
       uniform float ignition;
       uniform float selfShadow;
       uniform float lightScatter;
-      uniform float worldScale,age,glow,headHeight,columnOpacity,cloudOpacity;
+      uniform float worldScale,age,glow,headHeight,columnOpacity,cloudOpacity,headFadeEnvelope;
       uniform vec2 shell;
       uniform int shellSteps;
       uniform float opacity,fireLight,headRadius;
@@ -126,7 +126,7 @@ export function createFireball(scene, look, noiseVolume, flow, environment, step
           vec3 local=referencePoint(p);
           float belowHead=1.-smoothstep(headHeight*.52,headHeight*.86,local.y);
           // Detail belongs to the entire head, not a fraction of its altitude.
-          // Keep density/fade ownership on the established belowHead mask.
+          // Density keeps its authored mask; Shared fades use this head envelope.
           float headBottom=headHeight-max(13.,headRadius);
           float detailHead=smoothstep(headBottom-headRadius*.15,headBottom+headRadius*.25,local.y);
           float detailBelow=1.-detailHead;
@@ -157,7 +157,7 @@ export function createFireball(scene, look, noiseVolume, flow, environment, step
           density+=max(0.,values.g*(.42+n*1.2)-.003)*condensate*(1.-belowHead);
           float column=smoothstep(4.,16.,local.y)*belowHead;
           density*=1.+column*.55;
-          density*=mix(cloudOpacity,columnOpacity,belowHead);
+          density*=mix(cloudOpacity,columnOpacity,mix(belowHead,detailBelow,headFadeEnvelope));
           vec2 heatOffset=local.xz-plumeOffset(local.y,shapeAge,headHeight);
           float heat=visibleHeat(values.r,shapeAge,length(heatOffset),local.y,headHeight,headRadius)*(.65+n*.62);
           float burning=smoothstep(${glsl(BURNING.from)},${glsl(BURNING.to)},heat);
@@ -306,6 +306,7 @@ export function createFireball(scene, look, noiseVolume, flow, environment, step
       visible=columnOpacity>0||cloudOpacity>0;
       sizeNow=size;
       uniforms.columnOpacity.value=columnOpacity;uniforms.cloudOpacity.value=cloudOpacity;
+      uniforms.headFadeEnvelope.value=look.cloudMotion==='shared'?1:0;
       uniforms.origin.value.copy(origin);uniforms.worldScale.value=size;
       uniforms.age.value=puffRollPhase(time,look.rollMotion)/.65;uniforms.glow.value=look.glow;
       const warm=1-Math.max(0,Math.min(1,(time-8)/14));

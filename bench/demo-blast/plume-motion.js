@@ -21,6 +21,16 @@ export function skirtHeightShare(radiusShare) {
   return .94 - edge * .34;
 }
 
+// Shared skirt tiers form a soft truncated cone below the measured head.
+// Emission and subsequent guidance must use exactly the same reference profile.
+export function skirtConeTarget(head,layer,profile) {
+  const t=Math.max(0,Math.min(1,layer)),radius=Math.max(13,head.radius);
+  return {
+    radius:radius*(profile.topRadius+(profile.bottomRadius-profile.topRadius)*t),
+    height:head.height-radius*(profile.topDrop+(profile.bottomDrop-profile.topDrop)*t),
+  };
+}
+
 // Coherent lateral motion shared by the volume and its detail parcels. The ground
 // stays anchored and the upper head shares one slow drift instead of deforming.
 export function plumeOffset(height, time, headHeight = 78) {

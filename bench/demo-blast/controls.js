@@ -11,6 +11,9 @@ export function mountCloudControls(gui,{settings,scale,restart}) {
     settings.feed.end=Math.max(settings.feed.end,settings.feed.taper+.1);
     settings.feed.columnEnd=Math.max(settings.feed.columnEnd,settings.feed.end+.1);
     settings.ringFormation.stop=Math.max(settings.ringFormation.stop,settings.ringFormation.buildEnd);
+    settings.skirt.bottomRadius=Math.max(settings.skirt.bottomRadius,settings.skirt.topRadius);
+    settings.skirt.bottomDrop=Math.max(settings.skirt.bottomDrop,settings.skirt.topDrop+.1);
+    settings.skirt.revealEnd=Math.max(settings.skirt.revealEnd,settings.skirt.startAge+.5);
     settings.visibility.visibleSeconds=Math.max(settings.visibility.visibleSeconds,settings.visibility.fadeStart+1);
     root.controllersRecursive().forEach(c=>c.updateDisplay());restart();
   };
@@ -34,10 +37,15 @@ export function mountCloudControls(gui,{settings,scale,restart}) {
     ['width','Billow width · ref m',6,30,.5],['variation','Width variation',0,.5,.01],
     ['grow','Mature growth gain',0,2,.05],['birthScale','Head birth scale',.25,2,.05],
   ]);
-  group('Shared flow','shared',[['billowScale','Shared billow size ×',.5,2.5,.05]]);
+  group('Shared flow','shared',[['billowScale','Shared billow size ×',.5,2.5,.05],['headRoundness','Head shape support',0,1,.05]]);
   group('Skirt emission','skirt',[
     ['bursts','Skirt bursts',1,6,1],['parcels','Puffs per burst',3,12,1],
-    ['interval','Burst interval · ref s',.2,4,.1],['startHeight','Emission height · ref m',14,60,1],
+    ['interval','Burst interval · ref s',.2,4,.1],['startHeight','Legacy emission height · ref m',14,60,1],
+    ['startAge','Skirt appears · ref s',.5,8,.5],['revealEnd','Skirt opens by · ref s',4,12,.5],
+    ['follow','Skirt rise following ×',.3,1.3,.05],
+    ['topRadius','Cone upper radius / head',.1,.7,.05],['bottomRadius','Cone lower radius / head',.3,1,.05],
+    ['topDrop','Cone upper drop / head R',.2,1.2,.05],['bottomDrop','Cone lower drop / head R',.6,2.5,.05],
+    ['puffScale','Skirt puff size ×',.3,1.3,.05],
   ]);
   group('Puff growth','growth',[
     ['birthScale','Skirt birth scale',.1,1.5,.05],['lateGain','Extra late growth',0,1,.05],
@@ -79,10 +87,16 @@ export function mountCloudControls(gui,{settings,scale,restart}) {
     ['takeoverSeconds','Force takeover · ref s',.5,20,.5],['riseFloor','Ascent pacing floor',.5,8,.1],
     ['diffusion','Late radial diffusion',0,20,.5],['windResponse','Bulk wind response',0,1,.01],
   ]);
+  group('Column → skirt → cloud','lifecycle',[
+    ['columnHold','Column holds until · ref s',40,180,5],
+    ['columnFade','Column fade duration · ref s',5,120,5],
+    ['skirtFade','Then skirt fade · ref s',5,120,5],
+    ['groundHold','Ground dust holds · ref s',30,180,5],['groundFade','Ground dust settles · ref s',10,120,5],
+  ]);
   group('Late atmosphere & visibility','visibility',[
     ['top','Cloud top target · m',1000,12000,100],['relativeHumidity','Relative humidity',.05,.95,.05],
     ['fadeStart','Fade begins · world s',300,3000,30],['visibleSeconds','Visibility ends · world s',600,7200,60],
-    ['columnFadeSeconds','Late column fade · world s',10,360,10],
+    ['columnFadeSeconds','Legacy column fade · world s',10,360,10],
   ]);
   return root;
 }

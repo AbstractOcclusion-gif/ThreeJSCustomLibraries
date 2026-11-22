@@ -19,7 +19,7 @@ export function createBlastGroundShadow(renderer,source,receiver,groundBounds,lo
       uniform vec4 warp,groundBounds;
       uniform vec2 drift;
       uniform float ignition,shapeAge,headHeight,headRadius,worldScale,densityScale,condensate;
-      uniform float opacity,columnOpacity,cloudOpacity,shadowActive;
+      uniform float opacity,columnOpacity,cloudOpacity,headFadeEnvelope,shadowActive;
       ${PLUME_MOTION_GLSL}
       ${BLAST_FIELD_GLSL}
       void main(){
@@ -38,9 +38,11 @@ export function createBlastGroundShadow(renderer,source,receiver,groundBounds,lo
               vec3 p=eye+sun*(enter+(float(i)+.5)*stepSize);
               vec3 local=referencePoint(p);
               float below=1.-smoothstep(headHeight*.52,headHeight*.86,local.y);
+              float headBottom=headHeight-max(13.,headRadius);
+              float fadeBelow=mix(below,1.-smoothstep(headBottom-headRadius*.15,headBottom+headRadius*.25,local.y),headFadeEnvelope);
               float density=referenceField(local).g;
               density*=densityScale+condensate*(1.-below);
-              depth+=density*mix(cloudOpacity,columnOpacity,below)*stepSize/ignition;
+              depth+=density*mix(cloudOpacity,columnOpacity,fadeBelow)*stepSize/ignition;
             }
             transmission=exp(-depth*opacity*.34);
           }
